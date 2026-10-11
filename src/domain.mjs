@@ -11,7 +11,7 @@ export function genId(prefix) {
 }
 
 /** bot 的花名册记录（持久化）。 */
-export function makeBot({ id, name, role = "", instructions = "", model = "", isMain = false }) {
+export function makeBot({ id, name, role = "", instructions = "", model = "", thinking = "", isMain = false }) {
   if (!id) throw new Error("bot 需要 id");
   if (!name) throw new Error("bot 需要 name");
   return {
@@ -20,6 +20,7 @@ export function makeBot({ id, name, role = "", instructions = "", model = "", is
     role,
     instructions,
     model,
+    thinking,
     isMain,
     createdAt: Date.now(),
   };

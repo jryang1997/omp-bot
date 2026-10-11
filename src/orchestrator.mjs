@@ -37,12 +37,15 @@ export class Orchestrator {
    * @param {string} [opts.home] 数据根目录，默认 ~/.ompbot
    * @param {string} [opts.bin] omp 可执行文件
    * @param {boolean} [opts.debug]
+   * @param {string} [opts.defaultThinking] 未显式指定时的默认思考档（默认 "low"，
+   *        避免免费/慢端点在高思考档下拖垮整个 bot 团队）
    * @param {(evt:object)=>void} [opts.onEvent] 观察回调 {type,...}
    */
   constructor(opts = {}) {
     this.home = opts.home ?? defaultHome();
     this.bin = opts.bin ?? "omp";
     this.debug = opts.debug ?? false;
+    this.defaultThinking = opts.defaultThinking ?? "low";
     this.onEvent = opts.onEvent ?? (() => {});
 
     this.store = new Store({ home: this.home });
@@ -61,9 +64,10 @@ export class Orchestrator {
   // ---- 花名册 ----
 
   /** 新建 bot 记录。 */
-  addBot({ name, role, instructions, model, isMain }) {
+  addBot({ name, role, instructions, model, thinking, isMain }) {
     const id = genId("bot");
-    const bot = makeBot({ id, name, role, instructions, model, isMain });
+    const resolvedThinking = thinking ?? this.defaultThinking ?? "";
+    const bot = makeBot({ id, name, role, instructions, model, thinking: resolvedThinking, isMain });
     this.store.putBot(bot);
     this.emit("bot_added", { bot });
     return bot;

@@ -39,12 +39,15 @@ function die(msg) {
 const HOME = process.env.OMPBOT_HOME || flag("home");
 const MODEL = process.env.OMPBOT_MODEL || flag("model") || "";
 const DEBUG = process.env.OMPBOT_DEBUG === "1" || hasFlag("debug");
+// 全局默认思考档（各 bot 未显式指定时用）。CLI 顶层 --thinking 也可覆盖。
+const THINKING = process.env.OMPBOT_THINKING || (argv.includes("--thinking") ? flag("thinking") : undefined);
 
 function newOrch() {
   const opts = { debug: DEBUG, onEvent: (e) => {
     if (DEBUG) console.error("·", e.type, JSON.stringify(e).slice(0, 160));
   } };
   if (HOME) opts.home = HOME;
+  if (THINKING) opts.defaultThinking = THINKING;
   return new Orchestrator(opts);
 }
 
@@ -95,6 +98,7 @@ function helpText() {
   --role R          bot 角色定位
   --instructions I  bot 专属指令
   --model M         绑定模型（默认用 omp 默认模型）
+  --thinking T      思考档 off|low|medium|high|xhigh|max（默认 low，见 OMPBOT_THINKING）
   --main            标记为主 bot
   --home DIR        数据目录（默认 ~/.ompbot，或 $OMPBOT_HOME）
   --debug           打印编排事件与 RPC 帧
@@ -135,12 +139,13 @@ async function runBots() {
   try {
     if (sub === "add") {
       const nm = rest.find((a) => !a.startsWith("--") && a !== "add");
-      if (!nm) die("用法: bots add <name> [--role R] [--model M] [--instructions I] [--main]");
+      if (!nm) die("用法: bots add <name> [--role R] [--model M] [--thinking T] [--instructions I] [--main]");
       const bot = orch.addBot({
         name: nm,
         role: flag("role", ""),
         instructions: flag("instructions", ""),
         model: flag("model", MODEL),
+        thinking: flag("thinking"),
         isMain: hasFlag("main"),
       });
       console.log(`已创建 bot ${bot.name} (${bot.id})`);

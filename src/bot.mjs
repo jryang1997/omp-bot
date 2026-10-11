@@ -83,6 +83,7 @@ export class BotRuntime {
         ...personaArgv,
       ];
       if (this.bot.model) args.push("--model", this.bot.model);
+      if (this.bot.thinking) args.push("--thinking", this.bot.thinking);
       // 会话目录里已有历史会话 → 续上，实现跨重启记忆。
       if (this._hasPriorSession()) args.push("--continue");
 
