@@ -1,12 +1,17 @@
 // persona.mjs — bot 人格文件与上下文隔离。
 //
-// 两个隔离目标：
+// 三个隔离目标：
 // 1) 人格：用 --append-system-prompt <file> 注入 bot 身份，保留 omp 默认工具/工作流策略。
 // 2) 上下文净化：用 --config overlay 关掉所有 context-file provider，
 //    这样用户全局 ~/.omp/agent/AGENTS.md（飞书/AskHuman 等约定）不会漏进 bot，
 //    bot 只看到自己的人格 + omp 默认系统提示。模型认证不受影响：
 //    disabledProviders 里放的是 context provider id（native/agents-md/…），
 //    与模型 provider id（anthropic/openai/…）不同命名空间。
+// 3) 记忆隔离：关掉 hindsight/mnemopi 等共享记忆后端与 autolearn。
+//    用户可能把 memory.backend 指到局域网/远程共享库；若不关，bot 会 recall 到
+//    用户的私有项目记忆，还会把 bot 的对话 retain 进共享库造成跨 bot 污染。
+//    bot 的常驻记忆靠会话续接（--continue）实现，不依赖记忆后端。
+//    overlay 优先级高于 global config.yml，能覆盖用户设的 memory.backend。
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -61,9 +66,16 @@ export function writePersonaFiles(bot, dir) {
 
   const overlayPath = join(dir, "isolate.yml");
   const overlay = [
-    "# omp-bot 生成的隔离 overlay：关掉 context-file 发现，只保留 bot 人格。",
+    "# omp-bot 生成的隔离 overlay。",
+    "# 1) 关掉 context-file 发现，防止用户全局 AGENTS.md（飞书/AskHuman 约定）漏进 bot。",
     "disabledProviders:",
     ...CONTEXT_PROVIDERS_TO_DISABLE.map((p) => `  - ${p}`),
+    "# 2) 关掉共享记忆后端与 autolearn，防止 bot recall/retain 用户的私有记忆库。",
+    "#    bot 的常驻记忆靠会话续接（--continue）实现，不依赖记忆后端。",
+    "memory:",
+    "  backend: off",
+    "autolearn:",
+    "  enabled: false",
     "",
   ].join("\n");
   writeFileSync(overlayPath, overlay, "utf8");

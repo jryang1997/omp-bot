@@ -126,15 +126,27 @@ async function main() {
       `Calc 文本=${JSON.stringify((spokenB.find((s) => s.name === "Calc")?.text || "").slice(0, 60))}`);
     check("admin: 回合收敛", !!roundEndB && !roundEndB.capped,
       roundEndB ? `turns=${roundEndB.turns}` : "无 round_end");
+    // ===== 隔离回归断言 =====
+    // 这些 token 来自真实泄漏观察：ComfyUI/h3ref/wf_run 是用户私有项目记忆，
+    // 紫罗兰-7788 是 smoke-persist 写进远程 hindsight 库的暗号。group 的 bot 是全新
+    // 进程、本测试里从未被告知这些内容，能说出来只可能来自共享记忆库。
+    // 修复（overlay memory.backend=off + autolearn=false）后应一个都不出现。
+    const LEAK_TOKENS = ["comfyui", "h3ref", "wf_run", "紫罗兰", "7788", "t2i"];
+    const allText = [...spokenA, ...spokenB].map((s) => s.text || "").join("\n").toLowerCase();
+    const leaked = LEAK_TOKENS.filter((t) => allText.includes(t.toLowerCase()));
+    check("隔离：bot 发言不含用户私有记忆 token", leaked.length === 0,
+      leaked.length ? `泄漏=${JSON.stringify(leaked)}` : "无泄漏 token（记忆隔离生效）");
 
     log("\n==== GROUP SMOKE 汇总 ====");
     const passed = checks.filter((c) => c.pass).length;
     log(`${passed}/${checks.length} PASS`);
-    // admin 的 @路由依赖模型遵循指令，属软指标；everyone 收敛与持久化是硬指标。
-    const hardFail = checks.some((c) => !c.pass && c.name.startsWith("everyone"));
+    // admin 的 @路由依赖模型遵循指令，属软指标；everyone 收敛/持久化与隔离是硬指标。
+    const hardFail = checks.some(
+      (c) => !c.pass && (c.name.startsWith("everyone") || c.name.startsWith("隔离")),
+    );
     const routeFail = !mentionEvt || !calcSpoke;
     if (hardFail) {
-      log("\nGROUP SMOKE FAIL（硬指标：everyone 收敛/持久化未过）");
+      log("\nGROUP SMOKE FAIL（硬指标：everyone 收敛/持久化 或 记忆隔离 未过）");
       process.exitCode = 1;
     } else if (routeFail) {
       log("\nGROUP SMOKE PARTIAL（everyone 全过；admin @路由未被模型遵循——软指标，见上）");
