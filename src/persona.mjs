@@ -1,33 +1,42 @@
-// persona.mjs — bot 人格文件与上下文隔离。
+// persona.mjs — bot 人格文件与上下文隔离 overlay。
 //
-// 三个隔离目标：
+// 隔离目标与实测边界（依据官方 docs 与源码核查，本机未逐项实跑）：
 // 1) 人格：用 --append-system-prompt <file> 注入 bot 身份，保留 omp 默认工具/工作流策略。
-// 2) 上下文净化：用 --config overlay 关掉所有 context-file provider，
-//    这样用户全局 ~/.omp/agent/AGENTS.md（飞书/AskHuman 等约定）不会漏进 bot，
-//    bot 只看到自己的人格 + omp 默认系统提示。模型认证不受影响：
-//    disabledProviders 里放的是 context provider id（native/agents-md/…），
-//    与模型 provider id（anthropic/openai/…）不同命名空间。
-// 3) 记忆隔离：关掉 hindsight/mnemopi 等共享记忆后端与 autolearn。
-//    用户可能把 memory.backend 指到局域网/远程共享库；若不关，bot 会 recall 到
-//    用户的私有项目记忆，还会把 bot 的对话 retain 进共享库造成跨 bot 污染。
-//    bot 的常驻记忆靠会话续接（--continue）实现，不依赖记忆后端。
-//    overlay 优先级高于 global config.yml，能覆盖用户设的 memory.backend。
+// 2) 上下文净化：逐文件关掉用户级/项目级 AGENTS.md、CLAUDE.md、GEMINI.md。
+//    不能用整源开关：disabledProviders 里写 native 会连同原生 MCP 服务器、skills、
+//    命令、hooks、tools 一起移除，而 native 正是读取 bot 私有 <cwd>/.omp/mcp.json 的
+//    provider。所以这里只用 disabledExtensions 的精确 id + skills 的用户级开关。
+//    残留（如实披露，不宣称全封）：用户级 ~/.omp/agent/RULES.md 与用户级 mcp.json
+//    在 native 源开启时仍会加载；要一并挡掉只能废掉整个 native 源，代价是失去 bot
+//    私有项目 MCP/skills，因此选择保留。
+// 3) 记忆：默认关闭共享/本地记忆后端与 autolearn；用户显式开启时用原生 local 后端，
+//    隔离靠 BotRuntime 把 PI_CODING_AGENT_DIR 指向 bot 私有 agentDir（含 agent.db 与
+//    memories 目录）。该私有目录的模型来源由 memory-config.mjs 写成最小 models.yml
+//    （选定 provider 的非密传输行 + 选定模型行），凭据留在全局 auth store；记忆整理用的
+//    default/smol/memory 角色钉在选定模型上，不继承用户全局的 cpa/tiny 等 provider。
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { DEFAULT_TASK_CONCURRENCY } from "./constants.mjs";
+import { memoryModelRoles } from "./memory-config.mjs";
 
-/** 要禁用的 context-file provider（不含任何模型 provider）。 */
-const CONTEXT_PROVIDERS_TO_DISABLE = [
-  "native",
-  "agents",
-  "agents-md",
-  "claude",
-  "claude-md",
-  "codex",
-  "gemini",
-  "opencode",
-  "github",
-  "custom-context",
+/** 要逐文件关闭的上下文文件 id（scope: 文件名）。 */
+const CONTEXT_FILES_TO_DISABLE = [
+  "context-file:user:AGENTS.md",
+  "context-file:project:AGENTS.md",
+  "context-file:user:CLAUDE.md",
+  "context-file:project:CLAUDE.md",
+  "context-file:user:GEMINI.md",
+  "context-file:project:GEMINI.md",
+];
+
+/** 用户级 skills/规则来源开关（项目级保持默认，供 bot 私有 .omp/skills 使用）。 */
+const USER_SOURCE_TOGGLES = [
+  "enablePiUser",
+  "enableAgentsUser",
+  "enableClaudeUser",
+  "enableCodexUser",
+  "enableOpencodeUser",
 ];
 
 /** 生成 bot 的人格提示文本。 */
@@ -46,9 +55,11 @@ export function personaText(bot) {
     `# 团队协作规则`,
     ``,
     `- 你可以用 message_bot 工具给团队里的其他 bot 发消息并直接拿到它的回复。`,
+    `- 需要对方在后台并行处理时用 delegate_bot：它立即返回子 Run id，你之后可以继续做自己的事。`,
     `- 收到其他 bot 的消息时，消息会带署名，形如「Message from 🤖 名字 (@id): …」。`,
     `- 群聊里，如果这轮你没有实质内容要说，只回复 [PASS]。`,
     `- 想点名某个成员接着说，用 @名字。`,
+    `- 跨合作范围（不同工作区）的私有上下文不共享；不要索要其他工作区的私有资料。`,
     `- 回答简洁、直接，别复述规则本身。`,
   );
   return lines.join("\n");
@@ -58,27 +69,97 @@ export function personaText(bot) {
  * 为一个 bot 准备人格文件与 config overlay，返回启动时要追加的 argv。
  * @param {object} bot 花名册记录
  * @param {string} dir 该 bot 的私有目录（放 persona 文件、overlay、session）
+ * @param {object} [opts]
+ * @param {string[]} [opts.extraDisabledExtensions] 额外要禁用的扩展 id（如 chat 档逐个关掉的 `mcp:<name>`）
  */
-export function writePersonaFiles(bot, dir) {
+export function writePersonaFiles(bot, dir, opts = {}) {
   mkdirSync(dir, { recursive: true });
   const personaPath = join(dir, "persona.md");
   writeFileSync(personaPath, personaText(bot), "utf8");
 
+  const extraDisabled = Array.isArray(opts.extraDisabledExtensions) ? opts.extraDisabledExtensions : [];
   const overlayPath = join(dir, "isolate.yml");
-  const overlay = [
-    "# omp-bot 生成的隔离 overlay。",
-    "# 1) 关掉 context-file 发现，防止用户全局 AGENTS.md（飞书/AskHuman 约定）漏进 bot。",
-    "disabledProviders:",
-    ...CONTEXT_PROVIDERS_TO_DISABLE.map((p) => `  - ${p}`),
-    "# 2) 关掉共享记忆后端与 autolearn，防止 bot recall/retain 用户的私有记忆库。",
-    "#    bot 的常驻记忆靠会话续接（--continue）实现，不依赖记忆后端。",
-    "memory:",
-    "  backend: off",
-    "autolearn:",
-    "  enabled: false",
+  const lines = [
+    "# omp-bot 生成的隔离 overlay（每 bot 一份，不改用户全局配置）。",
+    "# 1) 逐文件关掉用户级/项目级上下文文件；不用整源开关，避免连原生 MCP 一起废掉。",
+    "disabledExtensions:",
+    ...CONTEXT_FILES_TO_DISABLE.map((id) => `  - ${id}`),
+    ...extraDisabled.map((id) => `  - ${id}`),
+    "skills:",
+    ...USER_SOURCE_TOGGLES.map((k) => `  ${k}: false`),
+  ];
+
+  if (bot.memoryEnabled === true) {
+    // 记忆由用户显式开启：原生 local 后端 + autolearn，根目录靠运行时环境
+    // PI_CODING_AGENT_DIR 指向本 bot 私有 agentDir（见 BotRuntime.buildEnv）。
+    lines.push(
+      "# 2) 记忆由用户显式开启：原生 local 后端；隔离依赖 PI_CODING_AGENT_DIR 指向本 bot 私有目录。",
+      "#    不改用户全局配置，也不调用原生的全局 clear（那会删掉用户所有项目的记忆队列）。",
+      "memory:",
+      "  backend: local",
+      "autolearn:",
+      "  enabled: true",
+    );
+    // 记忆整理阶段用 default/smol/memory 角色选模型；不钉住就会落到用户全局配置里的
+    // cpa/tiny 等别的 provider（私有目录没有它们的定义，直接不可用）。overlay 层压在
+    // 全局配置之上，所以这三个角色只用选定模型。
+    const roles = memoryModelRoles(bot.model);
+    if (roles) {
+      lines.push(
+        "# 2b) 记忆/整理角色钉在选定模型上（overlay 层覆盖用户全局 modelRoles）。",
+        "modelRoles:",
+        ...Object.entries(roles).map(([role, value]) => `  ${role}: ${value}`),
+      );
+    }
+  } else {
+    lines.push(
+      "# 2) 关掉共享记忆后端与 autolearn，防止 bot recall/retain 用户的私有记忆库。",
+      "#    bot 的常驻记忆靠会话续接（--continue）实现，不依赖记忆后端。",
+      "memory:",
+      "  backend: off",
+      "autolearn:",
+      "  enabled: false",
+    );
+  }
+
+  lines.push(
+    "# 3) 团队工具显式声明审批档：未声明的原生 host tool 默认按 exec 处理，",
+    "#    会在 supervised/write 下每次都弹卡。这三个工具的边界由宿主 admission 保证：",
+    "#    同工作区、父预算/能力交集内自动；忙目标与越域一律拒绝。",
+    "#    不在此宽泛放行任何内置工具或 task。",
+    "tools:",
+    "  approval:",
+    "    message_bot: allow",
+    "    list_bots: allow",
+    "    delegate_bot: allow",
+  );
+
+  if (bot.executionMode === "chat") {
+    // 只有 chat（受控读取）档收窄工具来源，且只用真实原生机制：
+    //  - mcp.enableProjectConfig=false：不加载项目级 .mcp.json/mcp.json
+    //    （settings id 在 18.10.0 schema 中确认：packages/coding-agent/src/mcp/settings.ts，
+    //     description "Load .mcp.json/mcp.json from project root"，默认 true）。
+    //  - disabledExtensions 里的 `mcp:<name>`：按扩展 id 逐个关掉用户级 MCP 服务器
+    //    （MCP 条目的 toExtensionId 就是 `mcp:${name}`；未发现通配支持，只能列名）。
+    //  - 启动参数额外加 --no-extensions（真实 CLI 开关 → disableExtensionDiscovery）。
+    // 本机实测：restrictToolNames/enableMCP/allowRestrictedCustomTools 这类 SDK 选项会被忽略，
+    // 所以不再写它们；残留风险由 BotRuntime 的运行时工具面校验兜底（见 _verifyChatToolSurface），
+    // 发现越界工具即拒绝运行，不宣称安全聊天。
+    lines.push(
+      "# 4a) chat 档：用真实原生设置关掉项目 MCP 来源（SDK 选项实测被忽略，不再使用）。",
+      "mcp:",
+      "  enableProjectConfig: false",
+    );
+  }
+
+  lines.push(
+    "# 4b) 原生子任务并发与递归上限（本次运行内生效，不改用户全局配置）。",
+    "task:",
+    `  maxConcurrency: ${DEFAULT_TASK_CONCURRENCY}`,
+    "  maxRecursionDepth: 2",
     "",
-  ].join("\n");
-  writeFileSync(overlayPath, overlay, "utf8");
+  );
+  writeFileSync(overlayPath, lines.join("\n"), "utf8");
 
   return {
     personaPath,
