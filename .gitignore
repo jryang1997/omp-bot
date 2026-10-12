@@ -7,3 +7,5 @@ node_modules/
 .shots/
 # omp-bot 运行时数据（花名册/会话/人格），不入库
 .ompbot/
+release/
+.desktop-runtime/
