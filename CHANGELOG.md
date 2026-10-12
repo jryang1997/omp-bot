@@ -28,6 +28,10 @@ OMP 原生优先的工作台改造：把「一次性聊天」升级成有台账�
 - **CLI 审批语义**：`interactive` 在终端问真实的人；一次性命令默认失败关闭并停止该运行，只有显式 `--approve`/`--answers` 才代为回答；凭据类请求永不由 CLI 代填。
 - **权限档**：Bot 增加 `executionMode`（默认 `supervised`）、`approvalMode`（默认 `write`）、预算、记忆开关、技能过滤与工作区。预算按核心唯一契约存对象 `{maxTokens, maxCostUsd, maxTimeMs, maxConcurrency}`（`null` = 不设限），CLI 的 `--budget N` 写 `{maxTokens:N}`、`--budget none` 清除、`--max-cost-usd/--max-time-ms/--max-concurrency` 合并写入，标量或未知键被明确拒绝而不是当成无限制。`full`/`yolo` 必须由用户显式确认（CLI 需要 `--confirm-execution-mode`/`--confirm-approval-mode`，HTTP 需要同名确认字段），导入模板绝不携带这些授权。
 
+### 修复
+
+- 关停期间晚到的 Run 收尾不再把「Ledger 已关闭」抛成未捕获拒绝而崩掉进程；群 Run 的成果登记改为如实跳过（没有单归属 Bot），不再报 `run.botId 必填`。
+
 ### 升级注意
 
 - 老的 `state.json` 不删、不改语义，Bot 与群的 id 保持；台账在旁边新建 `workbench.sqlite`，历史 session 不迁移也不改写。

@@ -1036,7 +1036,12 @@ export class Orchestrator {
           this.emit("run_finalize_error", { runId: run.id, error: e2?.message ?? String(e2) });
         }
       }
-      return this.getRun(run.id);
+      // 关停可能已经关闭台账：ctrl.done 无人再等，晚到的读取失败也不能成为未捕获拒绝。
+      try {
+        return this.getRun(run.id);
+      } catch {
+        return null;
+      }
     });
     return starting ?? this.getRun(run.id) ?? run;
   }
@@ -1464,6 +1469,11 @@ export class Orchestrator {
   }
 
   async _collectArtifacts(runId, runtime, features) {
+    if (!this.getRun(runId)?.botId) {
+      // 群 Run 没有单归属 Bot，成果无从归属到某个工作区：如实跳过，不报错。
+      this.emit("artifact_skipped", { runId, reason: "no_bot" });
+      return;
+    }
     if (!runtime) {
       // 群 Run 找不到可用的成员 runtime 时不能凭空登记成果（也没有可读的 cwd/baseDir）。
       this.emit("artifact_skipped", { runId, reason: "no_runtime" });
