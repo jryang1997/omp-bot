@@ -309,6 +309,8 @@ async function runInteractive() {
 }
 
 main().catch((e) => {
-  console.error(e?.stack ?? e);
+  // 业务错误（模型无 key、bot 找不到等）打干净一行；--debug 才显示堆栈。
+  if (DEBUG) console.error(e?.stack ?? e);
+  else console.error(`错误: ${e?.message ?? e}`);
   process.exit(1);
 });

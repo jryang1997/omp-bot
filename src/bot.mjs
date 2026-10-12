@@ -149,6 +149,12 @@ export class BotRuntime {
     this.deliveryDepth = depth;
     try {
       const res = await this.rpc.promptAndWait(text, { timeoutMs });
+      // 回合以 error 结束（如模型无 API key、provider 报错）→ 抛出真实错误，
+      // 不能吞成空文本让调用方以为 bot 回了个空。
+      if (res.status === "error") {
+        const msg = res.error?.message ?? res.error ?? "回合以错误结束";
+        throw new Error(`bot ${this.bot.name} 回合失败: ${msg}`);
+      }
       let out = "";
       try {
         out = (await this.rpc.getLastAssistantText())?.text ?? "";
