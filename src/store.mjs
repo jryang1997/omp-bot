@@ -13,7 +13,7 @@ export function defaultHome() {
 }
 
 export function emptyState() {
-  return { version: STATE_VERSION, bots: {}, rooms: {}, exchanges: [] };
+  return { version: STATE_VERSION, bots: {}, rooms: {}, exchanges: [], chats: {} };
 }
 
 /** 原子写：先写 .tmp 再 rename，避免半截文件。 */
@@ -143,6 +143,25 @@ export class Store {
   flushExchanges() {
     this.save();
   }
+
+  // ---- 私聊日志（每 bot 一条，有界）----
+  // 只存展示用的 user/assistant 文本；真实 transcript 在 bot 各自的 omp session 里。
+
+  getChat(botId) {
+    return this.state.chats[botId] ?? [];
+  }
+
+  appendChat(botId, message, cap = 400) {
+    const arr = this.state.chats[botId] ?? (this.state.chats[botId] = []);
+    arr.push(message);
+    if (arr.length > cap) this.state.chats[botId] = arr.slice(-cap);
+    this.save();
+  }
+
+  clearChat(botId) {
+    this.state.chats[botId] = [];
+    this.save();
+  }
 }
 
 function migrate(raw) {
@@ -153,6 +172,7 @@ function migrate(raw) {
     bots: raw.bots && typeof raw.bots === "object" ? raw.bots : {},
     rooms: raw.rooms && typeof raw.rooms === "object" ? raw.rooms : {},
     exchanges: Array.isArray(raw.exchanges) ? raw.exchanges : [],
+    chats: raw.chats && typeof raw.chats === "object" ? raw.chats : {},
   };
 }
 

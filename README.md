@@ -22,7 +22,22 @@
 前提：本机装好 `omp`（`omp --version` 能跑），且至少配好一个模型（`omp models`）。Node ≥ 20。
 
 ```sh
-# 一键 demo：建两个 bot，跑一次「私聊委派」，打印用量
+# GUI（网页控制台，推荐）：一条命令启动，自动打开浏览器
+node ompbot.mjs serve
+```
+
+打开 `http://127.0.0.1:3099`（可用 `--port` 换端口，`--no-open` 不自动开浏览器）。GUI 里可以：
+
+- **Bots**：新建/删除 bot，聊天（Enter 发送），点 ⚙ 打开设置抽屉改名字/角色/模型（下拉列出全部 `omp models`）/思考档/专属指令/主 bot 标记——保存即生效（下一条消息按新配置重启该 bot 的进程）。
+- **群聊**：新建群（勾选成员、选 admin、选模式），发言后每个 bot 的回复**经 SSE 实时逐条推送**到界面，不用刷新。
+- **用量**：当前常驻进程内每个 bot runtime 的请求数 / token / cost 表格。
+- 左上角绿点 = SSE 事件流连通。服务是常驻进程，bot 的 omp 子进程在两条消息之间活着，所以 GUI 里连续聊天比 CLI 单发快得多。
+
+服务只听 `127.0.0.1`，不对外网暴露。
+
+### 一键 demo（CLI）
+
+```sh
 node ompbot.mjs demo
 ```
 
@@ -57,6 +72,7 @@ node ompbot.mjs interactive room:工作组    # 群聊
 
 | 命令 | 作用 |
 |---|---|
+| `serve [--port 3099] [--no-open]` | 启动 GUI（网页控制台），默认自动开浏览器 |
 | `demo` | 建两个 bot 跑一次私聊委派，打印用量 |
 | `bots add <name> [--role R] [--model M] [--instructions I] [--main]` | 新增 bot |
 | `bots list` / `bots rm <name\|id>` | 列出 / 删除 |
@@ -72,8 +88,11 @@ node ompbot.mjs interactive room:工作组    # 群聊
 ## 架构
 
 ```
+   GUI(浏览器) ──HTTP/SSE──┐
+   CLI / IM 桥 ────────────┤
+                           ▼
                  ┌─────────────────────────────┐
-   CLI / IM 桥 →  │        Orchestrator         │  ← state.json（花名册/群/投递日志）
+                 │        Orchestrator         │  ← state.json（花名册/群/投递/聊天日志）
                  │  花名册 · runtime 池 · 投递   │     + 单写者锁
                  └──────────────┬──────────────┘
                                 │ 每个 (bot, scope) 一个 BotRuntime
@@ -87,6 +106,8 @@ node ompbot.mjs interactive room:工作组    # 群聊
 ```
 
 - **`src/rpc-client.mjs`** — 驱动一个 `omp --mode rpc` 子进程的 JSONL 客户端：帧编解码、协议 v2 协商与 chunk 重组、命令/响应按 id 关联、事件订阅、host tool 回调服务。
+- **`src/server.mjs`** — GUI 后端：node:http 常驻服务（127.0.0.1），静态文件 + JSON API + SSE 事件流。
+- **`web/`** — GUI 前端：零依赖单页（index.html + app.js + style.css），侧边栏/聊天窗/设置抽屉/用量表。
 - **`src/bot.mjs`** — `BotRuntime`：一个 omp RPC 子进程绑定一个会话上下文（`private` 或 `room:<id>`）。注入人格（`--append-system-prompt`）与隔离 overlay（`--config`），注册团队工具，维护 `busy`/`deliveryDepth` 状态机。
 - **`src/persona.mjs`** — bot 人格文本生成 + 隔离 overlay（关掉 context-file provider 防止用户全局 `~/.omp/agent/AGENTS.md` 漏进 bot；关掉 `memory.backend`/`autolearn` 防止 bot recall/retain 用户的私有记忆库）。
 - **`src/orchestrator.mjs`** — 花名册 CRUD、runtime 池（按 `botId::scope` 懒启动）、`message_bot`/`list_bots` 团队工具、bot→bot 投递协议、群聊入口。
@@ -94,7 +115,7 @@ node ompbot.mjs interactive room:工作组    # 群聊
 - **`src/domain.mjs`** — 核心数据形状（Bot/Room/Message/Exchange）与归一化：@mention 解析（最长名优先）、room.log 裁剪、群聊 prompt 构建。
 - **`src/store.mjs`** — 团队状态持久层：原子写 + pid 单写者锁 + 版本迁移。
 - **`src/constants.mjs`** — 领域常量（hop 上限、超时、mention 限额、回合上限等，多数借自 DS-Bot）。
-- **`src/usage.mjs`** — 跨 bot 用量汇总（防御式归一化 `get_session_stats`）。
+- **`src/usage.mjs`** — 跨 bot 用量汇总（按实测 `get_session_stats` 字段归一化）。
 
 ## bot→bot 消息怎么防死锁
 
@@ -107,8 +128,9 @@ node ompbot.mjs interactive room:工作组    # 群聊
 ## 测试
 
 ```sh
-npm test              # unit + gate + b2b + group + persist 全套
+npm test              # unit + gui + gate + b2b + group + persist 全套
 node test/unit.mjs    # 纯函数单测（无模型）：normalizeStats/parseMentions/isPass/room.log 裁剪
+node smoke-gui.mjs    # HTTP API 层（无模型）：静态/CRUD/校验/SSE/目录穿越，25 项断言
 node gate.mjs         # 阻塞门：RPC 握手、人格注入、host tool 回调、最终文本抓取
 node smoke-b2b.mjs    # bot→bot 私聊委派闭环
 node smoke-group.mjs  # 群聊 relay：everyone 收敛 + admin @路由 + 记忆隔离断言
@@ -126,7 +148,8 @@ smoke 都是真实模型调用，抓真实 transcript 作为断言证据，不�
 - **记忆隔离是有意为之**：bot 关闭了 omp 的记忆后端（`memory.backend: off`）与 autolearn。用户若把 `memory.backend` 指向局域网/远程共享库（如 hindsight），不关的话 bot 会 recall 到用户私有项目记忆、还会把 bot 对话 retain 进共享库造成跨 bot 污染（这个 bug 真实发生过，`smoke-group` 现有断言守着）。bot 的常驻记忆改由会话续接（`--continue`）承担，每 bot 每 scope 独立、互不串。若要给某个 bot 开记忆，改它的 `isolate.yml` 并自负污染风险。
 - **单写者**：同一 `OMPBOT_HOME` 同时只能一个 orchestrator 写；第二个拿不到锁时只读。
 - **Windows**：已在本机 Windows（Node v24）实测通过；stdio 管道与子进程生命周期正常。
-- **IM 桥未含**：本项目是编排内核 + CLI。接飞书/Telegram/QQ 需要另写一个 adapter 把 IM 消息映射到 `chatWithBot`/`postToRoom`，把回复发回 IM。可直接借鉴 [crayonlu/omp-bot](https://github.com/crayonlu/omp-bot) 的 NapCat/OneBot 管道或 [evandrodevbr/oh-my-pi-telegram](https://github.com/evandrodevbr/oh-my-pi-telegram)。
+- **IM 桥未含**：目前入口是 GUI + CLI。接飞书/Telegram/QQ 需要另写一个 adapter 把 IM 消息映射到 `chatWithBot`/`postToRoom`（或直接打 GUI 的 HTTP API），把回复发回 IM。可借鉴 [crayonlu/omp-bot](https://github.com/crayonlu/omp-bot) 的 NapCat/OneBot 管道或 [evandrodevbr/oh-my-pi-telegram](https://github.com/evandrodevbr/oh-my-pi-telegram)。
+- **GUI 无鉴权**：服务只听 127.0.0.1，默认假设本机单用户。别把端口转发到公网。
 
 ## 致谢
 

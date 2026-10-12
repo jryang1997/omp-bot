@@ -16,6 +16,7 @@
 //   ompbot.mjs interactive <bot|room:ROOM>   # REPL 连续对话
 
 import { createInterface } from "node:readline";
+import { exec } from "node:child_process";
 import { Orchestrator } from "./src/orchestrator.mjs";
 import { collectUsage, renderUsageTable } from "./src/usage.mjs";
 
@@ -53,6 +54,8 @@ function newOrch() {
 
 async function main() {
   switch (cmd) {
+    case "serve":
+      return runServe();
     case "demo":
       return runDemo();
     case "bots":
@@ -83,6 +86,7 @@ function helpText() {
   return `omp-bot — 在 omp 上跑一支常驻 AI bot 团队
 
 命令:
+  serve [--port 3099]           启动 GUI（网页控制台），默认自动打开浏览器
   demo                          建两个 bot 跑一次私聊委派，打印用量
   bots add <name> [选项]        新增 bot
   bots list                     列出所有 bot
@@ -105,6 +109,39 @@ function helpText() {
 
 环境变量:
   OMPBOT_HOME, OMPBOT_MODEL, OMPBOT_DEBUG=1`;
+}
+
+async function runServe() {
+  const { startServer } = await import("./src/server.mjs");
+  const port = Number(flag("port") || process.env.OMPBOT_PORT || 3099);
+  const host = flag("host") || "127.0.0.1";
+  const { url } = await startServer({
+    port,
+    host,
+    ...(HOME ? { home: HOME } : {}),
+    debug: DEBUG,
+    ...(THINKING ? { defaultThinking: THINKING } : {}),
+  });
+  console.log(`omp-bot GUI 已启动: ${url}`);
+  console.log("按 Ctrl+C 停止。");
+  // 尽力打开浏览器（失败不影响服务）。
+  if (!hasFlag("no-open")) openBrowser(url);
+  const shutdown = async () => {
+    console.log("\n正在关闭…");
+    process.exit(0);
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+}
+
+function openBrowser(url) {
+  const cmdStr =
+    process.platform === "win32"
+      ? `start "" "${url}"`
+      : process.platform === "darwin"
+        ? `open "${url}"`
+        : `xdg-open "${url}"`;
+  exec(cmdStr, () => {}); // 打不开就算了，URL 已打印
 }
 
 async function runDemo() {

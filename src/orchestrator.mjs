@@ -83,14 +83,65 @@ export class Orchestrator {
 
   removeBot(id) {
     this.store.removeBot(id);
-    // 停掉它所有 runtime
+    this._stopRuntimesFor(id);
+    this.emit("bot_removed", { id });
+  }
+
+  /**
+   * 更新 bot 的可变字段（name/role/instructions/model/thinking/isMain）。
+   * 影响人格或模型的字段变了，必须重启该 bot 的所有 runtime，否则旧人格还在跑。
+   * @returns {object|null} 更新后的 bot，或 null（不存在）
+   */
+  updateBot(id, patch) {
+    const bot = this.getBot(id);
+    if (!bot) return null;
+    const affectsRuntime = ["instructions", "model", "thinking", "role"].some(
+      (k) => patch[k] !== undefined && patch[k] !== bot[k],
+    );
+    const next = { ...bot };
+    for (const k of ["name", "role", "instructions", "model", "thinking", "isMain"]) {
+      if (patch[k] !== undefined) next[k] = patch[k];
+    }
+    this.store.putBot(next);
+    this.emit("bot_updated", { bot: next });
+    if (affectsRuntime) this._stopRuntimesFor(id);
+    return next;
+  }
+
+  /** 停掉某 bot 的所有 runtime（下次用到会按新人格懒启动）。 */
+  _stopRuntimesFor(botId) {
     for (const [key, rt] of this.runtimes) {
-      if (key.startsWith(`${id}::`)) {
+      if (key.startsWith(`${botId}::`)) {
         rt.stop();
         this.runtimes.delete(key);
       }
     }
-    this.emit("bot_removed", { id });
+  }
+
+  /** 更新群的可变字段（name/members/adminId/mode）。成员变了清空 room.log 语义不变，直接改。 */
+  updateRoom(id, patch) {
+    const room = this.getRoom(id);
+    if (!room) return null;
+    const next = { ...room };
+    if (patch.name !== undefined) next.name = patch.name;
+    if (patch.mode !== undefined) next.mode = patch.mode;
+    if (Array.isArray(patch.members)) next.members = [...patch.members];
+    if (patch.adminId !== undefined) next.adminId = patch.adminId;
+    this.store.putRoom(next);
+    this.emit("room_updated", { room: next });
+    return next;
+  }
+
+  /** 删群，并停掉它的成员 room-scoped runtime。 */
+  removeRoom(id) {
+    this.store.removeRoom(id);
+    for (const [key, rt] of this.runtimes) {
+      if (key.endsWith(`::room:${id}`)) {
+        rt.stop();
+        this.runtimes.delete(key);
+      }
+    }
+    this.emit("room_removed", { id });
   }
 
   /** 按名字或 id 解析 bot；名字大小写不敏感，最长名优先。 */
@@ -245,13 +296,31 @@ export class Orchestrator {
 
   // ---- 私聊入口（IM 层/测试用）----
 
-  /** 用户向某 bot 私聊发一条，返回 bot 回复。 */
+  /** 用户向某 bot 私聊发一条，返回 bot 回复。记录展示用聊天日志。 */
   async chatWithBot(botId, text, opts = {}) {
     const rt = await this.runtimeFor(botId, "private");
     this.emit("user_to_bot", { botId, text });
-    const res = await rt.send(text, opts);
-    this.emit("bot_to_user", { botId, text: res.text });
-    return res.text;
+    this.store.appendChat(botId, { role: "user", text, at: Date.now() });
+    let reply;
+    try {
+      reply = await rt.send(text, opts);
+    } catch (e) {
+      this.store.appendChat(botId, { role: "error", text: e?.message ?? String(e), at: Date.now() });
+      throw e;
+    }
+    this.store.appendChat(botId, { role: "assistant", text: reply.text, at: Date.now() });
+    this.emit("bot_to_user", { botId, text: reply.text });
+    return reply.text;
+  }
+
+  /** 读某 bot 的展示用私聊日志。 */
+  getChat(botId) {
+    return this.store.getChat(botId);
+  }
+
+  /** 清空某 bot 的私聊日志（仅展示层；不动 omp session）。 */
+  clearChat(botId) {
+    this.store.clearChat(botId);
   }
 
   // ---- 群聊入口 ----

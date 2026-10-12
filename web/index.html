@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>omp-bot</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div id="sidebar-head">
+      <span id="logo">⌥ omp-bot</span>
+      <span id="conn" title="事件流状态">●</span>
+    </div>
+    <nav id="nav">
+      <button data-view="bots" class="nav-btn active">Bots</button>
+      <button data-view="rooms" class="nav-btn">群聊</button>
+      <button data-view="usage" class="nav-btn">用量</button>
+    </nav>
+    <div id="side-list"></div>
+    <div id="sidebar-foot">
+      <button id="btn-new" class="btn primary">＋ 新建</button>
+    </div>
+  </aside>
+
+  <main id="main">
+    <header id="main-head">
+      <div id="head-title">
+        <span id="head-name">选一个 bot 或群</span>
+        <span id="head-sub"></span>
+      </div>
+      <div id="head-actions">
+        <button id="btn-settings" class="btn ghost" title="设置">⚙</button>
+      </div>
+    </header>
+    <div id="chat-log"></div>
+    <div id="composer">
+      <textarea id="input" rows="1" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+      <button id="btn-send" class="btn primary">发送</button>
+    </div>
+  </main>
+
+  <aside id="drawer" class="hidden">
+    <div id="drawer-head">
+      <span id="drawer-title">设置</span>
+      <button id="drawer-close" class="btn ghost">✕</button>
+    </div>
+    <div id="drawer-body"></div>
+  </aside>
+</div>
+
+<div id="modal-back" class="hidden">
+  <div id="modal">
+    <div id="modal-head"><span id="modal-title"></span><button id="modal-close" class="btn ghost">✕</button></div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<div id="toast-wrap"></div>
+<script src="app.js"></script>
+</body>
+</html>
