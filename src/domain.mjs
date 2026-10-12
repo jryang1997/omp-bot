@@ -2,7 +2,19 @@
 // 领域建模：花名册/群用 registry（id→记录），bot 运行态用显式状态机，
 // 消息用带 kind 的统一形状，避免散落的布尔判断。
 
-import { ROOM_MODES, PASS_TOKEN, ROOM_LOG_KEEP } from "./constants.mjs";
+import {
+  ROOM_MODES,
+  PASS_TOKEN,
+  ROOM_LOG_KEEP,
+  EXECUTION_MODES,
+  APPROVAL_MODES,
+  DEFAULT_EXECUTION_MODE,
+  DEFAULT_APPROVAL_MODE,
+  DEFAULT_MEMORY_ENABLED,
+  EXECUTION_MODE_RANK,
+  RUN_STATES,
+  TERMINAL_RUN_STATES,
+} from "./constants.mjs";
 
 let idSeq = 0;
 export function genId(prefix) {
@@ -10,10 +22,33 @@ export function genId(prefix) {
   return `${prefix}_${Date.now().toString(36)}_${idSeq.toString(36)}`;
 }
 
-/** bot 的花名册记录（持久化）。 */
-export function makeBot({ id, name, role = "", instructions = "", model = "", thinking = "", isMain = false }) {
+/**
+ * bot 的花名册记录（持久化）。
+ * executionMode / approvalMode / workspace / memoryEnabled / skills / budget 共同决定
+ * 这个 bot 的 runtime 能复用什么进程：policySignature 一变就必须重建进程。
+ * supervised 是「走原生审批」的诚实描述，不是 OS 沙箱。
+ */
+export function makeBot({
+  id,
+  name,
+  role = "",
+  instructions = "",
+  model = "",
+  thinking = "",
+  isMain = false,
+  executionMode = DEFAULT_EXECUTION_MODE,
+  approvalMode = DEFAULT_APPROVAL_MODE,
+  workspace = "",
+  memoryEnabled = DEFAULT_MEMORY_ENABLED,
+  skills = null,
+  budget = null,
+} = {}) {
   if (!id) throw new Error("bot 需要 id");
   if (!name) throw new Error("bot 需要 name");
+  if (!EXECUTION_MODES.includes(executionMode)) throw new Error(`未知执行模式: ${executionMode}`);
+  if (!APPROVAL_MODES.includes(approvalMode)) throw new Error(`未知审批档: ${approvalMode}`);
+  if (skills !== null && !Array.isArray(skills)) throw new Error("skills 必须是数组或 null");
+  const normalizedBudget = normalizeBudget(budget, "bot.budget");
   return {
     id,
     name,
@@ -22,6 +57,12 @@ export function makeBot({ id, name, role = "", instructions = "", model = "", th
     model,
     thinking,
     isMain,
+    executionMode,
+    approvalMode,
+    workspace: workspace || "",
+    memoryEnabled: memoryEnabled === true,
+    skills: skills === null ? null : [...skills],
+    budget: normalizedBudget,
     createdAt: Date.now(),
   };
 }
@@ -151,3 +192,139 @@ export function roomPrompt({ room, members, self, turnNumber, after = [], notice
     .filter(Boolean)
     .join("\n");
 }
+
+// ---- 运行策略：进程复用签名 / 预算与能力收窄 ----
+
+/** 策略版本：语义变化时必须改，避免旧版本的宽松进程被新版本复用。 */
+export const POLICY_VERSION = 1;
+
+/**
+ * 把旧记录补齐成当前形状（升级时用，不改用户已有取值）。
+ * @returns {object|null} 归一化后的 bot；输入非法时返回 null
+ */
+export function normalizeBot(raw) {
+  if (!raw || !raw.id || !raw.name) return null;
+  // 预算单独归一：旧记录里可能出现标量/负数等非法形状，这时不能假装「无限制」，
+  // 也不能让整条花名册记录消失 —— 记下 budgetInvalid，运行入口会显式拒绝该 bot。
+  let budget = null;
+  let budgetInvalid = null;
+  try {
+    budget = normalizeBudget(raw.budget, "bot.budget");
+  } catch (e) {
+    budgetInvalid = e?.message ?? String(e);
+  }
+  try {
+    const bot = makeBot({
+      id: raw.id,
+      name: raw.name,
+      role: raw.role ?? "",
+      instructions: raw.instructions ?? "",
+      model: raw.model ?? "",
+      thinking: raw.thinking ?? "",
+      isMain: raw.isMain === true,
+      executionMode: raw.executionMode ?? DEFAULT_EXECUTION_MODE,
+      approvalMode: raw.approvalMode ?? DEFAULT_APPROVAL_MODE,
+      workspace: raw.workspace ?? "",
+      memoryEnabled: raw.memoryEnabled ?? DEFAULT_MEMORY_ENABLED,
+      skills: raw.skills ?? null,
+      budget,
+    });
+    return budgetInvalid ? { ...bot, budgetInvalid } : bot;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * runtime 复用签名。执行模式、审批档、工作区、模型、思考档、技能过滤、
+ * 记忆开关任何一个变了都必须重建进程：宽权限进程不得承接收窄后的 Run。
+ * @param {object} bot
+ * @param {{cwd:string, scope:string}} ctx
+ */
+export function policySignature(bot, ctx) {
+  const parts = [
+    `v${POLICY_VERSION}`,
+    `mode=${bot.executionMode ?? DEFAULT_EXECUTION_MODE}`,
+    `approval=${bot.approvalMode ?? DEFAULT_APPROVAL_MODE}`,
+    `ws=${bot.workspace ?? ""}`,
+    `model=${bot.model ?? ""}`,
+    `thinking=${bot.thinking ?? ""}`,
+    `skills=${(bot.skills ?? []).join(",")}`,
+    `memory=${bot.memoryEnabled === true ? 1 : 0}`,
+    `cwd=${ctx?.cwd ?? ""}`,
+    `scope=${ctx?.scope ?? ""}`,
+  ];
+  return parts.join("|");
+}
+
+const BUDGET_KEYS = ["maxTokens", "maxCostUsd", "maxTimeMs", "maxConcurrency"];
+
+/** 预算非法：显式错误，绝不静默当成「无限制」。 */
+function badBudget(message) {
+  const e = new Error(message);
+  e.status = 400;
+  e.code = "budget_invalid";
+  return e;
+}
+
+/**
+ * 预算归一化（唯一入口）。只接受 null/undefined，或只含受支持限制项的对象；
+ * 每项必须是有限非负数字。标量、数组、NaN、负数、Infinity、未知键一律显式报错。
+ * @param {unknown} budget
+ * @param {string} [where] 出错信息里的定位
+ * @returns {object|null}
+ */
+export function normalizeBudget(budget, where = "budget") {
+  if (budget === null || budget === undefined) return null;
+  if (typeof budget !== "object" || Array.isArray(budget)) {
+    throw badBudget(
+      `${where} 必须是对象或 null，收到 ${Array.isArray(budget) ? "array" : typeof budget}`,
+    );
+  }
+  const out = {};
+  for (const [k, v] of Object.entries(budget)) {
+    if (!BUDGET_KEYS.includes(k)) {
+      throw badBudget(`${where}.${k} 不是受支持的预算项（允许：${BUDGET_KEYS.join(", ")}）`);
+    }
+    if (typeof v !== "number" || !Number.isFinite(v) || v < 0) {
+      throw badBudget(`${where}.${k} 必须是非负有限数字，收到 ${JSON.stringify(v)}`);
+    }
+    out[k] = v;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+/**
+ * 父子预算取交集（每项取更小者）。任一方未定义的项取另一方；都未定义返回 null。
+ * 子 Run 永远拿不到比父 Run 更大的额度。非有限数字一律按未定义处理（上游已归一化，这里兜底）。
+ */
+export function intersectBudget(parent, child) {
+  const out = {};
+  let any = false;
+  for (const k of BUDGET_KEYS) {
+    const p = Number.isFinite(parent?.[k]) ? parent[k] : null;
+    const c = Number.isFinite(child?.[k]) ? child[k] : null;
+    if (p === null && c === null) continue;
+    out[k] = p === null ? c : c === null ? p : Math.min(p, c);
+    any = true;
+  }
+  return any ? out : null;
+}
+
+/** 子 Run 的执行模式不得强于父 Run（chat < supervised < full）。 */
+export function intersectExecutionMode(parentMode, childMode) {
+  const p = EXECUTION_MODE_RANK[parentMode] ?? EXECUTION_MODE_RANK[DEFAULT_EXECUTION_MODE];
+  const c = EXECUTION_MODE_RANK[childMode] ?? p;
+  return c <= p ? childMode : parentMode;
+}
+
+export function isTerminalRunState(state) {
+  return TERMINAL_RUN_STATES.has(state);
+}
+
+/** 运行是否还占着 scope 租约（非终态就算占用，cancelling 也算）。 */
+export function isActiveRunState(state) {
+  return !isTerminalRunState(state);
+}
+
+export { RUN_STATES, TERMINAL_RUN_STATES };
