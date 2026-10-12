@@ -1,0 +1,46 @@
+# electron-builder 配置。
+#
+# 打包的是当前工作区（含未提交的本地修改），不做 git archive，也不清空工作区：
+# 谁的本地改动都会如实进包，root 在打包前用 git status 记录基线即可。
+# 许可归属：本项目 MIT（LICENSE）+ 随包内置的 OMP 及其 MIT 许可（desktop/OMP-LICENSE，
+# 由 scripts/prepare-desktop.mjs 复制到 resources/runtime/ 并写 VERSION/PROVENANCE.json）。
+# publish 保持 null：没有发布源，不做自动更新；也没有代码签名证书，安装包未做 Authenticode 签名。
+appId: org.ompbot.desktop
+productName: omp-bot
+asar: true
+npmRebuild: false
+electronDist: node_modules/electron/dist
+publish: null
+directories:
+  output: release
+files:
+  - desktop/main.mjs
+  - desktop/OMP-LICENSE
+  - src/**/*.mjs
+  - web/**/*
+  - package.json
+  - README.md
+  - CHANGELOG.md
+  - LICENSE
+extraResources:
+  # 本机原生 OMP：omp.exe + OMP-LICENSE + VERSION + PROVENANCE.json（版本、来源、sha256）。
+  - from: .desktop-runtime
+    to: runtime
+win:
+  icon: web/assets/app-icon.ico
+  target:
+    - target: portable
+      arch: x64
+    - target: nsis
+      arch: x64
+portable:
+  artifactName: omp-bot-${version}-portable.exe
+nsis:
+  artifactName: omp-bot-${version}-setup.exe
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: omp-bot
+  deleteAppDataOnUninstall: false
