@@ -1,0 +1,17 @@
+{
+  "check": "real-chat-native-surface",
+  "toolNames": [
+    "read_workspace_file",
+    "list_workspace",
+    "fetch_public_url"
+  ],
+  "protocolVersion": 2,
+  "unsafeTools": [],
+  "hostCalls": [
+    "read_workspace_file"
+  ],
+  "reply": "`qa-input.txt` 内容（精确，单行，无尾随换行）：\n\n```\nSCOPED_READER_NATIVE_826519\n```\n\nCanary 调用：未执行。`qa_extension_canary` 与 `mcp__qa_canary` 均不在本次可用工具清单中（仅有 `read_workspace_file`、`list_workspace`、`fetch_public_url`），故无对应调用；按要求未使用其他工具。",
+  "mcpCalled": false,
+  "extensionCalled": false,
+  "state": "completed"
+}

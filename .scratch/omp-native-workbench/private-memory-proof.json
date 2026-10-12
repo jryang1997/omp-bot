@@ -1,0 +1,46 @@
+{
+  "checkedAt": "2026-10-12T14:07:19.514Z",
+  "checks": [
+    {
+      "check": "actual-native-learn-in-private-dir",
+      "botId": "bot_mv5brwwe_1",
+      "privateAgentDir": "C:\\Users\\Jerry\\AppData\\Local\\Temp\\ompbot-private-memory-proof-Hmbarr\\bots\\bot_mv5brwwe_1\\private\\agent",
+      "model": "magpie/opencode-go/deepseek-v4.1-flash",
+      "learnedPath": "C:\\Users\\Jerry\\AppData\\Local\\Temp\\ompbot-private-memory-proof-Hmbarr\\bots\\bot_mv5brwwe_1\\private\\agent\\memories\\--c--users-jerry-appdata-local-temp-ompbot-private-memory-proof-hmbarr-bots-bot_mv5brwwe_1-private-work--\\learned.md",
+      "ownMarkerStored": true,
+      "otherMarkerAbsent": true
+    },
+    {
+      "check": "actual-native-learn-in-private-dir",
+      "botId": "bot_mv5brwwn_2",
+      "privateAgentDir": "C:\\Users\\Jerry\\AppData\\Local\\Temp\\ompbot-private-memory-proof-Hmbarr\\bots\\bot_mv5brwwn_2\\private\\agent",
+      "model": "magpie/opencode-go/deepseek-v4.1-flash",
+      "learnedPath": "C:\\Users\\Jerry\\AppData\\Local\\Temp\\ompbot-private-memory-proof-Hmbarr\\bots\\bot_mv5brwwn_2\\private\\agent\\memories\\--c--users-jerry-appdata-local-temp-ompbot-private-memory-proof-hmbarr-bots-bot_mv5brwwn_2-private-work--\\learned.md",
+      "ownMarkerStored": true,
+      "otherMarkerAbsent": true
+    },
+    {
+      "check": "restart-new-session-private-recall",
+      "botId": "bot_mv5brwwe_1",
+      "ownMarkerRecalled": true,
+      "otherMarkerAbsent": true
+    },
+    {
+      "check": "restart-new-session-private-recall",
+      "botId": "bot_mv5brwwn_2",
+      "ownMarkerRecalled": true,
+      "otherMarkerAbsent": true
+    },
+    {
+      "check": "scoped-edit-clear-and-fresh-session",
+      "editReadback": true,
+      "derivedMemoryCleared": true,
+      "backupPreserved": true,
+      "otherBotPreserved": true,
+      "clearedMarkerNotRecalled": true,
+      "sourceSessionsRetained": true
+    }
+  ],
+  "globalCredentialsCopied": false,
+  "externalMessagesSent": false
+}

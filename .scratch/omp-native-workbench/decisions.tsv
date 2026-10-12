@@ -1,0 +1,18 @@
+ts	phase	decision	why	evidence	result
+2026-10-12T00:00:00Z	frame	实施 A-H，OMP 原生优先，Flash 子代理写代码，主代理集成与验收	用户明确授权实施且要求不重复 OMP 能力	.scratch/omp-native-workbench/spec.md	open
+2026-10-12T00:00:01Z	baseline	保留现有未提交修改并记录改动前基线	保护用户资料，后续验证有可比较起点	.gitignore;README.md;test/unit.mjs;test/shutdown.mjs;smoke-gui.mjs	11/11 unit，shutdown PASS，30/30 HTTP
+2026-10-12T00:00:02Z	storage	原生 SQLite 已在 Node 与 Electron 实测可用	持久台账无需新增数据库依赖	package.json;.desktop-runtime/VERSION	Node SQLite 3.53.3，Electron SQLite 3.53.4
+2026-10-12T06:15:50.200Z	correction	前面三行时间为录入占位，不是实测执行时间，本行予以纠正	审计时间不能编造，决策与运行结果仍有真实工具证据	.scratch/omp-native-workbench/decisions.tsv:2	前三行时间无效，实际发生在本行之前的本轮会话
+2026-10-12T06:32:08.664Z	design	采用原生执行权威加SQLite薄运行投影，Orchestrator唯一整合，七位实现者按独占文件并行	复用OMP功能，不另建RunManager或记忆引擎	.scratch/omp-native-workbench/contract.md	接口冻结，实施开始
+2026-10-12T06:32:08.664Z	native-gate	接通plain rpc-ui原生审批，不自造风险分级器	真实Deny禁止写文件，Approve创建准确临时文件，236增量帧	.scratch/omp-native-workbench/probe-native-approval.mjs	PASS
+2026-10-12T06:32:08.664Z	design-review	审批与成果只存Ledger，ask不作授权，native checkpoint不当文件回滚	独立设计审查发现候选双权威与概念混淆	agent://ArchitectureJudge	已在冻结契约和owner指导中落实
+2026-10-12T07:14:33.557Z	review	陈旧锁接管、父预算、成果版本、受控fetch、CLI跨进程与设备撤销问题退回owner	独立源码检查发现真实竞争、绕过与假成功通路	src/store.mjs;src/orchestrator.mjs;src/features/artifacts.mjs;src/features/hosttools.mjs;ompbot.mjs;src/server.mjs	修复中，尚未验收
+2026-10-12T07:14:33.557Z	rpc-test	运行冻结RPC传输用例，23/25通过	必须验证真实子进程协议与错误生命周期，不能以worker退出代替验收	node test/rpc-client.mjs (bg_60)	5.92s，退出1；silent命令death/timeout两例失败，已退回，不重复确认
+2026-10-12T07:14:33.557Z	channel-review	接受select形状、receiver异常、限流来源、scope缺失、入站恢复、有效配对码淘汰六项修复	真实原生消费者与测试façade接口不匹配，持久状态与HTTP边界有缺口	agent://ChannelSecurityReview/findings	派回Device/API/Features所有者，外部凭据闭环未测
+2026-10-12T07:54:59.366Z	rpc-verified	原生传输与取消实际结算回归30/30通过	修复admission无回执、false settled、write signal泄漏与settlement状态缺失	node test/rpc-client.mjs (bg_75)	PASS 8.05s；后续不无故重跑
+2026-10-12T07:54:59.366Z	incident	特性fixture空workspace误写.git/config，找到事故前完整原文并核对恢复	测试必须在所有写操作前检查临时home范围，不能依赖产物函数正确性	prior-session 01a12e00-105a toolCall call_00f9b1ef3cfe4819a5a41a542b209387; current .git/config#CAA9	七行原文与当前相同，只有core六项；Guarded测试已启用，两个fixture临时文件清理
+2026-10-12T07:54:59.366Z	native-security	真实chat受限模式仍调用MCP，SDK字段overlay未生效，退回根修	安全性由真实调用证明，不能相信二进制键字符串存在	.scratch/omp-native-workbench/chat-surface-proof.json (bg_77)	FAIL：mcp__qa_canary曝光且mcpCalled=true；bounded reader读token成功；主代理probe修正host名称
+2026-10-12T09:55:27.072Z	verified	最后冻结检查：RPC30/30、Ledger10/10、Run39/39、Features45、HTTP83/83、Channels25/25、GUI55/55与原生smoke通过	以实际工具结果与独立审查修复收口	docs/research/2026-10-12-implementation-verification.md	本地PASS
+2026-10-12T09:55:27.072Z	ui-fix	网页预算改maxTokens，清除保留费用限制；原生task/wait共用子任务行	浏览器先复现预算保存失败再实测保存回显清除；实际帧回放确认Flash与完成结果	.scratch/omp-native-workbench/browser-budget-proof.json;browser-subagent-replay.json	PASS
+2026-10-12T09:55:27.072Z	package	portable与NSIS重建，最终打包程序实跑内置OMP，后台完成/菜单恢复/退出释放锁通过	首次构建被QA占用失败，关闭本轮服务后成功；实际签名NotSigned	.scratch/omp-native-workbench/package-proof.json;desktop-proof.json	PASS本地构建与程序，未验安装卸载
+2026-10-12T09:55:27.072Z	limits	飞书真实账号/公网HTTPS/手机远端/隔离记忆认证/签名发布缺前置；不宣称竞品全能力完成	权限与实际可用性不能由本地mock推断	docs/research/2026-10-12-implementation-verification.md	精确前置已披露

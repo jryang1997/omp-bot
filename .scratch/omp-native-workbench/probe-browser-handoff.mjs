@@ -1,0 +1,36 @@
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Orchestrator } from '../../src/orchestrator.mjs';
+const exec=promisify(execFile);const home=mkdtempSync(join(tmpdir(),'ompbot-browser-handoff-proof-'));const frames=[];
+const orch=new Orchestrator({home,bin:'C:/Users/Jerry/Desktop/omp_bot/.desktop-runtime/omp.exe',onEvent:event=>frames.push(event)});
+orch.onEvent=event=>{frames.push(event);if(event.type==='ui_request'&&event.approval.method==='select'){const a=event.approval;const approved=a.options?.find(value=>/^Approve$/i.test(value));if(approved)void orch.answerUi(a.id,{value:approved}).catch(()=>{});}};
+let socket;let cwd;let seq=0;const pending=new Map();
+async function cdp(method,params={},sessionId){const id=++seq;return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{pending.delete(id);reject(new Error('CDP timeout: '+method));},10000);pending.set(id,{resolve,reject,timer});socket.send(JSON.stringify({id,method,params,...(sessionId?{sessionId}:{})}));});}
+try{
+ const bot=orch.addBot({name:'NativeBrowserHandoffQA',model:'magpie/commandcode-plan/deepseek/deepseek-v4.1-flash',thinking:'low',approvalMode:'write',instructions:'Temporary local browser QA. Use only native eval/browser in a fresh own headed tab. Do not attach user browser, use network, or send messages.'});
+ const html='<title>OMP_HANDOFF_QA</title><input id="qa"><button id="commit">Commit</button><output id="result"></output><script>document.querySelector("#commit").onclick=()=>document.querySelector("#result").textContent=document.querySelector("#qa").value;window.ticks=0;setInterval(()=>window.ticks++,20)</script>';
+ const code=`const tab=await browser.open({name:'handoff-qa',headed:true,persist:true,url:${JSON.stringify('data:text/html,'+encodeURIComponent(html))}});const ws=await tab.run(({browser})=>browser.wsEndpoint());display({ws,url:await tab.url(),tabs:await browser.tabs()});`;
+ const run=orch.startRun({botId:bot.id,text:'Execute this exact JavaScript via native eval; read xd://eval/browser first if needed. Then reply JSON with the actual ws field from the tool result, no extra prose. Code: '+code,timeoutMs:180000});
+ const done=await orch.waitRun(run.id,{timeoutMs:210000});assert.equal(done.state,'completed',done.error);assert.ok(frames.some(e=>e.runId===run.id&&e.event?.toolName==='eval'),'Real eval must execute');
+ const ws=done.reply.match(/ws:\/\/127\.0\.0\.1:\d+\/devtools\/browser\/[a-zA-Z0-9-]+/)?.[0];assert.ok(ws,'Actual native Chromium endpoint required');
+ const runtime=orch.runtimes.get(bot.id+'::private');cwd=runtime.cwd;const state=await runtime.rpc.getState();assert.ok(state.dumpTools.some(tool=>tool.name==='eval'),'Native eval tool expected');assert.ok(!state.dumpTools.some(tool=>tool.name==='browser'),'Browser must be a prelude, not invented tool');
+ socket=new WebSocket(ws);await new Promise((resolve,reject)=>{socket.addEventListener('open',resolve,{once:true});socket.addEventListener('error',reject,{once:true});});socket.addEventListener('message',event=>{const frame=JSON.parse(event.data);const waiter=pending.get(frame.id);if(!waiter)return;pending.delete(frame.id);clearTimeout(waiter.timer);frame.error?waiter.reject(new Error(frame.error.message)):waiter.resolve(frame.result);});
+ const targets=await cdp('Target.getTargets');const target=targets.targetInfos.find(t=>t.title==='OMP_HANDOFF_QA');assert.ok(target,'Own QA page must exist');const {sessionId}=await cdp('Target.attachToTarget',{targetId:target.targetId,flatten:true});
+ const before=await cdp('Runtime.evaluate',{expression:'window.ticks',returnByValue:true},sessionId);
+ const takeover=await orch.features.native.browserTakeover(bot.id);assert.equal(takeover.active,true);assert.equal(takeover.humanUrl,null);assert.throws(()=>orch.startRun({botId:bot.id,text:'MUST_BE_BLOCKED'}),error=>error.status===409&&error.code==='bot_paused');
+ orch.features.native = new orch.features.native.constructor({ orch, home, bin: orch.bin });
+ assert.equal(orch.features.native.isPaused(bot.id), true, 'Durable takeover must survive feature reconstruction');
+ assert.throws(()=>orch.startRun({botId:bot.id,text:'STILL_BLOCKED_AFTER_RESTART'}),error=>error.code==='bot_paused');
+ await cdp('Runtime.evaluate',{expression:'document.querySelector("#qa").focus()',returnByValue:true},sessionId);await cdp('Input.insertText',{text:'HUMAN_INPUT_WHILE_PAUSED'},sessionId);
+ const bounds=await cdp('Runtime.evaluate',{expression:'(()=>{const r=document.querySelector("#commit").getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()',returnByValue:true},sessionId);const {x,y}=bounds.result.value;await cdp('Input.dispatchMouseEvent',{type:'mousePressed',x,y,button:'left',clickCount:1},sessionId);await cdp('Input.dispatchMouseEvent',{type:'mouseReleased',x,y,button:'left',clickCount:1},sessionId);
+ const interaction=await cdp('Runtime.evaluate',{expression:'new Promise(resolve=>setTimeout(()=>resolve({result:document.querySelector("#result").textContent,ticks:window.ticks}),100))',awaitPromise:true,returnByValue:true},sessionId);assert.equal(interaction.result.value.result,'HUMAN_INPUT_WHILE_PAUSED');assert.ok(interaction.result.value.ticks>before.result.value,'Persistent page must remain interactive, not frozen');
+ const image=await cdp('Page.captureScreenshot',{format:'png'},sessionId);writeFileSync(new URL('./browser-handoff-proof.png',import.meta.url),Buffer.from(image.data,'base64'));
+ const release=await orch.features.native.browserRelease(bot.id);assert.equal(release.active,false);assert.equal(release.settledAtRelease,true);
+ const close=orch.startRun({botId:bot.id,text:'Use native eval JavaScript: await browser.tab("handoff-qa").close(); Then reply BROWSER_RELEASED_AND_CLOSED.',timeoutMs:120000});const closed=await orch.waitRun(close.id,{timeoutMs:150000});assert.equal(closed.state,'completed',closed.error);assert.ok(closed.reply.includes('BROWSER_RELEASED_AND_CLOSED'));
+ const chat=orch.addBot({name:'RestrictedBrowserQA',model:bot.model,executionMode:'chat',thinking:'low'});await assert.rejects(()=>orch.features.native.browserTakeover(chat.id),error=>error.status===409);
+ const proof={checkedAt:new Date().toISOString(),accepted:true,model:done.stats.model,evalPreludeConfirmed:true,noInventedBrowserTool:true,pauseRejectsRun:true,humanInputWhilePaused:true,pageNotFrozen:true,releaseSettled:true,resumedRunCompleted:true,restrictedChatRefused:true,externalMessagesSent:false};writeFileSync(new URL('./browser-handoff-proof.json',import.meta.url),JSON.stringify(proof,null,2));console.log(JSON.stringify(proof));
+}catch(error){console.error('BROWSER_HANDOFF_FAILURE '+error.message);throw error;}finally{socket?.close();await orch.shutdown();if(cwd)await exec('omp',['ps','stop','omp.browser.headed','--dir',cwd,'--timeout','2'],{timeout:15000,windowsHide:true}).catch(()=>{});try{rmSync(home,{recursive:true,force:true,maxRetries:10,retryDelay:100});}catch(error){console.warn(JSON.stringify({cleanup:false,home,code:error.code}));}}

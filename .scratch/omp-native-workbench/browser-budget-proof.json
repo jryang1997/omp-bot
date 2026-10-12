@@ -1,0 +1,9 @@
+{
+  "saved": {
+    "maxCostUsd": 2,
+    "maxTokens": 12345
+  },
+  "cleared": {
+    "maxCostUsd": 2
+  }
+}

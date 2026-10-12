@@ -1,0 +1,31 @@
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Orchestrator } from '../../src/orchestrator.mjs';
+const home=mkdtempSync(join(tmpdir(),'ompbot-subagent-proof-'));
+const events=[];const orch=new Orchestrator({home,bin:'C:/Users/Jerry/Desktop/omp_bot/.desktop-runtime/omp.exe',onEvent:e=>events.push(e)});
+const model='magpie/commandcode-plan/deepseek/deepseek-v4.1-flash';
+const forward=orch.onEvent;
+orch.onEvent=event=>{forward(event);if(event.type==='ui_request'){const a=event.approval;const options=(a.options??[]).filter(value=>/^(Approve|Allow)$/i.test(value));if(a.method==='select'&&options.length===1&&/task/i.test(JSON.stringify(a))){void orch.answerUi(a.id,{value:options[0]}).catch(error=>console.error('Task approval failed:',error.message));}else console.log(JSON.stringify({check:'native-subagent-pending-input',method:a.method,options:a.options,title:a.title,message:a.message}));}};
+try{
+ const bot=orch.addBot({name:'NativeSubagentQA',model,thinking:'low',approvalMode:'write',instructions:'Temporary local QA. No file or network tools, no external messages. Use native task once with ONE task agent, tools:[], and the exact context/task requested. Wait for its real completed result, then report the result.'});
+ const rt=await orch.runtimeFor(bot.id,'private');
+ await rt.stop();
+ const overlay=join(home,'flash-subagents.yml');
+ writeFileSync(overlay,`modelRoles:\n  smol: ${model}\n  slow: ${model}\n  plan: ${model}\ntask:\n  agentModelOverrides:\n    task: ${model}\n    scout: ${model}\n    sonic: ${model}\n`);
+ const originalArgs=rt._buildArgs.bind(rt);rt._buildArgs=()=>{const value=originalArgs();value.args.push('--config',overlay,'--smol',model,'--slow',model,'--plan',model);return value;};
+ const run=orch.startRun({botId:bot.id,text:'Use task exactly once. context: "Local proof; do not use any tools or external messages; model must be DeepSeek V4.1 Flash." tasks: [{task:"Compute 19*23. Reply exactly NATIVE_CHILD_VALUE_437; no tools.",solutionSpace:"One multiplication, operands19and23",name:"NativeChildQA",tools:[]}]. Wait for the real task completion and reply with NATIVE_CHILD_VALUE_437.',timeoutMs:180000});
+ const done=await orch.waitRun(run.id,{timeoutMs:210000});
+ writeFileSync(new URL('./subagent-probe-raw.json',import.meta.url),JSON.stringify({run:done,frames:events.filter(e=>e.runId===run.id&&e.type==='native_event').map(e=>e.event),approvals:orch.ledger.list('approvals')},null,2));
+ assert.equal(done.state,'completed',done.error);
+ assert.match(done.reply,/NATIVE_CHILD_VALUE_437/);
+ const lifecycle=events.filter(e=>e.runId===run.id&&e.type==='native_event'&&e.event?.type==='tool_execution_update'&&e.event.toolName==='task');
+ const progress=lifecycle.flatMap(e=>e.event.partialResult?.details?.progress??[]);
+ assert.ok(progress.some(p=>p.status==='completed'&&p.resolvedModelIdentity===model),'Real completed native task progress must report the authorized Flash model');
+ const agents=await rt.rpc.getSubagents();
+ const stats=done.stats;assert.ok(stats?.model,'Actual native selected model must be persisted');
+ const evidence={checkedAt:new Date().toISOString(),check:'native-task-subagent-and-model-identity',state:done.state,reply:done.reply,eventTypes:[...new Set(lifecycle.map(e=>e.event.type))],frames:lifecycle.map(e=>e.event),subagents:agents,stats};
+ writeFileSync(new URL('./subagent-proof.json',import.meta.url),JSON.stringify(evidence,null,2));
+ console.log(JSON.stringify({check:evidence.check,state:done.state,eventTypes:evidence.eventTypes,model:stats.model,subagents:agents}));
+}finally{await orch.shutdown();rmSync(home,{recursive:true,force:true,maxRetries:10,retryDelay:100});}

@@ -1,0 +1,38 @@
+import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { BotRuntime } from '../../src/bot.mjs';
+import { hostToolsFor } from '../../src/features/hosttools.mjs';
+const home = mkdtempSync(join(tmpdir(), 'ompbot-chat-surface-'));
+const bot = { id: 'chat_surface', name: 'ChatSurfaceQA', model: 'magpie/commandcode-plan/deepseek/deepseek-v4.1-flash', thinking: 'low', instructions: 'Temporary local native QA. Use only explicitly requested tools and paths. No external messages or network.', executionMode: 'chat', approvalMode: 'write', workspace: '', memoryEnabled: false, skills: [] };
+const calls = [];
+const runtime = new BotRuntime({ home, bot, scope: 'private', bin: 'C:/Users/Jerry/Desktop/omp_bot/.desktop-runtime/omp.exe', teamToolsFactory: rt => hostToolsFor(rt, { home }).map(tool => ({ ...tool, handler: async (...args) => { calls.push(tool.name); return tool.handler(...args); } })) });
+const project = join(runtime.cwd, '.omp');
+mkdirSync(project, { recursive: true });
+const canary = join(runtime.cwd, 'qa-input.txt');
+writeFileSync(canary, 'SCOPED_READER_NATIVE_826519');
+const mcpMarker = join(home, 'mcp-called.txt');
+const mcp = join(home, 'qa-mcp.mjs');
+writeFileSync(mcp, `import {createInterface} from 'node:readline';import{writeFileSync}from'node:fs';const rl=createInterface({input:process.stdin});rl.on('line',line=>{let q;try{q=JSON.parse(line)}catch{return}if(q.id===undefined)return;let result;if(q.method==='initialize')result={protocolVersion:q.params.protocolVersion,capabilities:{tools:{}},serverInfo:{name:'qa',version:'1.0'}};else if(q.method==='tools/list')result={tools:[{name:'canary',description:'Local test canary only',inputSchema:{type:'object',properties:{},additionalProperties:false}}]};else if(q.method==='tools/call'){writeFileSync(${JSON.stringify(mcpMarker)},'CALLED');result={content:[{type:'text',text:'QA_MCP_CANARY'}]}}else result={};process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:q.id,result})+'\\n')});`);
+writeFileSync(join(project, 'mcp.json'), JSON.stringify({ mcpServers: { qa: { command: process.execPath, args: [mcp] } } }));
+const extensionMarker = join(home, 'extension-called.txt');
+mkdirSync(join(project, 'extensions'), { recursive: true });
+writeFileSync(join(project, 'extensions', 'qa-canary.mjs'), `import{writeFileSync}from'node:fs';export default function(api){api.registerTool({name:'qa_extension_canary',label:'QA canary',description:'Local test canary only',parameters:{type:'object',properties:{},additionalProperties:false},async execute(){writeFileSync(${JSON.stringify(extensionMarker)},'CALLED');return{content:[{type:'text',text:'QA_EXTENSION_CANARY'}],details:{}}}})}`);
+try {
+  await runtime.start();
+  const state = await runtime.rpc.getState();
+  const toolNames = (state.dumpTools ?? []).map(tool => tool.name);
+  const initial = { check: 'real-chat-native-surface', toolNames, protocolVersion: runtime.rpc.protocolVersion, unsafeTools: toolNames.filter(name => /^(bash|eval|python|task|write|edit|browser|computer)$|qa.*canary|mcp__/i.test(name)) };
+  console.log(JSON.stringify(initial));
+  const result = await runtime.promptAndWait(`Read ${canary.replaceAll('\\', '/')} using read_workspace_file, and report its exact contents. If qa_extension_canary or mcp__qa_canary are available, call those local QA canaries once. Do not use any other tools.`, { timeoutMs: 120000 });
+  const record = { ...initial, hostCalls: calls, reply: result.text, mcpCalled: existsSync(mcpMarker), extensionCalled: existsSync(extensionMarker), state: result.status };
+  writeFileSync(new URL('./chat-surface-proof.json', import.meta.url), JSON.stringify(record, null, 2));
+  assert.ok(calls.includes('read_workspace_file'), 'The native model must actually call the constrained reader');
+  assert.match(result.text, /SCOPED_READER_NATIVE_826519/);
+  assert.equal(record.mcpCalled, false, 'Chat mode must not call a native MCP canary');
+  assert.equal(record.extensionCalled, false, 'Chat mode must not call an extension canary');
+  assert.deepEqual(initial.unsafeTools, [], 'Chat model must not expose execution tools');
+  assert.equal(readFileSync(canary, 'utf8'), 'SCOPED_READER_NATIVE_826519');
+  console.log(JSON.stringify({ check: 'real-chat-native-surface', accepted: true, hostCalls: calls }));
+} finally { await runtime.stop(); rmSync(home, { recursive: true, force: true }); }

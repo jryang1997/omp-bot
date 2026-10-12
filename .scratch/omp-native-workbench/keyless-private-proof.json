@@ -1,0 +1,8 @@
+{
+  "checkedAt": "2026-10-12T11:16:33.818Z",
+  "check": "actual-keyless-model-private-agent-dir",
+  "accepted": true,
+  "model": "magpie/workbuddy-ai/deepseek-v4.1-flash",
+  "authDatabaseCopied": false,
+  "brokerEnabled": false
+}

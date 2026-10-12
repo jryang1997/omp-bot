@@ -1,0 +1,63 @@
+{
+  "checkedAt": "2026-10-12T09:08:04.663Z",
+  "observations": [
+    {
+      "check": "actual-model-and-usage",
+      "runId": "run_mv51416k_12fe3cff",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "cost": 0.00033565200000000003,
+      "tokens": 9123
+    },
+    {
+      "check": "actual-model-and-usage",
+      "runId": "run_mv51451n_e7a2d4a8",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "cost": 0.000135228,
+      "tokens": 9192
+    }
+  ],
+  "resources": [
+    {
+      "bots": 1,
+      "pids": [
+        19392
+      ],
+      "workingSetBytes": 296869888,
+      "cumulativeCpuSeconds": 1.8125,
+      "elapsedFromFirstMs": 1196
+    },
+    {
+      "bots": 4,
+      "pids": [
+        12336,
+        19392,
+        32748,
+        36248
+      ],
+      "workingSetBytes": 1251209216,
+      "cumulativeCpuSeconds": 6.734375,
+      "elapsedFromFirstMs": 5191
+    },
+    {
+      "bots": 12,
+      "pids": [
+        9020,
+        12336,
+        19392,
+        30848,
+        32748,
+        36248,
+        36500,
+        36936,
+        37144,
+        37648,
+        38248,
+        38812
+      ],
+      "workingSetBytes": 3635724288,
+      "cumulativeCpuSeconds": 21.765625,
+      "elapsedFromFirstMs": 14395
+    }
+  ],
+  "limits": "Runtime idle working set after sequential startup; includes two native text turns for the first bot; no claim of throughput speedup or peak memory."
+}

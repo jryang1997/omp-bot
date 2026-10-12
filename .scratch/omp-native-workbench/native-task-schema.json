@@ -1,0 +1,175 @@
+{
+  "model": {
+    "id": "commandcode-plan/deepseek/deepseek-v4.1-flash",
+    "name": "DeepSeek V4.1 Flash · Command Code Plan",
+    "api": "openai-completions",
+    "provider": "magpie",
+    "baseUrl": "http://127.0.0.1:3425/v1",
+    "reasoning": true,
+    "thinking": {
+      "mode": "effort",
+      "efforts": [
+        "low",
+        "high",
+        "max"
+      ]
+    },
+    "input": [
+      "text",
+      "image"
+    ],
+    "cost": {
+      "input": 0.3,
+      "output": 1.2,
+      "cacheRead": 0.006,
+      "cacheWrite": 0
+    },
+    "contextWindow": 1000000,
+    "maxTokens": 200000,
+    "compat": {
+      "supportsStore": true,
+      "supportsDeveloperRole": false,
+      "supportsMultipleSystemMessages": true,
+      "supportsReasoningEffort": true,
+      "supportsReasoningParams": true,
+      "supportsSamplingParams": true,
+      "supportsPenaltyAndStopParams": true,
+      "reasoningEffortMap": {},
+      "supportsUsageInStreaming": true,
+      "alwaysSendMaxTokens": false,
+      "disableReasoningOnForcedToolChoice": false,
+      "disableReasoningOnToolChoice": true,
+      "disableReasoningWithTools": false,
+      "supportsToolChoice": true,
+      "supportsForcedToolChoice": true,
+      "supportsNamedToolChoice": true,
+      "maxTokensField": "max_completion_tokens",
+      "requiresToolResultName": false,
+      "requiresAssistantAfterToolResult": false,
+      "requiresThinkingAsText": false,
+      "requiresMistralToolIds": false,
+      "thinkingFormat": "openai",
+      "reasoningDisableMode": "lowest-effort",
+      "omitReasoningEffort": false,
+      "includeEncryptedReasoning": true,
+      "filterReasoningHistory": false,
+      "reasoningContentField": "reasoning_content",
+      "requiresReasoningContentForToolCalls": true,
+      "requiresReasoningContentForAllAssistantTurns": true,
+      "allowsSyntheticReasoningContentForToolCalls": false,
+      "replayReasoningContent": true,
+      "qwenPreserveThinking": false,
+      "qwenTemplateReasoningEffort": false,
+      "requiresAssistantContentForToolCalls": false,
+      "supportsPromptCacheBreakpoints": false,
+      "isOpenRouterHost": false,
+      "wireModelIdMode": "raw",
+      "isVercelGatewayHost": false,
+      "supportsStrictMode": false,
+      "toolStrictMode": "mixed",
+      "toolSchemaFlavor": "grammar",
+      "streamFirstEventTimeoutMs": 0,
+      "streamIdleTimeoutMs": 300000,
+      "stripDeepseekSpecialTokens": false,
+      "streamMarkupHealingPattern": "dsml",
+      "reasoningDeltasMayBeCumulative": false,
+      "emptyLengthFinishIsContextError": false,
+      "usesOpenAIToolCallIdLimit": false,
+      "promptCacheSessionHeader": "x-session-affinity",
+      "dropThinkingWhenReasoningEffort": false,
+      "nativeKimiK3Reasoning": false,
+      "zaiReasoningEffortDialect": false,
+      "clampOutputToModelMax": true,
+      "stripImageInput": false,
+      "thinkingLoopGuard": "deepseek",
+      "rejectRootObjectUnion": false,
+      "retryWithoutStrictOnGrammarError": false,
+      "supportsPromptCacheKey": false
+    },
+    "tokenizer": "deepseek-v3",
+    "identity": {
+      "class": "deepseek",
+      "family": "flash",
+      "revision": "4.1.0"
+    },
+    "requiresGlyphTokenization": false,
+    "supportsComputerUse": false,
+    "compatConfig": {
+      "promptCacheSessionHeader": "x-session-affinity"
+    },
+    "int": 39.5,
+    "tps": 217.1
+  },
+  "task": {
+    "name": "task",
+    "description": "Spawn `tasks[]` concurrently; IDs return immediately.\n\n# Results\n`outputSchema` parsed payload, even invalid: `agent://<id>` (field `/<field>`, nested `/reports/0/data`); invalid preview inline.\n\n# Delegation\nUse most specific agent. Read-only research MUST use `scout` only when files unknown. Prefer one agent to investigate + edit. Omit `agent` only for default (`task`); NEVER specify it.\nShared edits need one integration owner; siblings coordinate via `write agent://<id>`. Set interfaces in `context`. Every task MUST skip build/lint/tests/formatters mid-flight; run once afterward.\n\n# Inputs\n`name`: CamelCase ≤32, auto-generated if omitted; address agent by name. `outputSchema` overrides agent/session schemas.\n`solutionSpace`: describe how open-ended the child's problem is: whether the fix or design is given, or which causes or designs remain open. Volume of work does not widen it; NEVER mention sibling agents or coordination. (`one fix: rename, names given`; `one fix: slice end in paginate`; `single-flight cache load; races easy to miss`; `several retry API shapes; error classes to choose`; `deadlock cause open, no repro`)\n`tools`: eval-defined, run in your kernel.\n`schemaMode`: default permissive warns after retries; strict fails.\nChildren start blank; parent IRC steers immediately; large payloads via `local://<path>`, NEVER inline.\n\n# Format\n`context`: shared (`# Goal`, `# Contract` interfaces); NEVER repeat per task.\n`task`: self-contained (`# Target` files/non-goals, `# Change` steps/APIs, `# Acceptance` observable result).\n\n# Available Agents\n- `comment-sicko`: Compatibility target for the imported no-comments workflow. Audits comments and suppressions within an explicit scope and returns deletion or refactor findings without editing files.\n- `poteto-agent`: Compatibility target for imported poteto-mode delegation. Runs one bounded implementation brief with the active playbook and no child delegation.\n- `scout` (READ-ONLY; investigation only, no edits): MUST be used for exploratory codebase research, rapid code analysis, and broad pattern searches. Fast read-only scout returning compressed context for handoff.\n- `reviewer`: Code review specialist for quality/security analysis\n- `security-reviewer`: Read-only security specialist for evidence-backed repository vulnerability discovery\n- `task`: General-purpose subagent with full capabilities for delegated multi-step tasks\n- `sonic`: Low-reasoning agent for strictly mechanical updates or data collection only",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "context": {
+          "type": "string"
+        },
+        "tasks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "task": {
+                "type": "string"
+              },
+              "solutionSpace": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "agent": {
+                "type": "string",
+                "default": "task"
+              },
+              "outputSchema": {
+                "anyOf": [
+                  {
+                    "type": "object"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "schemaMode": {
+                "enum": [
+                  "permissive",
+                  "strict"
+                ],
+                "type": "string"
+              },
+              "tools": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "task",
+              "solutionSpace"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "context",
+        "tasks"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

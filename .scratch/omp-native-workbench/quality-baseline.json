@@ -1,0 +1,1307 @@
+{
+  "sampledAt": "2026-10-12T08:29:48.044Z",
+  "samples": [
+    {
+      "sample": 1,
+      "kind": "research",
+      "session": "first-process-and-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zhyxn_bae71ff3",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 21757,
+      "firstNativeEventMs": 1197,
+      "firstTextMs": 4790,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 4807,
+          "tokensOut": 716,
+          "reasoning": 8,
+          "totalTokens": 41107,
+          "cost": 0.002514804,
+          "requests": 1,
+          "toolCalls": 3
+        },
+        "at": 1791793373902
+      },
+      "artifactHash": "7ccdb1ca646387dbef8ab71300059214596efe402b078a4b08283cd99acb38f5"
+    },
+    {
+      "sample": 2,
+      "kind": "development",
+      "session": "first-process-and-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zifqh_4950f5ff",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 15171,
+      "firstNativeEventMs": 938,
+      "firstTextMs": 14326,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 2047,
+          "tokensOut": 395,
+          "reasoning": 70,
+          "totalTokens": 28810,
+          "cost": 0.001246308,
+          "requests": 1,
+          "toolCalls": 2
+        },
+        "at": 1791793389093
+      },
+      "artifactHash": "9217da4ad1472a0eac96dcead2ba8f3e86f43208d880b78b5748fca602adaa20"
+    },
+    {
+      "sample": 3,
+      "kind": "data",
+      "session": "first-process-and-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zirga_513aa1be",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 12377,
+      "firstNativeEventMs": 943,
+      "firstTextMs": 11222,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 2042,
+          "tokensOut": 474,
+          "reasoning": 137,
+          "totalTokens": 29012,
+          "cost": 0.001340376,
+          "requests": 1,
+          "toolCalls": 2
+        },
+        "at": 1791793401404
+      },
+      "artifactHash": "b7f76c16766234768d09af03afff56075d64fea383f5355a60ed0f47a2953f68"
+    },
+    {
+      "sample": 4,
+      "kind": "research",
+      "session": "continued-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zj107_98b4a978",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 21478,
+      "firstNativeEventMs": 4,
+      "firstTextMs": 20382,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 2131,
+          "tokensOut": 714,
+          "reasoning": 14,
+          "totalTokens": 48157,
+          "cost": 0.0017679719999999996,
+          "requests": 1,
+          "toolCalls": 3
+        },
+        "at": 1791793423013
+      },
+      "artifactHash": "b60b23a6fce28d9777c227a1adf051d70201b09d25b0890b28235229cce1e337"
+    },
+    {
+      "sample": 5,
+      "kind": "development",
+      "session": "continued-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zjhll_311ad81e",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 13433,
+      "firstNativeEventMs": 17,
+      "firstTextMs": 7494,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 860,
+          "tokensOut": 361,
+          "reasoning": 20,
+          "totalTokens": 30661,
+          "cost": 0.0008678399999999997,
+          "requests": 1,
+          "toolCalls": 2
+        },
+        "at": 1791793436358
+      },
+      "artifactHash": "9217da4ad1472a0eac96dcead2ba8f3e86f43208d880b78b5748fca602adaa20"
+    },
+    {
+      "sample": 6,
+      "kind": "data",
+      "session": "continued-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zjryh_d6bfe620",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 10715,
+      "firstNativeEventMs": 5,
+      "firstTextMs": 10080,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 810,
+          "tokensOut": 330,
+          "reasoning": 27,
+          "totalTokens": 30836,
+          "cost": 0.0008171759999999998,
+          "requests": 1,
+          "toolCalls": 2
+        },
+        "at": 1791793447156
+      },
+      "artifactHash": "a0bf18093150799971e93711488cf9c7297326273092a64d106278e587aeeb50"
+    },
+    {
+      "sample": 7,
+      "kind": "research",
+      "session": "new-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zk0bw_3ebf8ee1",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 12232,
+      "firstNativeEventMs": 17,
+      "firstTextMs": 11017,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 2247,
+          "tokensOut": 487,
+          "reasoning": 12,
+          "totalTokens": 29870,
+          "cost": 0.0014213160000000002,
+          "requests": 1,
+          "toolCalls": 2
+        },
+        "at": 1791793459487
+      },
+      "artifactHash": "614b613104aa5f28d13ed21a3130fe204e090169b64cea1f346de7fa1f25826c"
+    },
+    {
+      "sample": 8,
+      "kind": "development",
+      "session": "new-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zk9v4_f6c4e435",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 21329,
+      "firstNativeEventMs": 17,
+      "firstTextMs": 3602,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 1591,
+          "tokensOut": 524,
+          "reasoning": 154,
+          "totalTokens": 28739,
+          "cost": 0.001265844,
+          "requests": 1,
+          "toolCalls": 2
+        },
+        "at": 1791793480856
+      },
+      "artifactHash": "ae7f2ae730cc4202b62b6e82059ad063b7d2986626b98bbd9383b49622799d1e"
+    },
+    {
+      "sample": 9,
+      "kind": "data",
+      "session": "new-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zkqee_86addae6",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 15428,
+      "firstNativeEventMs": 7,
+      "firstTextMs": 15212,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 1806,
+          "tokensOut": 494,
+          "reasoning": 73,
+          "totalTokens": 38524,
+          "cost": 0.0013519439999999999,
+          "requests": 1,
+          "toolCalls": 3
+        },
+        "at": 1791793496479
+      },
+      "artifactHash": "f2fadfd5302aed465c18dc8dc0661154561fe853fcf4197b44c424dcc0e01cf1"
+    },
+    {
+      "sample": 10,
+      "kind": "research",
+      "session": "continued-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zl2bp_20c5f114",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 14584,
+      "firstNativeEventMs": 18,
+      "firstTextMs": 13327,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 1470,
+          "tokensOut": 587,
+          "reasoning": 43,
+          "totalTokens": 33801,
+          "cost": 0.0013358639999999995,
+          "requests": 1,
+          "toolCalls": 2
+        },
+        "at": 1791793511036
+      },
+      "artifactHash": "6cc14487d1ea2cacbf8eece255b15cfa6787e0aaac78e68c89c8634420428eea"
+    },
+    {
+      "sample": 11,
+      "kind": "development",
+      "session": "continued-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zldl6_452d4538",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 12987,
+      "firstNativeEventMs": 16,
+      "firstTextMs": 11922,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 927,
+          "tokensOut": 439,
+          "reasoning": 42,
+          "totalTokens": 30934,
+          "cost": 0.0009823079999999999,
+          "requests": 1,
+          "toolCalls": 2
+        },
+        "at": 1791793524061
+      },
+      "artifactHash": "ae7f2ae730cc4202b62b6e82059ad063b7d2986626b98bbd9383b49622799d1e"
+    },
+    {
+      "sample": 12,
+      "kind": "data",
+      "session": "continued-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zlnmb_b21aaaf3",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 16032,
+      "firstNativeEventMs": 17,
+      "firstTextMs": 15468,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 892,
+          "tokensOut": 453,
+          "reasoning": 22,
+          "totalTokens": 41409,
+          "cost": 0.001051584,
+          "requests": 1,
+          "toolCalls": 3
+        },
+        "at": 1791793540074
+      },
+      "artifactHash": "4f15f497e7abc3bc182332d5db1f645bd4f5671ccd945e1073381422e52514df"
+    },
+    {
+      "sample": 13,
+      "kind": "research",
+      "session": "new-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zm03i_c2fcecc4",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 13876,
+      "firstNativeEventMs": 16,
+      "firstTextMs": 3159,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 1471,
+          "tokensOut": 614,
+          "reasoning": 9,
+          "totalTokens": 30117,
+          "cost": 0.0013462919999999998,
+          "requests": 1,
+          "toolCalls": 2
+        },
+        "at": 1791793554074
+      },
+      "artifactHash": "b0b1af1eb92b505ea5186571324ed635385af2959122a908f36c5ad0704cbce6"
+    },
+    {
+      "sample": 14,
+      "kind": "development",
+      "session": "new-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zmawe_c1199fc9",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 11404,
+      "firstNativeEventMs": 18,
+      "firstTextMs": 10279,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 752,
+          "tokensOut": 476,
+          "reasoning": 103,
+          "totalTokens": 28748,
+          "cost": 0.00096192,
+          "requests": 1,
+          "toolCalls": 2
+        },
+        "at": 1791793565675
+      },
+      "artifactHash": "8090ddebc764a86cee8e2c026f3ea3341ac1e67ed2ff3d1389e4c0ee13459d00"
+    },
+    {
+      "sample": 15,
+      "kind": "data",
+      "session": "new-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zmjsj_9f3be10b",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 17119,
+      "firstNativeEventMs": 18,
+      "firstTextMs": 6997,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 749,
+          "tokensOut": 398,
+          "reasoning": 59,
+          "totalTokens": 28667,
+          "cost": 0.0008674199999999999,
+          "requests": 1,
+          "toolCalls": 2
+        },
+        "at": 1791793582833
+      },
+      "artifactHash": "6bae5e78ec725fcb4b421d84eba8056c69fa8d6c627b88c18a8085dd68ad5bd1"
+    },
+    {
+      "sample": 16,
+      "kind": "research",
+      "session": "continued-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zmx0g_bc29bc4a",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 11996,
+      "firstNativeEventMs": 17,
+      "firstTextMs": 11177,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 1491,
+          "tokensOut": 580,
+          "reasoning": 0,
+          "totalTokens": 34199,
+          "cost": 0.0013360680000000002,
+          "requests": 1,
+          "toolCalls": 2
+        },
+        "at": 1791793594863
+      },
+      "artifactHash": "2df783ded59200c298f463cb07c7ecd5c3630df56bc1a5091168fb074ffe1d52"
+    },
+    {
+      "sample": 17,
+      "kind": "development",
+      "session": "continued-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zn6a2_19f2af2a",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 13292,
+      "firstNativeEventMs": 18,
+      "firstTextMs": 12522,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 819,
+          "tokensOut": 389,
+          "reasoning": 14,
+          "totalTokens": 30776,
+          "cost": 0.0008899079999999998,
+          "requests": 1,
+          "toolCalls": 2
+        },
+        "at": 1791793608223
+      },
+      "artifactHash": "8090ddebc764a86cee8e2c026f3ea3341ac1e67ed2ff3d1389e4c0ee13459d00"
+    },
+    {
+      "sample": 18,
+      "kind": "data",
+      "session": "continued-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zngjo_e55bdd7a",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 12335,
+      "firstNativeEventMs": 17,
+      "firstTextMs": 11622,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 698,
+          "tokensOut": 340,
+          "reasoning": 27,
+          "totalTokens": 30478,
+          "cost": 0.0007940399999999999,
+          "requests": 1,
+          "toolCalls": 2
+        },
+        "at": 1791793620505
+      },
+      "artifactHash": "96701bad4795dad7afd793e36e0a8f6d14e709073d0084a8c2dab55374866e0d"
+    },
+    {
+      "sample": 19,
+      "kind": "research",
+      "session": "new-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4znq5u_c4f189a6",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 11774,
+      "firstNativeEventMs": 18,
+      "firstTextMs": 10348,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 1391,
+          "tokensOut": 545,
+          "reasoning": 6,
+          "totalTokens": 29968,
+          "cost": 0.001239492,
+          "requests": 1,
+          "toolCalls": 2
+        },
+        "at": 1791793632465
+      },
+      "artifactHash": "b2daf9b1f64aee9d67e8ca7ccdc22c690e1f586167affecf548af1e903057fd6"
+    },
+    {
+      "sample": 20,
+      "kind": "development",
+      "session": "new-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4znzbt_8c4a0d00",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 16804,
+      "firstNativeEventMs": 17,
+      "firstTextMs": 3171,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 752,
+          "tokensOut": 625,
+          "reasoning": 185,
+          "totalTokens": 28897,
+          "cost": 0.00114072,
+          "requests": 1,
+          "toolCalls": 2
+        },
+        "at": 1791793649345
+      },
+      "artifactHash": "8090ddebc764a86cee8e2c026f3ea3341ac1e67ed2ff3d1389e4c0ee13459d00"
+    },
+    {
+      "sample": 21,
+      "kind": "data",
+      "session": "new-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zoce0_0383b9a4",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 16537,
+      "firstNativeEventMs": 18,
+      "firstTextMs": 15435,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 1710,
+          "tokensOut": 579,
+          "reasoning": 87,
+          "totalTokens": 38641,
+          "cost": 0.0014259119999999999,
+          "requests": 1,
+          "toolCalls": 3
+        },
+        "at": 1791793666104
+      },
+      "artifactHash": "f7ba4554690763373db6da59cd95ad4e30d7efb3bb0be6a2df1f3c458dd90245"
+    },
+    {
+      "sample": 22,
+      "kind": "research",
+      "session": "continued-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zop5b_03e85cb4",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 12846,
+      "firstNativeEventMs": 9,
+      "firstTextMs": 11550,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 1551,
+          "tokensOut": 595,
+          "reasoning": 34,
+          "totalTokens": 34018,
+          "cost": 0.0013705319999999998,
+          "requests": 1,
+          "toolCalls": 2
+        },
+        "at": 1791793678842
+      },
+      "artifactHash": "ed9fd2facf852ed73d5ea1a17c7dd97d093a45d324b22cfe556f1418500c7397"
+    },
+    {
+      "sample": 23,
+      "kind": "development",
+      "session": "continued-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zoz2y_48fcf38e",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 14236,
+      "firstNativeEventMs": 17,
+      "firstTextMs": 13159,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 1070,
+          "tokensOut": 459,
+          "reasoning": 43,
+          "totalTokens": 31353,
+          "cost": 0.0010507439999999997,
+          "requests": 1,
+          "toolCalls": 2
+        },
+        "at": 1791793693139
+      },
+      "artifactHash": "8090ddebc764a86cee8e2c026f3ea3341ac1e67ed2ff3d1389e4c0ee13459d00"
+    },
+    {
+      "sample": 24,
+      "kind": "data",
+      "session": "continued-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zpa2s_02c55c34",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 17086,
+      "firstNativeEventMs": 17,
+      "firstTextMs": 16461,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 1022,
+          "tokensOut": 490,
+          "reasoning": 27,
+          "totalTokens": 41832,
+          "cost": 0.00113652,
+          "requests": 1,
+          "toolCalls": 3
+        },
+        "at": 1791793710218
+      },
+      "artifactHash": "6d2e8c06a1abf827142c6756646f67f1d4a90e74ee04d51968f1442a4a1d59b9"
+    },
+    {
+      "sample": 25,
+      "kind": "research",
+      "session": "new-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zpnd8_1bfa114c",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 14518,
+      "firstNativeEventMs": 18,
+      "firstTextMs": 13489,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 1404,
+          "tokensOut": 547,
+          "reasoning": 6,
+          "totalTokens": 29983,
+          "cost": 0.001245792,
+          "requests": 1,
+          "toolCalls": 2
+        },
+        "at": 1791793724849
+      },
+      "artifactHash": "721c0c5ccf6575013090f06271e699ce4aea20852c5d15dc843154470142fa13"
+    },
+    {
+      "sample": 26,
+      "kind": "development",
+      "session": "new-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zpynz_2e167815",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 10905,
+      "firstNativeEventMs": 5,
+      "firstTextMs": 2362,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 777,
+          "tokensOut": 418,
+          "reasoning": 111,
+          "totalTokens": 28715,
+          "cost": 0.00089982,
+          "requests": 1,
+          "toolCalls": 2
+        },
+        "at": 1791793735931
+      },
+      "artifactHash": "42282b2503abef6a0822c79fecb900ffc4b5376c85e3b9eec65d34533d7484a4"
+    },
+    {
+      "sample": 27,
+      "kind": "data",
+      "session": "new-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zq773_e13e5620",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 13288,
+      "firstNativeEventMs": 17,
+      "firstTextMs": 12388,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 889,
+          "tokensOut": 608,
+          "reasoning": 236,
+          "totalTokens": 29017,
+          "cost": 0.0011614199999999998,
+          "requests": 1,
+          "toolCalls": 2
+        },
+        "at": 1791793749427
+      },
+      "artifactHash": "35f8d85ada0a4addc3fa8c016af6a76c4d4d59d5580b33cb3466fd3d6ec7e04a"
+    },
+    {
+      "sample": 28,
+      "kind": "research",
+      "session": "continued-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zqhgm_4c0fe82f",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 13411,
+      "firstNativeEventMs": 19,
+      "firstTextMs": 12128,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 1523,
+          "tokensOut": 579,
+          "reasoning": 13,
+          "totalTokens": 33974,
+          "cost": 0.0013429319999999998,
+          "requests": 1,
+          "toolCalls": 2
+        },
+        "at": 1791793762752
+      },
+      "artifactHash": "517ce3d7546bb5f66d4d963e114886fdfc93d1ee984fa3a2d31ddb438bb0c673"
+    },
+    {
+      "sample": 29,
+      "kind": "development",
+      "session": "continued-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zqrt6_95107675",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 11336,
+      "firstNativeEventMs": 4,
+      "firstTextMs": 10858,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 757,
+          "tokensOut": 312,
+          "reasoning": 16,
+          "totalTokens": 30509,
+          "cost": 0.0007781399999999999,
+          "requests": 1,
+          "toolCalls": 2
+        },
+        "at": 1791793774146
+      },
+      "artifactHash": "42282b2503abef6a0822c79fecb900ffc4b5376c85e3b9eec65d34533d7484a4"
+    },
+    {
+      "sample": 30,
+      "kind": "data",
+      "session": "continued-session",
+      "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+      "runId": "run_mv4zr0kt_8b9ed824",
+      "state": "completed",
+      "accepted": true,
+      "totalMs": 13787,
+      "firstNativeEventMs": 18,
+      "firstTextMs": 13094,
+      "stats": {
+        "model": null,
+        "delta": {
+          "tokensIn": 963,
+          "tokensOut": 380,
+          "reasoning": 28,
+          "totalTokens": 31167,
+          "cost": 0.000923844,
+          "requests": 1,
+          "toolCalls": 2
+        },
+        "at": 1791793787890
+      },
+      "artifactHash": "45515bed7d90d5db7a5364365adcf194aa028d33ad2037643485b856152397bd"
+    }
+  ],
+  "usage": {
+    "perRun": [
+      {
+        "runId": "run_mv4zhyxn_bae71ff3",
+        "model": null,
+        "tokensIn": 4807,
+        "tokensOut": 716,
+        "reasoning": 8,
+        "totalTokens": 41107,
+        "cost": 0.002514804,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 3,
+        "updatedAt": 1791793373902
+      },
+      {
+        "runId": "run_mv4zifqh_4950f5ff",
+        "model": null,
+        "tokensIn": 2047,
+        "tokensOut": 395,
+        "reasoning": 70,
+        "totalTokens": 28810,
+        "cost": 0.001246308,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 2,
+        "updatedAt": 1791793389093
+      },
+      {
+        "runId": "run_mv4zirga_513aa1be",
+        "model": null,
+        "tokensIn": 2042,
+        "tokensOut": 474,
+        "reasoning": 137,
+        "totalTokens": 29012,
+        "cost": 0.001340376,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 2,
+        "updatedAt": 1791793401404
+      },
+      {
+        "runId": "run_mv4zj107_98b4a978",
+        "model": null,
+        "tokensIn": 2131,
+        "tokensOut": 714,
+        "reasoning": 14,
+        "totalTokens": 48157,
+        "cost": 0.0017679719999999996,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 3,
+        "updatedAt": 1791793423013
+      },
+      {
+        "runId": "run_mv4zjhll_311ad81e",
+        "model": null,
+        "tokensIn": 860,
+        "tokensOut": 361,
+        "reasoning": 20,
+        "totalTokens": 30661,
+        "cost": 0.0008678399999999997,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 2,
+        "updatedAt": 1791793436358
+      },
+      {
+        "runId": "run_mv4zjryh_d6bfe620",
+        "model": null,
+        "tokensIn": 810,
+        "tokensOut": 330,
+        "reasoning": 27,
+        "totalTokens": 30836,
+        "cost": 0.0008171759999999998,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 2,
+        "updatedAt": 1791793447156
+      },
+      {
+        "runId": "run_mv4zk0bw_3ebf8ee1",
+        "model": null,
+        "tokensIn": 2247,
+        "tokensOut": 487,
+        "reasoning": 12,
+        "totalTokens": 29870,
+        "cost": 0.0014213160000000002,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 2,
+        "updatedAt": 1791793459487
+      },
+      {
+        "runId": "run_mv4zk9v4_f6c4e435",
+        "model": null,
+        "tokensIn": 1591,
+        "tokensOut": 524,
+        "reasoning": 154,
+        "totalTokens": 28739,
+        "cost": 0.001265844,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 2,
+        "updatedAt": 1791793480856
+      },
+      {
+        "runId": "run_mv4zkqee_86addae6",
+        "model": null,
+        "tokensIn": 1806,
+        "tokensOut": 494,
+        "reasoning": 73,
+        "totalTokens": 38524,
+        "cost": 0.0013519439999999999,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 3,
+        "updatedAt": 1791793496479
+      },
+      {
+        "runId": "run_mv4zl2bp_20c5f114",
+        "model": null,
+        "tokensIn": 1470,
+        "tokensOut": 587,
+        "reasoning": 43,
+        "totalTokens": 33801,
+        "cost": 0.0013358639999999995,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 2,
+        "updatedAt": 1791793511036
+      },
+      {
+        "runId": "run_mv4zldl6_452d4538",
+        "model": null,
+        "tokensIn": 927,
+        "tokensOut": 439,
+        "reasoning": 42,
+        "totalTokens": 30934,
+        "cost": 0.0009823079999999999,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 2,
+        "updatedAt": 1791793524061
+      },
+      {
+        "runId": "run_mv4zlnmb_b21aaaf3",
+        "model": null,
+        "tokensIn": 892,
+        "tokensOut": 453,
+        "reasoning": 22,
+        "totalTokens": 41409,
+        "cost": 0.001051584,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 3,
+        "updatedAt": 1791793540074
+      },
+      {
+        "runId": "run_mv4zm03i_c2fcecc4",
+        "model": null,
+        "tokensIn": 1471,
+        "tokensOut": 614,
+        "reasoning": 9,
+        "totalTokens": 30117,
+        "cost": 0.0013462919999999998,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 2,
+        "updatedAt": 1791793554074
+      },
+      {
+        "runId": "run_mv4zmawe_c1199fc9",
+        "model": null,
+        "tokensIn": 752,
+        "tokensOut": 476,
+        "reasoning": 103,
+        "totalTokens": 28748,
+        "cost": 0.00096192,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 2,
+        "updatedAt": 1791793565675
+      },
+      {
+        "runId": "run_mv4zmjsj_9f3be10b",
+        "model": null,
+        "tokensIn": 749,
+        "tokensOut": 398,
+        "reasoning": 59,
+        "totalTokens": 28667,
+        "cost": 0.0008674199999999999,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 2,
+        "updatedAt": 1791793582833
+      },
+      {
+        "runId": "run_mv4zmx0g_bc29bc4a",
+        "model": null,
+        "tokensIn": 1491,
+        "tokensOut": 580,
+        "reasoning": 0,
+        "totalTokens": 34199,
+        "cost": 0.0013360680000000002,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 2,
+        "updatedAt": 1791793594863
+      },
+      {
+        "runId": "run_mv4zn6a2_19f2af2a",
+        "model": null,
+        "tokensIn": 819,
+        "tokensOut": 389,
+        "reasoning": 14,
+        "totalTokens": 30776,
+        "cost": 0.0008899079999999998,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 2,
+        "updatedAt": 1791793608223
+      },
+      {
+        "runId": "run_mv4zngjo_e55bdd7a",
+        "model": null,
+        "tokensIn": 698,
+        "tokensOut": 340,
+        "reasoning": 27,
+        "totalTokens": 30478,
+        "cost": 0.0007940399999999999,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 2,
+        "updatedAt": 1791793620505
+      },
+      {
+        "runId": "run_mv4znq5u_c4f189a6",
+        "model": null,
+        "tokensIn": 1391,
+        "tokensOut": 545,
+        "reasoning": 6,
+        "totalTokens": 29968,
+        "cost": 0.001239492,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 2,
+        "updatedAt": 1791793632465
+      },
+      {
+        "runId": "run_mv4znzbt_8c4a0d00",
+        "model": null,
+        "tokensIn": 752,
+        "tokensOut": 625,
+        "reasoning": 185,
+        "totalTokens": 28897,
+        "cost": 0.00114072,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 2,
+        "updatedAt": 1791793649345
+      },
+      {
+        "runId": "run_mv4zoce0_0383b9a4",
+        "model": null,
+        "tokensIn": 1710,
+        "tokensOut": 579,
+        "reasoning": 87,
+        "totalTokens": 38641,
+        "cost": 0.0014259119999999999,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 3,
+        "updatedAt": 1791793666104
+      },
+      {
+        "runId": "run_mv4zop5b_03e85cb4",
+        "model": null,
+        "tokensIn": 1551,
+        "tokensOut": 595,
+        "reasoning": 34,
+        "totalTokens": 34018,
+        "cost": 0.0013705319999999998,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 2,
+        "updatedAt": 1791793678842
+      },
+      {
+        "runId": "run_mv4zoz2y_48fcf38e",
+        "model": null,
+        "tokensIn": 1070,
+        "tokensOut": 459,
+        "reasoning": 43,
+        "totalTokens": 31353,
+        "cost": 0.0010507439999999997,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 2,
+        "updatedAt": 1791793693139
+      },
+      {
+        "runId": "run_mv4zpa2s_02c55c34",
+        "model": null,
+        "tokensIn": 1022,
+        "tokensOut": 490,
+        "reasoning": 27,
+        "totalTokens": 41832,
+        "cost": 0.00113652,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 3,
+        "updatedAt": 1791793710218
+      },
+      {
+        "runId": "run_mv4zpnd8_1bfa114c",
+        "model": null,
+        "tokensIn": 1404,
+        "tokensOut": 547,
+        "reasoning": 6,
+        "totalTokens": 29983,
+        "cost": 0.001245792,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 2,
+        "updatedAt": 1791793724849
+      },
+      {
+        "runId": "run_mv4zpynz_2e167815",
+        "model": null,
+        "tokensIn": 777,
+        "tokensOut": 418,
+        "reasoning": 111,
+        "totalTokens": 28715,
+        "cost": 0.00089982,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 2,
+        "updatedAt": 1791793735931
+      },
+      {
+        "runId": "run_mv4zq773_e13e5620",
+        "model": null,
+        "tokensIn": 889,
+        "tokensOut": 608,
+        "reasoning": 236,
+        "totalTokens": 29017,
+        "cost": 0.0011614199999999998,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 2,
+        "updatedAt": 1791793749427
+      },
+      {
+        "runId": "run_mv4zqhgm_4c0fe82f",
+        "model": null,
+        "tokensIn": 1523,
+        "tokensOut": 579,
+        "reasoning": 13,
+        "totalTokens": 33974,
+        "cost": 0.0013429319999999998,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 2,
+        "updatedAt": 1791793762752
+      },
+      {
+        "runId": "run_mv4zqrt6_95107675",
+        "model": null,
+        "tokensIn": 757,
+        "tokensOut": 312,
+        "reasoning": 16,
+        "totalTokens": 30509,
+        "cost": 0.0007781399999999999,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 2,
+        "updatedAt": 1791793774146
+      },
+      {
+        "runId": "run_mv4zr0kt_8b9ed824",
+        "model": null,
+        "tokensIn": 963,
+        "tokensOut": 380,
+        "reasoning": 28,
+        "totalTokens": 31167,
+        "cost": 0.000923844,
+        "costKnown": true,
+        "requests": 1,
+        "toolCalls": 2,
+        "updatedAt": 1791793787890
+      }
+    ],
+    "totals": {
+      "tokensIn": 41419,
+      "tokensOut": 14908,
+      "reasoning": 1626,
+      "totalTokens": 982919,
+      "cost": 0.035874851999999985,
+      "costKnown": true,
+      "requests": 30,
+      "toolCalls": 66
+    },
+    "ledgerAvailable": true,
+    "perRuntime": [
+      {
+        "botId": "bot_mv4zhywc_1",
+        "botName": "Quality_research",
+        "scope": "private",
+        "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+        "tokensIn": 2927,
+        "tokensOut": 1126,
+        "reasoning": 19,
+        "totalTokens": 63957,
+        "cost": 0.0025887239999999997,
+        "requests": 2,
+        "toolCalls": 4,
+        "contextPercent": 1.1565,
+        "raw": {
+          "sessionFile": "C:\\Users\\Jerry\\AppData\\Local\\Temp\\ompbot-quality-7fhh3T\\bots\\bot_mv4zhywc_1\\private\\sessions\\2026-10-12T08-28-30-339Z_01a12f3a-4503-761b-ae1f-a716d4cc2dee.jsonl",
+          "sessionId": "01a12f3a-4503-761b-ae1f-a716d4cc2dee",
+          "userMessages": 2,
+          "assistantMessages": 6,
+          "toolCalls": 4,
+          "toolResults": 4,
+          "totalMessages": 12,
+          "tokens": {
+            "input": 2927,
+            "output": 1126,
+            "reasoning": 19,
+            "cacheRead": 59904,
+            "cacheWrite": 0,
+            "total": 63957
+          },
+          "cost": 0.0025887239999999997,
+          "premiumRequests": 0,
+          "contextUsage": {
+            "tokens": 11565,
+            "contextWindow": 1000000,
+            "percent": 1.1565
+          }
+        }
+      },
+      {
+        "botId": "bot_mv4zhywm_2",
+        "botName": "Quality_development",
+        "scope": "private",
+        "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+        "tokensIn": 1534,
+        "tokensOut": 730,
+        "reasoning": 127,
+        "totalTokens": 59224,
+        "cost": 0.0016779599999999998,
+        "requests": 2,
+        "toolCalls": 4,
+        "contextPercent": 1.0218,
+        "raw": {
+          "sessionFile": "C:\\Users\\Jerry\\AppData\\Local\\Temp\\ompbot-quality-7fhh3T\\bots\\bot_mv4zhywm_2\\private\\sessions\\2026-10-12T08-28-44-994Z_01a12f3a-7e42-753f-9324-8fdf21039279.jsonl",
+          "sessionId": "01a12f3a-7e42-753f-9324-8fdf21039279",
+          "userMessages": 2,
+          "assistantMessages": 6,
+          "toolCalls": 4,
+          "toolResults": 4,
+          "totalMessages": 12,
+          "tokens": {
+            "input": 1534,
+            "output": 730,
+            "reasoning": 127,
+            "cacheRead": 56960,
+            "cacheWrite": 0,
+            "total": 59224
+          },
+          "cost": 0.0016779599999999998,
+          "premiumRequests": 0,
+          "contextUsage": {
+            "tokens": 10218,
+            "contextWindow": 1000000,
+            "percent": 1.0218
+          }
+        }
+      },
+      {
+        "botId": "bot_mv4zhywt_3",
+        "botName": "Quality_data",
+        "scope": "private",
+        "model": "magpie/commandcode-plan/deepseek/deepseek-v4.1-flash",
+        "tokensIn": 1852,
+        "tokensOut": 988,
+        "reasoning": 264,
+        "totalTokens": 60184,
+        "cost": 0.002085264,
+        "requests": 2,
+        "toolCalls": 4,
+        "contextPercent": 1.0437,
+        "raw": {
+          "sessionFile": "C:\\Users\\Jerry\\AppData\\Local\\Temp\\ompbot-quality-7fhh3T\\bots\\bot_mv4zhywt_3\\private\\sessions\\2026-10-12T08-28-56-035Z_01a12f3a-a963-7703-9acc-7f1dcec8734d.jsonl",
+          "sessionId": "01a12f3a-a963-7703-9acc-7f1dcec8734d",
+          "userMessages": 2,
+          "assistantMessages": 6,
+          "toolCalls": 4,
+          "toolResults": 4,
+          "totalMessages": 12,
+          "tokens": {
+            "input": 1852,
+            "output": 988,
+            "reasoning": 264,
+            "cacheRead": 57344,
+            "cacheWrite": 0,
+            "total": 60184
+          },
+          "cost": 0.002085264,
+          "premiumRequests": 0,
+          "contextUsage": {
+            "tokens": 10437,
+            "contextWindow": 1000000,
+            "percent": 1.0437
+          }
+        }
+      }
+    ]
+  },
+  "scope": "30 native tasks: actual repository-source reports, executable invoice modules, CSV analyses; first/new/continued sessions. No external service accounts or OS sandbox tested."
+}

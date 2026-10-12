@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { RpcClient } from '../../src/rpc-client.mjs';
+const home=mkdtempSync(join(tmpdir(),'ompbot-keyless-proof-'));const agent=join(home,'agent');mkdirSync(agent);
+writeFileSync(join(agent,'models.yml'),JSON.stringify({providers:{magpie:{baseUrl:'http://127.0.0.1:3425/v1',api:'openai-completions',auth:'none',headers:{'User-Agent':'omp'},models:[{id:'workbuddy-ai/deepseek-v4.1-flash',name:'Deepseek-V4.1-Flash · WorkBuddy AI',contextWindow:1000000,maxTokens:128000,reasoning:true,thinking:{mode:'effort',efforts:['low','high','max']},input:['text','image'],cost:{input:0.3,output:1.2,cacheRead:0.006,cacheWrite:0}}]}}}));
+writeFileSync(join(agent,'config.yml'),JSON.stringify({modelRoles:{default:'magpie/workbuddy-ai/deepseek-v4.1-flash',smol:'magpie/workbuddy-ai/deepseek-v4.1-flash'},memory:{backend:'off'},autolearn:{enabled:false}}));
+const env={...process.env,PI_CODING_AGENT_DIR:agent};for(const name of ['OMP_PROFILE','PI_PROFILE','OMP_AUTH_BROKER_URL','OMP_AUTH_BROKER_TOKEN','PI_AUTH_BROKER_URL'])delete env[name];
+const rpc=new RpcClient({bin:'C:/Users/Jerry/Desktop/omp_bot/.desktop-runtime/omp.exe',cwd:home,env,exactEnvironment:true,args:['--no-ui','--no-tools','--no-extensions','--no-skills','--no-rules','--model','magpie/workbuddy-ai/deepseek-v4.1-flash','--thinking','low','--session-dir',join(home,'sessions')]});
+try{await rpc.start();const result=await rpc.promptAndWait('No tools. Reply exactly KEYLESS_PRIVATE_NATIVE_OK.',{timeoutMs:60000});assert.equal(result.status,'completed');const text=(await rpc.getLastAssistantText())?.text??'';assert.ok(text.includes('KEYLESS_PRIVATE_NATIVE_OK'));const state=await rpc.getState();assert.equal(state.model.provider+'/'+state.model.id,'magpie/workbuddy-ai/deepseek-v4.1-flash');const proof={checkedAt:new Date().toISOString(),check:'actual-keyless-model-private-agent-dir',accepted:true,model:state.model.provider+'/'+state.model.id,authDatabaseCopied:false,brokerEnabled:false};writeFileSync(new URL('./keyless-private-proof.json',import.meta.url),JSON.stringify(proof,null,2));console.log(JSON.stringify(proof));}finally{await rpc.stop();rmSync(home,{recursive:true,force:true,maxRetries:10,retryDelay:100});}

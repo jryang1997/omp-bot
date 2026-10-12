@@ -1,0 +1,12 @@
+{
+  "enabled": false,
+  "port": 31978,
+  "identities": 1,
+  "credentialFlags": {
+    "app": true,
+    "verify": true,
+    "encrypt": true
+  },
+  "secretFieldsCleared": true,
+  "publicResponseHasNoSecrets": true
+}

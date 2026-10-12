@@ -1,0 +1,23 @@
+{
+  "observedAt": "2026-10-12T14:21:28.772Z",
+  "executable": "C:/Users/Jerry/Desktop/omp_bot/release/win-unpacked/omp-bot.exe",
+  "records": [
+    {
+      "check": "close-hides-and-native-task-completes",
+      "state": "completed",
+      "windowVisible": false
+    },
+    {
+      "check": "window-restores-and-actual-renderer-captured",
+      "visible": true
+    },
+    {
+      "check": "explicit-quit-exits-and-releases-lease",
+      "exited": true,
+      "lockPresent": false
+    }
+  ],
+  "limits": [
+    "Native tray menu mouse interaction and Windows OS toast delivery not observed; window close/hide, background native work, restore, renderer and explicit quit actually exercised."
+  ]
+}
