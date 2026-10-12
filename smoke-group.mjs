@@ -24,6 +24,14 @@ async function main() {
     onEvent: (e) => {
       events.push(e);
       if (debug) log("  ·", e.type, JSON.stringify(e).slice(0, 200));
+      // 无人值守：审批一律拒绝（select 选 Deny，其余按取消回答），不代批工具。
+      if (e.type === "ui_request" && e.approval?.id) {
+        const options = (e.approval.options ?? []).map((o) =>
+          typeof o === "string" ? o : o?.value ?? o?.label,
+        );
+        const response = options.includes("Deny") ? { value: "Deny" } : { cancelled: true };
+        orch.answerUi(e.approval.id, response).catch(() => {});
+      }
     },
   });
 
