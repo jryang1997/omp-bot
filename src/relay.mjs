@@ -30,12 +30,14 @@ import {
 
 export class Relay {
   /**
-   * @param {object} orch Orchestrator 实例（提供 runtimeFor / getBot / store / emit）
+   * @param {object} orch Orchestrator 实例（提供 runtimeFor / nativeTurn / getBot / store / emit）
    * @param {object} room 群记录（含 members / adminId / mode / log）
+   * @param {object} [run] 承载本次群回合的 room Run {id, signal}
    */
-  constructor(orch, room) {
+  constructor(orch, room, run = null) {
     this.orch = orch;
     this.room = room;
+    this.run = run;
   }
 
   /** 群成员的花名册记录数组（保序）。 */
@@ -91,6 +93,13 @@ export class Relay {
 
     let turns = 0;
     while (queue.length && turns < ROOM_MAX_ROUNDS) {
+      // 取消传播：room Run 被取消后不再开启新的成员回合。
+      if (this.run?.signal?.aborted) break;
+      // 预算耗尽：不再开新回合（额度由真实原生用量核对）。
+      if (this.run?.shouldStop?.()) {
+        this.orch.emit("room_turn_budget_stop", { roomId: room.id, turns });
+        break;
+      }
       const speaker = queue.shift();
       turns += 1;
       const after = [...queue];
@@ -105,8 +114,17 @@ export class Relay {
 
       let replyText = "";
       try {
-        const rt = await this.orch.runtimeFor(speaker.id, `room:${room.id}`);
-        const res = await rt.send(prompt, { timeoutMs: ROOM_TURN_TIMEOUT_MS });
+        const scope = `room:${room.id}`;
+        const rt = await this.orch.runtimeFor(speaker.id, scope, { runId: this.run?.id });
+        const res = await this.orch.nativeTurn({
+          runtime: rt,
+          runId: this.run?.id ?? null,
+          signal: this.run?.signal,
+          botId: speaker.id,
+          scope,
+          text: prompt,
+          timeoutMs: ROOM_TURN_TIMEOUT_MS,
+        });
         replyText = res.text ?? "";
       } catch (e) {
         replyText = "";
