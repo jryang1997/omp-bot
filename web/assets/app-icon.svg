@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="omp-icon-title omp-icon-description">
+  <title id="omp-icon-title">omp-bot app icon</title>
+  <desc id="omp-icon-description">A pearl-white robot with two tilted charcoal eyes and a short crown notch on a dark rounded tile.</desc>
+  <defs>
+    <linearGradient id="omp-icon-tile" x1="88" y1="24" x2="424" y2="496" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#303338"/>
+      <stop offset="0.48" stop-color="#191C20"/>
+      <stop offset="1" stop-color="#090B0E"/>
+    </linearGradient>
+    <linearGradient id="omp-icon-edge" x1="116" y1="16" x2="392" y2="496" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#55585D" stop-opacity="0.65"/>
+      <stop offset="0.5" stop-color="#303338" stop-opacity="0.2"/>
+      <stop offset="1" stop-color="#080A0D" stop-opacity="0.8"/>
+    </linearGradient>
+    <linearGradient id="omp-icon-pearl" x1="143" y1="137" x2="388" y2="397" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFDF5"/>
+      <stop offset="0.4" stop-color="#F1F1ED"/>
+      <stop offset="0.76" stop-color="#D5D7DA"/>
+      <stop offset="1" stop-color="#A8ADB5"/>
+    </linearGradient>
+    <linearGradient id="omp-icon-eyes" x1="204" y1="205" x2="305" y2="305" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#272B30"/>
+      <stop offset="1" stop-color="#0C0F13"/>
+    </linearGradient>
+    <path id="omp-icon-face" d="M94 227C94 174 127 128 177 118C205 112 227 121 249 111C274 100 304 105 329 119C383 147 416 198 418 256L411 316C407 363 378 391 331 397H187C132 397 96 362 95 311Z"/>
+  </defs>
+  <path d="M132 16H380C456 16 496 56 496 132V380C496 456 456 496 380 496H132C56 496 16 456 16 380V132C16 56 56 16 132 16Z" fill="url(#omp-icon-tile)" stroke="url(#omp-icon-edge)" stroke-width="2"/>
+  <use href="#omp-icon-face" transform="translate(0 9)" fill="#000000" opacity="0.38"/>
+  <use href="#omp-icon-face" fill="url(#omp-icon-pearl)" stroke="#FFFFFF" stroke-opacity="0.24" stroke-width="2"/>
+  <path d="M258 107C267 105 274 107 278 112L275 137C274 142 270 145 264 144C258 143 254 139 255 133Z" fill="#202328"/>
+  <g fill="url(#omp-icon-eyes)">
+    <rect x="177" y="223" width="56" height="87" rx="28" transform="rotate(-17 205 266.5)"/>
+    <rect x="284" y="204" width="53" height="83" rx="26.5" transform="rotate(-17 310.5 245.5)"/>
+  </g>
+</svg>
