@@ -250,7 +250,7 @@ export function roomPrompt({ room, members, self, turnNumber, after = [], notice
 // ---- 运行策略：进程复用签名 / 预算与能力收窄 ----
 
 /** 策略版本：语义变化时必须改，避免旧版本的宽松进程被新版本复用。 */
-export const POLICY_VERSION = 2;
+export const POLICY_VERSION = 3;
 
 /**
  * 把旧记录补齐成当前形状（升级时用，不改用户已有取值）。
@@ -293,7 +293,7 @@ export function normalizeBot(raw) {
 /**
  * runtime 复用签名。执行模式、审批档、工作区、模型、思考档、技能过滤、
  * 记忆开关、电脑绑定任何一个变了都必须重建进程：宽权限进程不得承接收窄后的 Run，
- * 绑定电脑后进程必须按电脑档（无原生工具/扩展/skills/MCP）重新起。
+ * 绑定电脑后进程要带上客机工具和对应的 overlay 审批段重新起。
  * @param {object} bot
  * @param {{cwd:string, scope:string}} ctx
  */

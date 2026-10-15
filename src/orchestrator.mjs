@@ -738,9 +738,7 @@ export class Orchestrator {
    * 委派准入：同工作区自动；越域（拿别的合作范围的私有上下文）一律拒绝。
    * 能力不扩权：以父 Run 的 bot 为准；万一拿不到父 Run（理论上不应发生），
    * 退回发起者自身做基准 —— 缺信息时只会收紧，不会放开。
-   * 电脑边界：绑定电脑的发送者不能把可执行工作交给「未绑定电脑且不是 chat」的收件人，
-   * 否则那条委派会在宿主本机执行，等于绕过电脑模式；chat 收件人（受控读取、无宿主工具）
-   * 与同样绑定电脑的同事都照常放行。未绑定发送者的行为完全不变。
+   * 绑定共享电脑是加法，发送者自己就有本机工具，所以委派不再按电脑绑定设边界。
    */
   _assertDelegationAllowed(fromBot, target, parentRun) {
     if ((fromBot.workspace ?? "") !== (target.workspace ?? "")) {
@@ -748,14 +746,6 @@ export class Orchestrator {
         403,
         `跨工作区私有上下文不共享：${fromBot.name} 与 ${target.name} 不在同一工作区，拒绝委派`,
         "cross_workspace_denied",
-      );
-    }
-    if (fromBot.computer && !target.computer && target.executionMode !== "chat") {
-      throw httpErr(
-        403,
-        `${fromBot.name} 绑定电脑，不能把工作交给未绑定电脑的 ${target.name}（${target.executionMode}）在本机执行；` +
-          "请委派给同样绑定电脑的同事，或让 chat 档收件人只做受控读取",
-        "computer_host_escape_denied",
       );
     }
     const basis = parentRun?.botId ? (this.getBot(parentRun.botId) ?? fromBot) : fromBot;
@@ -2103,24 +2093,24 @@ export class Orchestrator {
     const bot = this.getBot(botId);
     const rt = this.runtimes.get(`${botId}::${scope}`);
     const verdict = rt?.toolSurface ?? null;
-    const narrowed = bot?.executionMode === "chat" || !!bot?.computer;
-    const mechanism = bot?.computer
-      ? "--no-tools + --no-extensions + --no-skills + mcp.enableProjectConfig:false + disabledExtensions mcp:<name>；工具面只允许团队工具与客机工具（computer_screenshot/input/shell/files/upload_attachment/publish_file）"
-      : "--no-tools + --no-extensions + mcp.enableProjectConfig:false + disabledExtensions mcp:<name>";
-    // 如实披露：supervised 是原生审批档，不是 OS 沙箱；chat/电脑档的收窄程度以运行时工具面校验为准。
+    // 只有 chat 档收窄；绑定共享电脑是加法，本机工具面不变，客机工具加在上面。
+    const narrowed = bot?.executionMode === "chat";
+    const mechanism = "--no-tools + --no-extensions + mcp.enableProjectConfig:false + disabledExtensions mcp:<name>";
+    // 如实披露：三档都不是 OS 沙箱；chat 档的收窄程度以运行时工具面校验为准。
     const disclosure = {
       executionMode: bot?.executionMode ?? null,
       approvalMode: bot?.approvalMode ?? null,
       computer: bot?.computer ? { bound: true, runtime: bot.computer.runtime, kind: bot.computer.kind } : { bound: false },
       sandbox: false,
-      sandboxNote: "本机没有经过验证的 OS 沙箱；supervised/chat/full 都不是沙箱，只是审批与工具范围差异",
+      permission: bot ? permissionOf(bot) : null,
+      sandboxNote: "本机没有经过验证的 OS 沙箱；三档都不是沙箱，只是审批与工具范围差异",
       toolSurface: narrowed
         ? verdict
           ? {
               restricted: true,
               // 实际 dumpTools 的自报工具面：越界即拒绝回合（blocked 里带 violations）
               nativeVerification: verdict.verified ? "verified" : "failed",
-              kind: verdict.kind ?? (bot?.computer ? "computer" : "chat"),
+              kind: "chat",
               reported: verdict.reported ?? null,
               allowed: verdict.allowed ?? null,
               violations: verdict.violations ?? [],
@@ -2128,7 +2118,7 @@ export class Orchestrator {
           : {
               restricted: true,
               nativeVerification: "unverified",
-              kind: bot?.computer ? "computer" : "chat",
+              kind: "chat",
               mechanism,
               reported: null,
               violations: null,

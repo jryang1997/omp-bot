@@ -14,16 +14,9 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { canonicalFilename, clone, ferr, humanBytes, isFeatureError } from "./util.mjs";
 import { computerIdFor, genId } from "../domain.mjs";
+import { COMPUTER_TOOL_NAMES } from "../constants.mjs";
 
-/** 固定客机工具名（与合同一致；工具 schema 里没有 computerId/endpoint/token/localPath）。 */
-export const COMPUTER_TOOL_NAMES = Object.freeze([
-  "computer_screenshot",
-  "computer_input",
-  "computer_shell",
-  "computer_files",
-  "computer_upload_attachment",
-  "computer_publish_file",
-]);
+export { COMPUTER_TOOL_NAMES };
 
 /** 官方 Cua Linux 镜像的默认标识（绑定记录里的 image 字段；测试可用构造参数覆盖）。 */
 export const DEFAULT_COMPUTER_IMAGE = "cua-linux";
@@ -1214,7 +1207,7 @@ export class Computers {
         name: "computer_screenshot",
         label: "Computer Screenshot",
         description:
-          "截取你这台电脑的桌面（PNG，随结果直接给你看）。用来看清屏幕上现在是什么、点到了哪里；截图不会获得输入能力。",
+          "在 Linux 共享电脑里截取你自己的桌面（PNG，随结果直接给你看）。用来看清屏幕上现在是什么、点到了哪里；截图不会获得输入能力。",
         parameters: SCREENSHOT_SCHEMA,
         handler: (_args, meta) =>
           this.#toolCall({ bot, runId: runId(), cid, name: "computer_screenshot", signal: signalOf(meta), kind: "screenshot" }, async ({ backend, signal, authority }) => {
@@ -1237,7 +1230,7 @@ export class Computers {
         name: "computer_input",
         label: "Computer Input",
         description:
-          "在这台电脑的桌面上点击/移动/滚动/输入文本或按键。配合 computer_screenshot 使用；输入只作用于你自己的电脑。",
+          "在 Linux 共享电脑里，在你自己的桌面上点击/移动/滚动/输入文本或按键。配合 computer_screenshot 使用；输入只作用于你自己的桌面。",
         parameters: INPUT_SCHEMA,
         handler: (args, meta) =>
           this.#toolCall({ bot, runId: runId(), cid, name: "computer_input", signal: signalOf(meta), kind: "input", mutating: true }, async ({ backend, signal, authority }) => {
@@ -1260,7 +1253,7 @@ export class Computers {
         name: "computer_shell",
         label: "Computer Shell",
         description:
-          "在你的电脑（Linux 客机）里用 /bin/sh 执行命令，返回 stdout/stderr/退出码。默认工作目录 /work；这是客机，不是运行工作台的那台机器。",
+          "在 Linux 共享电脑里用 /bin/sh 执行命令，返回 stdout/stderr/退出码。默认工作目录 /work。这台电脑不是运行工作台的那台机器，本机工具照常可用。",
         parameters: SHELL_SCHEMA,
         handler: (args, meta) =>
           this.#toolCall({ bot, runId: runId(), cid, name: "computer_shell", signal: signalOf(meta), kind: "shell", mutating: true }, async ({ backend, signal, generation, authority }) => {
@@ -1291,7 +1284,7 @@ export class Computers {
         name: "computer_files",
         label: "Computer Files",
         description:
-          "在你的电脑（Linux 客机）里查看/读取/写入/删除文件。list/read 可看任意客机绝对路径；write/remove 只允许 /work 与 /tmp。宿主路径不接受。",
+          "在 Linux 共享电脑里查看/读取/写入/删除文件。list/read 可看任意客机绝对路径；write/remove 只允许 /work 与 /tmp。宿主路径不接受。",
         parameters: FILES_SCHEMA,
         handler: (args, meta) =>
           this.#toolCall({ bot, runId: runId(), cid, name: "computer_files", signal: signalOf(meta), kind: "files", mutating: true }, async ({ backend, signal, generation, authority }) => {
@@ -1368,7 +1361,7 @@ export class Computers {
         name: "computer_upload_attachment",
         label: "Computer Upload Attachment",
         description:
-          "把本 Bot 附件库里已登记的附件上传到你的电脑（默认 /work/attachments/<附件 id>-<文件名>），之后可在客机里用文件路径访问它。只能上传属于本 Bot 的附件。",
+          "在 Linux 共享电脑里放入本 Bot 附件库里已登记的附件（默认 /work/attachments/<附件 id>-<文件名>），之后可在客机里用文件路径访问它。只能上传属于本 Bot 的附件。",
         parameters: UPLOAD_SCHEMA,
         handler: (args, meta) =>
           this.#toolCall({ bot, runId: runId(), cid, name: "computer_upload_attachment", signal: signalOf(meta), kind: "upload_attachment", mutating: true }, async ({ backend, signal, authority }) => {
@@ -1400,7 +1393,7 @@ export class Computers {
         name: "computer_publish_file",
         label: "Computer Publish File",
         description:
-          "把电脑里生成的文件交付给用户：从客机下载进本 Run 的专属 spool，再用既有不可变成果库登记，用户可在工作台预览/下载。",
+          "在 Linux 共享电脑里取出生成的文件交付给用户：从客机下载进本 Run 的专属 spool，再用既有不可变成果库登记，用户可在工作台预览/下载。",
         parameters: PUBLISH_SCHEMA,
         handler: (args, meta) =>
           this.#toolCall({ bot, runId: runId(), cid, name: "computer_publish_file", signal: signalOf(meta), kind: "publish", mutating: true }, async ({ backend, signal, authority }) => {

@@ -457,17 +457,16 @@ export function createPanels({ client, deps }) {
         // 档位会影响下面的工作目录、操作范围与记忆说明：保存成功后整页重绘，提示不会停留在旧档。
         if (await patchBot(bot, { permission: value, confirmPermission: value === "full" })) deps.rerenderPanel?.();
       })));
-    permissionCard.append(row("工作目录", computer
-      ? "绑定电脑期间本机执行档不生效，这个位置只在该 Bot 切回本机执行后使用。"
-      : "从这里开始找资料和保存成果，仍可访问其他有权限的位置。", Object.assign(el("input", "bt-input"), {
+    permissionCard.append(row("工作目录", "本机工具从这里开始找资料和保存成果，仍可访问其他有权限的位置。", Object.assign(el("input", "bt-input"), {
       value: bot.workspace || "",
       placeholder: "如 C:/work/project",
       onchange: (event) => { void patchBot(bot, { workspace: event.target.value.trim() || null }); },
     })));
+    const chatOnly = permissionOf(bot) === "chat";
     permissionCard.append(row("操作范围", computer
-      ? computer.note || "已绑定电脑：原生本机来源按绑定档收窄。"
+      ? computer.note || "本机和共享电脑两套工具都在。"
       : "执行任务时，助手可以访问当前账户有权限访问的文件和程序；工作目录不限制访问范围。",
-      el("span", "bt-note", computer ? (computer.hostToolsBlocked ? "电脑档（本机来源已关闭）" : "电脑档（只提供桌面）") : "本机账户权限")));
+      el("span", "bt-note", chatOnly ? (computer ? "只聊天（电脑只提供桌面）" : "只聊天") : computer ? "本机 + 共享电脑" : "本机账户权限")));
     root.append(section("权限与确认", permissionCard));
 
     const memoryReady = capabilities?.memory?.nativePrereq?.ready === true;
@@ -1239,12 +1238,10 @@ export function createPanels({ client, deps }) {
     const nativeCommands = caps && caps.skills && Array.isArray(caps.skills.commands) ? caps.skills.commands : null;
     const commandsError = caps && typeof caps.commandsError === "string" && caps.commandsError ? caps.commandsError : null;
     const probeNote = commandsError || probeError;
-    const hostSkillsOff = !!bot.computer && bot.executionMode !== "chat";
 
     const discovered = data.discovered || [];
     const selected = new Set(discovered.filter((s) => s.selected).map((s) => s.name));
     const box = el("div", "bt-set-card");
-    if (hostSkillsOff) box.append(el("div", "bt-note", "这台 Bot 绑定了电脑：原生本机技能来源整体关闭，下面的名单与勾选都不生效。"));
     box.append(el("div", "bt-set-hint", "勾选决定原生加载哪些技能；取消勾选的技能留在目录里，只是不被加载。"));
     if (!discovered.length) box.append(el("div", "bt-empty", "Bot 私有技能目录里还没有技能（未配置）；安装方法见下一节。"));
     for (const skill of discovered) {
@@ -1325,9 +1322,9 @@ export function createPanels({ client, deps }) {
     if (data.note) fileDetails.append(el("div", "bt-note", data.note));
     status.append(fileDetails);
     root.append(section("原生 mcp.json", status));
-    // 只聊天档与绑定电脑都会关掉项目级 MCP 来源，保存成功也不代表会生效。
-    if (bot.computer || bot.executionMode === "chat") {
-      root.append(el("div", "bt-note", "这台 Bot 当前不加载项目级 MCP 配置（只聊天档或已绑定电脑时如此）：保存的服务要等切回普通执行档后才可能生效。"));
+    // 只聊天档会关掉项目级 MCP 来源，保存成功也不代表会生效。
+    if (bot.executionMode === "chat") {
+      root.append(el("div", "bt-note", "这台 Bot 是只聊天档，不加载项目级 MCP 配置：保存的服务要等切到先问我或全部放手后才生效。"));
     }
 
     const servers = el("div", "bt-set-card");

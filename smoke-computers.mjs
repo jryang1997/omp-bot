@@ -146,13 +146,13 @@ try {
   pass("真实 OMP 消费随机桌面图像，附件到客机再生成可下载成果", { runId: runA.id, visualMarker: markerA, artifactId: resultFile.id });
 
   const stateA = await server.orch.getNativeState(a.id);
-  assert.equal(stateA.toolSurface.restricted, true);
-  assert.equal(stateA.toolSurface.nativeVerification, "verified");
-  const names = stateA.toolSurface.reported;
-  assert.ok(Array.isArray(names));
+  assert.equal(stateA.toolSurface.restricted, false, "绑定电脑是加法，不再收窄本机工具面");
+  const capsA = (await api(`/api/bots/${a.id}/native/capabilities`)).data;
+  const names = capsA.tools?.names;
+  assert.ok(Array.isArray(names), JSON.stringify(capsA.tools));
   for (const name of ["computer_screenshot", "computer_input", "computer_shell", "computer_files", "computer_upload_attachment", "computer_publish_file"]) assert.ok(names.includes(name), `实际工具清单缺少 ${name}`);
-  for (const name of ["bash", "read", "eval", "browser", "web_search"]) assert.ok(!names.includes(name), `实际工具清单仍有宿主工具 ${name}`);
-  pass("真实 dumpTools 核对所属电脑工具，宿主工具未进入模型", { tools: names });
+  for (const name of ["bash", "read"]) assert.ok(names.includes(name), `本机工具 ${name} 不应因绑定电脑消失`);
+  pass("真实 dumpTools 里本机工具和共享电脑工具都在", { tools: names });
 
   const runB = await startRun(b.id, "先用 computer_screenshot 读取桌面新增的 VIZ_ 文件完整名称，文件名必须仅从截图识别。随后只用自己的 computer_shell 检查 /work/output-a.txt 不存在，存在就报告失败。最终回复严格两行：第一行是从截图识别的完整文件名；第二行是 ISOLATED_B。禁止使用其他 Bot 的电脑或本机工具。");
   const doneB = await finished(runB.id);
@@ -242,17 +242,13 @@ try {
 
   const narrowedApproval = await api(`/api/bots/${b.id}`, { method: "PATCH", body: { permission: "ask" } });
   assert.equal(narrowedApproval.status, 200, narrowedApproval.data.error);
-  const supervised = await startRun(b.id, "只调用 computer_shell 执行 printf SUPERVISED_APPROVAL_READY。等待真正批准后报告输出，不能换其他工具绕过。 ");
-  const approval = await waitFor(async () => {
-    const values = (await api("/api/approvals")).data.approvals;
-    return values.find((item) => item.runId === supervised.id && item.status === "pending");
-  }, 120_000);
-  assert.equal((await api(`/api/runs/${supervised.id}`)).data.run.state, "waiting_approval");
-  await okPost(`/api/approvals/${approval.id}/respond`, { value: "Approve" });
+  const supervised = await startRun(b.id, "只调用 computer_shell 执行 printf ASK_GUEST_NO_PROMPT，然后报告输出，不能换其他工具。 ");
   const supervisedDone = await finished(supervised.id);
   assert.equal(supervisedDone.state, "completed", JSON.stringify(supervisedDone.error));
-  assert.ok(supervisedDone.reply?.includes("SUPERVISED_APPROVAL_READY"));
-  pass("真实 guest 命令沿用 native write 审批卡与明确批准", { runId: supervised.id, approvalId: approval.id });
+  assert.ok(supervisedDone.reply?.includes("ASK_GUEST_NO_PROMPT"));
+  const guestApprovals = (await api("/api/approvals")).data.approvals.filter((item) => item.runId === supervised.id);
+  assert.equal(guestApprovals.length, 0, `先问我档里共享电脑命令不应弹审批：${JSON.stringify(guestApprovals)}`);
+  pass("先问我档里共享电脑命令不弹审批", { runId: supervised.id });
 
   const chatMode = await api(`/api/bots/${b.id}`, { method: "PATCH", body: { permission: "chat" } });
   assert.equal(chatMode.status, 200, chatMode.data.error);
@@ -270,6 +266,7 @@ try {
   assert.ok(stoppedChatDone.reply?.includes(chatAttachmentText));
   assert.equal((await api(pathB)).data.computer.state, "stopped");
   const chatState = await server.orch.getNativeState(b.id);
+  assert.equal(chatState.toolSurface.restricted, true);
   assert.ok(!chatState.toolSurface.reported.some((name) => name.startsWith("computer_")));
   pass("绑定电脑的只聊天模式在人工接管与关机时仍可聊天和读取附件", { heldRunId: heldChat.id, stoppedRunId: stoppedChat.id, tools: chatState.toolSurface.reported });
 

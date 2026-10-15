@@ -302,9 +302,8 @@ export class NativeFeatures {
         sandbox: false,
         note: "三档都不是 OS 沙箱：先问我走 OMP 原生审批，全部放手跳过审批；本机没有已核实的 Windows 沙箱实现。",
       },
-      // 电脑档披露：客机档（非 chat）绑定后原生本机工具/扩展/skills/MCP 全部关闭，
-      // 工具面只允许团队工具与客机工具；chat 档没有客机工具，保留既有受控宿主读取工具。
-      // 真实生效与否看 tools.names（原生 dumpTools）与 getNativeState.toolSurface 的越界判定。
+      // 电脑披露：绑定共享电脑是加法，本机工具、扩展、技能和 MCP 都在，客机工具加在上面；
+      // chat 档没有客机工具，保留既有受控宿主读取工具。真实工具面看 tools.names（原生 dumpTools）。
       computer: bot.computer
         ? {
             bound: true,
@@ -312,12 +311,12 @@ export class NativeFeatures {
             runtime: bot.computer.runtime,
             kind: bot.computer.kind,
             executionMode: bot.executionMode,
-            hostToolsBlocked: bot.executionMode !== "chat",
+            hostToolsBlocked: false,
             guestTools: bot.executionMode === "chat" ? [] : [...COMPUTER_TOOL_NAMES],
             note:
               bot.executionMode === "chat"
-                ? "chat 档绑定电脑只提供桌面（人工接管/截图），聊天仍只有聊天：没有客机工具，也不依赖运行中的客机。"
-                : "绑定电脑后原生本机工具/扩展/skills/用户与项目 MCP 全部关闭；客机工具与团队工具走原生审批档。",
+                ? "只聊天档绑定电脑只提供桌面（人工接管/截图），聊天仍只有聊天：没有客机工具，也不依赖运行中的客机。"
+                : "本机和共享电脑两套工具都在。本机工具按权限档审批；共享电脑里的工具不弹审批，装系统包除外。",
           }
         : { bound: false, id: null, hostToolsBlocked: false, guestTools: [] },
       mcp: this.mcpStatus(botId, scope),

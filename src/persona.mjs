@@ -17,7 +17,7 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_TASK_CONCURRENCY } from "./constants.mjs";
+import { COMPUTER_PROMPT_TOOLS, COMPUTER_TOOL_NAMES, DEFAULT_TASK_CONCURRENCY } from "./constants.mjs";
 import { memoryModelRoles } from "./memory-config.mjs";
 
 /** 要逐文件关闭的上下文文件 id（scope: 文件名）。 */
@@ -151,10 +151,16 @@ export function writePersonaFiles(bot, dir, opts = {}) {
     "    list_bots: allow",
     "    delegate_bot: allow",
   );
-  if (bot.computer) lines.push("    computer_screenshot: allow");
+  if (bot.computer && bot.executionMode !== "chat") {
+    // 共享电脑是给 bot 的独立 Linux 用户，权限交给客机，两个可执行档都不弹审批。
+    // 装系统包例外：用户级 prompt 在 yolo 下也生效，全部放手档同样会问。
+    for (const name of COMPUTER_TOOL_NAMES) {
+      lines.push(`    ${name}: ${COMPUTER_PROMPT_TOOLS.includes(name) ? "prompt" : "allow"}`);
+    }
+  }
 
-  if (bot.executionMode === "chat" || bot.computer) {
-    // chat 与电脑绑定都使用受控工具来源，关闭项目 MCP：
+  if (bot.executionMode === "chat") {
+    // chat 档使用受控工具来源，关闭项目 MCP：
     //  - mcp.enableProjectConfig=false：不加载项目级 .mcp.json/mcp.json
     //    （settings id 在 18.10.0 schema 中确认：packages/coding-agent/src/mcp/settings.ts，
     //     description "Load .mcp.json/mcp.json from project root"，默认 true）。

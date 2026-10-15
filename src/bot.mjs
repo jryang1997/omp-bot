@@ -220,11 +220,11 @@ export class BotRuntime extends EventEmitter {
   }
 
   /**
-   * 收窄档：chat（受控读取）与「绑定电脑」（客机档）都必须用 --no-tools/--no-extensions
-   * 关掉原生本机工具与扩展来源；绑定电脑时 skills 也一并关闭（只留团队工具与客机工具）。
+   * 收窄档只有 chat（受控读取）：用 --no-tools/--no-extensions 关掉原生本机工具与扩展来源。
+   * 绑定共享电脑是加法，本机工具、扩展、技能和 MCP 都保留，客机工具加在上面。
    */
   get narrowedTools() {
-    return this.bot.executionMode === "chat" || !!this.bot.computer;
+    return this.bot.executionMode === "chat";
   }
 
   _signature() {
@@ -263,7 +263,7 @@ export class BotRuntime extends EventEmitter {
     return writePrivateMemoryConfig({ agentDir: this.agentDir, model: this.bot.model });
   }
 
-  /** 拼原生启动参数。收窄档（chat / 绑定电脑）用 --no-tools + --no-extensions 收窄工具来源。 */
+  /** 拼原生启动参数。收窄档（chat）用 --no-tools + --no-extensions 收窄工具来源。 */
   _buildArgs() {
     const { argv: personaArgv } = writePersonaFiles(this.bot, this.baseDir, {
       extraDisabledExtensions: this._narrowedDisabledExtensions(),
@@ -278,11 +278,7 @@ export class BotRuntime extends EventEmitter {
       // --no-tools：内置工具名表为空；--no-extensions：关闭扩展发现（真实 CLI 开关）。
       args.push("--no-tools", "--no-extensions");
     }
-    if (this.bot.computer && this.bot.executionMode !== "chat") {
-      // 绑定电脑的客机档：不装载任何本机 skill 来源；审批档仍走 rpc-ui 的原生审批。
-      // chat 档没有客机工具，保持原有 skills 过滤行为（仍然只有聊天）。
-      args.push("--no-skills");
-    } else if (Array.isArray(this.bot.skills)) {
+    if (Array.isArray(this.bot.skills)) {
       if (this.bot.skills.length === 0) args.push("--no-skills");
       else args.push("--skills", this.bot.skills.join(","));
     }
@@ -420,7 +416,7 @@ export class BotRuntime extends EventEmitter {
    * 原生只有按名字的 disabledServers/disabledExtensions，没有通配，也没有关掉用户级 MCP 的开关，
    * 所以这里读取（只读，不改）用户 agentDir 下的 mcp.json 服务器名，逐个列进 overlay。
    * 读取失败不假装成功：由运行时工具面校验兜底。
-   * 项目级 MCP 由 persona overlay 的 mcp.enableProjectConfig:false 关闭（chat 与绑定电脑同款）。
+   * 项目级 MCP 由 persona overlay 的 mcp.enableProjectConfig:false 关闭（只在 chat 档）。
    */
   _narrowedDisabledExtensions() {
     if (!this.narrowedTools) return [];
@@ -437,13 +433,13 @@ export class BotRuntime extends EventEmitter {
   }
 
   /**
-   * 收窄档（chat / 绑定电脑）的运行时校验（失败关闭）：
+   * chat 档的运行时校验（失败关闭）：
    * 注册完宿主工具后核对原生自报的工具面（实际 dumpTools），出现受控宿主工具之外的任何工具
    * 就把 runtime 标为不可用并拒绝运行回合，绝不因为「配置里写了收窄」就宣称安全。
-   * 允许集合 = 本 runtime 注册的宿主工具（团队工具 + 客机工具）∪ {ask}。
+   * 允许集合 = 本 runtime 注册的宿主工具 ∪ {ask}。chat 档没有客机工具。
    */
   async _verifyNarrowedToolSurface() {
-    const kind = this.bot.computer ? "computer" : "chat";
+    const kind = "chat";
     let reported = null;
     let error = null;
     try {
@@ -457,11 +453,10 @@ export class BotRuntime extends EventEmitter {
     }
     const verdict = evaluateToolSurface(reported, this.hostToolNames ?? []);
     this.toolSurface = { kind, ...verdict, ...(error ? { error } : {}) };
-    const key = kind === "computer" ? "computerToolSurface" : "chatToolSurface";
-    this.capabilities = { ...(this.capabilities ?? {}), [key]: this.toolSurface };
+    this.capabilities = { ...(this.capabilities ?? {}), chatToolSurface: this.toolSurface };
     this.emit("capabilities", this.capabilities);
     if (!verdict.verified) {
-      const label = kind === "computer" ? "电脑档" : "chat 档";
+      const label = "chat 档";
       this.blocked = {
         reason: reported === null ? "tool_surface_unverified" : "unsafe_tool_surface",
         kind,

@@ -210,7 +210,7 @@ export function createComputerView(bot, deps = {}) {
   const readyBody = el("div", "wb-computer-body");
   readyBody.append(section("电脑", statusCard), section("实时桌面", desktopCard), section("人工输入", inputCard), section("成果", artifactCardBox));
   if (bot.executionMode === "chat") {
-    readyBody.prepend(el("div", "wb-note", "该 Bot 现在是「只聊天」模式：绑定电脑不会让它执行电脑任务，模型也不会使用电脑工具；需要它在电脑里干活，请到「能力」里改成「执行任务」。人工接管和桌面操作不受此限制。"));
+    readyBody.prepend(el("div", "wb-note", "该 Bot 现在是「只聊天」模式：绑定电脑不会让它执行电脑任务，模型也不会使用电脑工具；需要它在电脑里干活，请到「权限」里改成「本机改东西先问我」或「全部放手」。人工接管和桌面操作不受此限制。"));
   }
 
   const pendingBox = el("div", "wb-computer-pending");
