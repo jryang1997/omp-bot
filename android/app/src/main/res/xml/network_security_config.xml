@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  设备入口的明文策略：局域网（192.168/10/172.16 等）与 tailnet（*.ts.net 或
+  100.64/10 CGNAT）走明文 HTTP 是本项目的本地信任模型，域配置表达不了裸 IP 白名单。
+  远程域名一律 HTTPS；允许明文不等于允许把本地路由当成凭据的自动回退。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

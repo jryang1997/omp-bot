@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OMP Bot</string>
+
+    <!-- 通知通道 -->
+    <string name="notification_channel_approval">审批与提问</string>
+    <string name="notification_channel_approval_desc">等待你回答的原生审批与提问</string>
+    <string name="notification_channel_runs">任务动态</string>
+    <string name="notification_channel_runs_desc">任务完成或失败时提醒</string>
+    <string name="notification_channel_always_on">常驻连接</string>
+    <string name="notification_channel_always_on_desc">开着常驻连接时显示</string>
+
+    <string name="always_on_title">OMP Bot 保持连接中</string>
+    <string name="always_on_text">应用在后台时也会收到任务与审批提醒</string>
+</resources>

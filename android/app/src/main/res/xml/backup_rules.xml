@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Auto Backup（API 23–30）：设备 token 的加密 prefs 不备份。
+  连接与游标可以备份（不含秘密），但 token 一旦跟着备份到新机，那台新机会拿着
+  这台手机的设备凭证去访问电脑 —— 那不是用户想要的「恢复」。
+-->
+<full-backup-content>
+    <exclude
+        domain="sharedpref"
+        path="companion_device_token.xml" />
+    <exclude
+        domain="sharedpref"
+        path="__androidx_security_crypto_encrypted_prefs__.xml" />
+</full-backup-content>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- API 31+ 的设备迁移规则：与 backup_rules 同一取舍，token 不迁移。 -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude
+            domain="sharedpref"
+            path="companion_device_token.xml" />
+        <exclude
+            domain="sharedpref"
+            path="__androidx_security_crypto_encrypted_prefs__.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude
+            domain="sharedpref"
+            path="companion_device_token.xml" />
+        <exclude
+            domain="sharedpref"
+            path="__androidx_security_crypto_encrypted_prefs__.xml" />
+    </device-transfer>
+</data-extraction-rules>

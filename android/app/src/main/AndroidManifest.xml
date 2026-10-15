@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!--
+      用户显式打开的「常驻连接」：用 connectedDevice 而不是 dataSync —— 这个服务
+      存在的原因是保持与电脑的配对连接，不是搬数据；dataSync 在 Android 15+ 还有
+      ~6h/24h 的系统上限，connectedDevice 没有。
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- 只在打开扫码时申请。不给相机时手动输入地址与配对码仍然可用。 -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.camera.autofocus"
+        android:required="false" />
+
+    <application
+        android:name=".OmpBotApp"
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.OmpBot">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:persistableMode="persistNever"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          ompbot:// 深链入口。链接里带着一次性配对码，而系统会保留 Activity 的启动
+          Intent；所以这个 Activity 永远不是任务根（自己的 taskAffinity）、不进历史、
+          不进最近任务、不写持久状态：它只把邀请放进进程内存，然后用一个不带 data、
+          不带 extras 的 Intent 启动 MainActivity。
+        -->
+        <activity
+            android:name=".PairingLinkActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:persistableMode="persistNever"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:host="pair"
+                    android:scheme="ompbot" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          25 秒宽限的锚：一个普通 started service，存在的唯一目的是让进程别落进
+          cached 类。它不是前台服务，没有通知、没有 binder、没有 IO。
+          stopWithTask: 划掉任务就是用户说「我不用了」，窗口跟着结束。
+        -->
+        <service
+            android:name=".lifecycle.SessionLingerService"
+            android:exported="false"
+            android:stopWithTask="true" />
+
+        <!--
+          用户打开的「常驻连接」。stopWithTask="false" 是重点：它就该在用户划掉
+          应用之后继续跑，这正是 25 秒宽限窗口不做的事。
+        -->
+        <service
+            android:name=".lifecycle.AlwaysOnConnectionService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice"
+            android:stopWithTask="false" />
+
+        <!-- 开机只做一件事：用户开着常驻连接时把它拉起来。关着就什么都不做。 -->
+        <receiver
+            android:name=".lifecycle.AlwaysOnBootReceiver"
+            android:exported="true"
+            android:permission="android.permission.RECEIVE_BOOT_COMPLETED">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!--
+          成果分享出去的那一个出口：只暴露 cache/shared-artifacts 目录，
+          每次分享只给一个文件、只给接收方一次读权限。
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.artifacts"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+</manifest>

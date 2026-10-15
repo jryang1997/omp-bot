@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 深色启动窗口不留白：没有这一支，深色模式第一帧会闪一下白。 -->
+    <style name="Theme.OmpBot" parent="android:Theme.Material.NoActionBar" />
+</resources>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!--
+      只有成果分享目录在 Provider 后面，而且在应用 cache 里：别的都不通过它暴露。
+      每次分享前清空，磁盘上最多留着最近一次导出的那一份。
+    -->
+    <cache-path
+        name="shared-artifacts"
+        path="shared-artifacts/" />
+</paths>

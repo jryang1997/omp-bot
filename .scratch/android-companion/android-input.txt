@@ -1,0 +1,4 @@
+OMP_ANDROID_SOURCE=7319
+A=21
+B=34
+Expected sum A+B is 55.

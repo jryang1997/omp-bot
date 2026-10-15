@@ -1,0 +1,38 @@
+OpenMausBot
+Copyright 2026 Milind Soni and OpenMausBot contributors
+
+OpenMausBot was relicensed from the MIT License to the Apache License,
+Version 2.0, with the consent of all contributors whose copyright was
+incorporated before the transition.
+
+The Google Antigravity ACP integration adapts release, installation, profile,
+and authentication behavior from T3 Code, Copyright 2026 T3 Tools Inc., used
+under the MIT License.
+
+The secure phone credential transport uses @hpke/core and @hpke/common from
+hpke-js, Copyright 2023-2024 Ajitomi Daisuke, used under the MIT License.
+
+Selected provider icon paths are from Simple Icons, used under CC0 1.0.
+The Cohere provider icon path is from Lobe Icons, Copyright 2023 LobeHub,
+used under the MIT License.
+
+--------------------------------------------------------------------------------
+
+OMP Bot Android companion (android/)
+
+The Android application in this directory (android/) is part of omp-bot,
+Copyright 2026 omp-bot contributors, and is distributed under the MIT License
+(see the repository root LICENSE).
+
+It contains code derived from the OpenMausBot Android companion application
+at the release snapshot identified above: the SSE line parser and event stream,
+the pairing-link address rules, the Keystore-backed device-token store, the
+25-second background connection grace window and its anchor service, the opt-in
+always-on foreground service, the notification-channel and PendingIntent
+conventions, and the QR scanner (CameraX + bundled ML Kit). The per-file
+mapping and the list of deliberately omitted upstream features are recorded in
+android/PROVENANCE.md.
+
+Bundle dependencies and their licenses are recorded in android/PROVENANCE.md,
+including ML Kit barcode-scanning, which is distributed under the ML Kit Terms
+of Service rather than an open-source license.
