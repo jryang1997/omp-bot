@@ -1,0 +1,8 @@
+<!doctype html><meta charset="utf-8"><title>bot screen</title>
+<style>body{margin:0;font:20px "Noto Sans SC",sans-serif}#h{padding:16px;color:#fff;font-size:32px}textarea{width:96vw;height:70vh;margin:2vw;font-size:18px}</style>
+<div id="h"></div><textarea id="t"></textarea>
+<script>
+const who=location.hash.slice(1)||'?';document.getElementById('h').textContent='屏幕属于 '+who;
+document.getElementById('h').style.background=who==='bot-a'?'#377FE6':'#E78531';
+window.clicks=0;addEventListener('mousedown',()=>window.clicks++);
+</script>

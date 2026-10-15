@@ -39,17 +39,19 @@ Status: open
 - D4 技能用"共享库加每 bot 白名单"，不全量加载。用户确认，推翻了此前"共享库全量"的建议。
 - D5 身份用分层 AGENTS.md。记忆每个 bot 一个库，私聊群聊通用。用户确认。
 - D6 头像改用 OpenMausBot 吉祥物体系。用户确认。调研结论见 [12](issues/12-avatar-research.md)，Apache-2.0 可用，有一个来源待核实。
+- D7 隔离只防误操作。客机里每 bot 一个 Linux 用户，不给免密 sudo，装系统包要审批；宿主侧不加强制隔离。见 [03](issues/03-isolation-goal.md)。
+- D8 每个 bot 在客机里一个 Linux 用户、一块 Xvfb 屏、一个官方 cua-spacesd 实例。沙盒实测两屏并发互不串、跨令牌被拒，现有 SDK 调用方式不用改。见 [01](issues/01-per-bot-screens.md)。
+- D9 共享文件以宿主 `team/workspace` 为唯一权威。omp-bot 内置 Node SFTP 服务，客机用 sshfs 无缓存挂到 `/workspace`。沙盒实测双向即时可见、并发追加不丢；小文件慢 16 倍，依赖和构建产物放客机本地盘。见 [04](issues/04-host-guest-files.md)。
+- D10 team 目录是 git 仓库，omp 找 AGENTS.md 停在 team 根上。overlay 只关用户级 AGENTS.md，bot 读到 team 和自己两层，按通用到具体排列。身份挪进 `team/bots/<id>/AGENTS.md`，persona.md 只留团队工具说明。见 [06](issues/06-agents-md-boundary.md)。
+- D11 技能库放 `team/skills/`，overlay 用 `customDirectories` 指向它，白名单沿用 `bot.skills` 到 `--skills`。私有技能要并进白名单，同名时库里那份赢，所以装技能时禁止重名。每个技能约占 110 字符，描述只露前 100 字符左右。见 [07](issues/07-skill-library-allowlist.md)。
+- D12 记忆用 mnemopi，`scoping: global` 加 `bank: bot-<id>`，库文件放 `team/.memory/`。不再改 `PI_CODING_AGENT_DIR`，`memory-config.mjs` 基本删掉，autolearn 关掉。团队共识只写 `team/AGENTS.md`，由 Main Bot 和用户写。见 [08](issues/08-memory-per-bot.md)。
 
 ## Fog
 
-- 每 bot 一块屏在 Cua 上怎么落地。见 01。
 - 共享浏览器登录与多屏并行的冲突。见 02。
-- 隔离要防到什么程度。见 03。
-- 本机 omp 的编辑工具怎么碰到客机里的文件。见 04。
 - 两台机器的工具同时在场，模型怎么分清，审批怎么覆盖。见 05。
-- AGENTS.md 和技能往上找的边界。见 06、07。
-- 记忆每 bot 一库后，memory-config.mjs 还要不要，共识由谁写。见 08。
-- team 目录放哪、要不要 git、旧数据怎么迁。见 09。
+- team 目录放哪、旧数据怎么迁。`--add-dir` 带进来的项目 AGENTS.md 接不接受，群聊要不要关自动召回。见 09。
+- 中文记忆召回要靠嵌入模型，沙盒没测出来。要在常驻进程里测，见 08 待验。
 - 共享虚拟机给多大。见 10。
 - 已有的每 bot 虚拟机怎么处理。见 11。
 - 吉祥物怎么移植进无构建的原生 DOM 前端，拿哪些功能。见 13、14。
@@ -65,14 +67,14 @@ Status: open
 
 | # | Type | 题目 | Blocked by | Status |
 | --- | --- | --- | --- | --- |
-| [01](issues/01-per-bot-screens.md) | research | 共享电脑里每个 bot 的屏幕 | | open |
+| [01](issues/01-per-bot-screens.md) | research | 共享电脑里每个 bot 的屏幕 | | resolved |
 | [02](issues/02-shared-browser-login.md) | prototype | 共享浏览器登录与多屏并行 | 01 | open |
-| [03](issues/03-isolation-goal.md) | grilling | 隔离要防到什么程度 | | open |
-| [04](issues/04-host-guest-files.md) | research | 本机 omp 怎么碰到客机里的文件 | | open |
+| [03](issues/03-isolation-goal.md) | grilling | 隔离要防到什么程度 | | resolved |
+| [04](issues/04-host-guest-files.md) | research | 本机 omp 怎么碰到客机里的文件 | | resolved |
 | [05](issues/05-two-machine-tools.md) | grilling | 两台机器的工具同时在场 | 03, 04 | open |
-| [06](issues/06-agents-md-boundary.md) | research | AGENTS.md 往上找的边界 | | open |
-| [07](issues/07-skill-library-allowlist.md) | prototype | 共享技能库加每 bot 白名单 | | open |
-| [08](issues/08-memory-per-bot.md) | research | 记忆每 bot 一库与共识写入 | | open |
+| [06](issues/06-agents-md-boundary.md) | research | AGENTS.md 往上找的边界 | | resolved |
+| [07](issues/07-skill-library-allowlist.md) | prototype | 共享技能库加每 bot 白名单 | | resolved |
+| [08](issues/08-memory-per-bot.md) | research | 记忆每 bot 一库与共识写入 | | resolved |
 | [09](issues/09-team-directory.md) | grilling | team 目录放哪、怎么管 | 06, 07, 08 | open |
 | [10](issues/10-shared-computer-size.md) | research | 共享电脑的规格 | 01, 02 | open |
 | [11](issues/11-existing-computers.md) | grilling | 已有的每 bot 电脑怎么办 | 02, 03, 09 | open |
@@ -81,3 +83,5 @@ Status: open
 | [14](issues/14-avatar-scope.md) | grilling | 头像拿哪些功能 | 13 | open |
 
 建议先做 01 和 03。01 决定"共用一台、每 bot 一块屏"能不能成立，03 决定后面所有隔离设计的力度。04 是这个方向最大的体验风险，可以并行。
+
+2026-10-15 进度。01、03、04、06、07、08、12 已 resolved。剩下的 grilling 05、09、11、14 要用户回答，prototype 02、13 各占一个会话，10 等 02。

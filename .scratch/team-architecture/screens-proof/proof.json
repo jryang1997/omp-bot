@@ -1,0 +1,81 @@
+{
+  "ticket": "01-per-bot-screens",
+  "at": "2026-10-15T03:01:09.028Z",
+  "rounds": 15,
+  "environment": "sandbox stand-in: Amazon Linux 2023, Xvfb 21.1, xdotool, xclip, Chrome for Testing 153; 与 Cua 客机镜像使用同一组工具（xvfb、xdotool、xclip、imagemagick、chromium）",
+  "concurrent": [
+    {
+      "user": "bot-a",
+      "display": ":11",
+      "clicks": 15,
+      "lines": 15,
+      "exactOrder": true,
+      "foreignTokens": false,
+      "sample": [
+        "甲方案🙂1 bot-a-1",
+        "甲方案🙂2 bot-a-2"
+      ],
+      "p50StepMs": 263
+    },
+    {
+      "user": "bot-b",
+      "display": ":12",
+      "clicks": 15,
+      "lines": 15,
+      "exactOrder": true,
+      "foreignTokens": false,
+      "sample": [
+        "乙方案🚀1 bot-b-1",
+        "乙方案🚀2 bot-b-2"
+      ],
+      "p50StepMs": 266
+    }
+  ],
+  "screenshots": [
+    {
+      "user": "bot-a",
+      "ok": true,
+      "bytes": 69724,
+      "file": "shot-bot-a.png"
+    },
+    {
+      "user": "bot-b",
+      "ok": true,
+      "bytes": 64960,
+      "file": "shot-bot-b.png"
+    }
+  ],
+  "crossAccess": {
+    "otherScreenWithOwnCookie": {
+      "blocked": true,
+      "err": "Authorization required, but no authorization protocol specified"
+    },
+    "readOtherXauthority": {
+      "blocked": true,
+      "err": "cat: /home/bot-b/.Xauthority: Permission denied"
+    },
+    "listOtherHome": {
+      "blocked": true,
+      "err": "ls: cannot open directory '/home/bot-b': Permission denied"
+    },
+    "clipboardLeak": false,
+    "otherBrowserDebugPort": {
+      "blocked": false
+    }
+  },
+  "workspace": {
+    "bCanAppendAFile": true,
+    "content": [
+      "from a",
+      "from b",
+      "bot-a:team 660"
+    ]
+  },
+  "rssKiB": {
+    "bot-b browser": 1240544,
+    "bot-b Xvfb": 61552,
+    "bot-a browser": 1234784,
+    "bot-a Xvfb": 64416
+  },
+  "pass": true
+}

@@ -1,0 +1,49 @@
+{
+  "ticket": "04-host-guest-files",
+  "at": "2026-10-15T03:16:08.416Z",
+  "environment": "sandbox stand-in: 宿主侧 OpenSSH sftp-server 经 socat 直连（普通用户，不做缓存，代替将来的 Node SFTP 服务），客机侧 sshfs 3.7.3（root 挂载，gid=team，umask=0007，cache=no）",
+  "checks": {
+    "hostWriteGuestRead": {
+      "ok": true,
+      "ms": 18
+    },
+    "hostAtomicRenameGuestRead": {
+      "ok": true
+    },
+    "guestWriteHostRead": {
+      "ok": true,
+      "ms": 15,
+      "err": ""
+    },
+    "otherBotAppend": {
+      "ok": true,
+      "err": ""
+    },
+    "concurrentAppendSameFile": {
+      "expected": 400,
+      "got": 400,
+      "ok": true
+    },
+    "concurrentDistinctFiles": {
+      "expected": 400,
+      "guestSees": 400,
+      "hostSees": 400,
+      "ok": true
+    },
+    "execBit": {
+      "ok": true,
+      "err": ""
+    },
+    "smallFiles500": {
+      "mount": {
+        "ok": true,
+        "ms": 6600
+      },
+      "guestLocal": {
+        "ok": true,
+        "ms": 415
+      }
+    }
+  },
+  "pass": true
+}

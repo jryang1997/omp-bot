@@ -2,7 +2,7 @@
 
 Type: grilling
 Label: wayfinder:grilling
-Status: open
+Status: resolved
 Blocked by:
 
 ## Question
@@ -33,5 +33,16 @@ Blocked by:
 ## Done when
 
 隔离目标、客机用户模型、sudo 策略写进 Answer。
+
+## Answer
+
+用户 2026-10-15 确认只防误操作。
+
+- 客机里每个 bot 一个 Linux 用户，home 设 0700。`/workspace` 归共享组 `team`，目录带 setgid，组内可读写。
+- 不给免密 sudo。pi、npm 包、pipx 工具装在 bot 自己的 home 里。
+- 装系统包走一条要用户审批的路，由宿主侧发起，以客机管理员身份执行。
+- 每个 bot 的屏幕只接受它自己的 X 授权，别的 bot 默认连不上。
+- 宿主侧不加新的强制隔离。bot 之间靠工作目录约定和审批档区分，这是有意的取舍。
+- 不承诺防恶意。要防恶意得给每个 bot 单独的 Windows 账户，本 effort 不做。
 
 ## Comments

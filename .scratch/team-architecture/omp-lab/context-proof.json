@@ -1,0 +1,40 @@
+{
+  "ticket": "06-agents-md-boundary",
+  "omp": "omp/18.10.3",
+  "at": "2026-10-15T03:19:25.365Z",
+  "layouts": {
+    "A_teamIsGitRepo": [
+      "USER-LEVEL-AGENTS-MARKER",
+      "TEAM-MARKER",
+      "BOT-MARKER"
+    ],
+    "B_teamNotGit": [
+      "USER-LEVEL-AGENTS-MARKER",
+      "ABOVE-MARKER",
+      "TEAM-MARKER",
+      "BOT-MARKER"
+    ],
+    "C_insideOuterRepo": [
+      "USER-LEVEL-AGENTS-MARKER",
+      "OUTER-REPO-MARKER",
+      "TEAM-MARKER",
+      "BOT-MARKER"
+    ],
+    "D_nestedRepo": [
+      "USER-LEVEL-AGENTS-MARKER",
+      "TEAM-MARKER",
+      "BOT-MARKER"
+    ],
+    "E_teamRepoPlusAddDir": [
+      "USER-LEVEL-AGENTS-MARKER",
+      "TEAM-MARKER",
+      "BOT-MARKER",
+      "WORKSPACE-MARKER"
+    ],
+    "F_teamRepoWithCurrentOverlay": [],
+    "G_teamRepoUserOnlyDisabled": [
+      "TEAM-MARKER",
+      "BOT-MARKER"
+    ]
+  }
+}

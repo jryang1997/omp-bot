@@ -22,3 +22,5 @@ Blocked by: 01, 02
 默认规格、上限和实测数字写进 Answer。
 
 ## Comments
+
+- 01 号沙盒实测，每个 bot 的 Xvfb、spacesd 和一个开着简单页面的浏览器，PSS 合计约 385 MiB。

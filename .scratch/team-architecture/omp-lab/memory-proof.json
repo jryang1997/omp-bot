@@ -1,0 +1,99 @@
+{
+  "ticket": "08-memory-per-bot",
+  "omp": "omp/18.10.3",
+  "at": "2026-10-15T03:28:59.921Z",
+  "note": "team 是 git 仓库，bot cwd = team/bots/<名>，HOME 下只有 models.yml，没有设置 PI_CODING_AGENT_DIR",
+  "steps": {
+    "banksAfterBotWrites": [
+      "a-2dhbj8bdqsnfi",
+      "b-15o7a70eo29ag"
+    ],
+    "perProject_botA_recalls": [
+      "BOTA1",
+      "BOTA2"
+    ],
+    "perProject_botB_recalls": [
+      "BOTB1"
+    ],
+    "banksAfterUserGlobal": [
+      "a-2dhbj8bdqsnfi",
+      "b-15o7a70eo29ag"
+    ],
+    "perProject_botA_afterUserGlobal": [
+      "BOTA1",
+      "BOTA2"
+    ],
+    "tagged_botA_afterUserGlobal": [
+      "BOTA1",
+      "BOTA2",
+      "USERG1"
+    ],
+    "banksAfterTeamGlobal": [
+      "a-2dhbj8bdqsnfi",
+      "b-15o7a70eo29ag"
+    ],
+    "teamTagged_botA": [
+      "BOTA1",
+      "BOTA2",
+      "TEAMG1"
+    ],
+    "teamTagged_botB": [
+      "BOTB1",
+      "TEAMG1"
+    ],
+    "dbPath_filesInBotDir": [
+      "banks",
+      "banks/a-2dhbj8bdqsnfi",
+      "banks/a-2dhbj8bdqsnfi/mnemopi.db",
+      "banks/a-2dhbj8bdqsnfi/mnemopi.db-shm",
+      "banks/a-2dhbj8bdqsnfi/mnemopi.db-wal"
+    ],
+    "dbPath_botA_recalls": [
+      "PRIVA1"
+    ],
+    "banksAfterDbPath": [
+      "a-2dhbj8bdqsnfi",
+      "b-15o7a70eo29ag",
+      "team-a-2dhbj8bdqsnfi",
+      "team-b-15o7a70eo29ag"
+    ],
+    "sessionsDirs": [
+      "--data-omp-lab-memlab-team--",
+      "--data-omp-lab-memlab-team-bots-a--",
+      "--data-omp-lab-memlab-team-bots-b--",
+      "--data-omp-lab-memlab-user-project--"
+    ],
+    "stableId_filesInTeamMemory": [
+      "mnemopi.db",
+      "mnemopi.db-shm",
+      "mnemopi.db-wal"
+    ],
+    "stableId_botA_recalls": [
+      "STA1",
+      "STA2"
+    ],
+    "stableId_botB_recalls": [
+      "STB1"
+    ],
+    "afterMove_stableId_botA_recalls": [
+      "STA1",
+      "STA2"
+    ],
+    "afterMove_perProject_botA_recalls": [],
+    "cjkFullTextOnly": {
+      "冰淇淋": true,
+      "菠萝味的冰淇淋": true,
+      "我喜欢什么口味的冰淇淋": false,
+      "我爱吃什么": false
+    }
+  },
+  "sourceFacts": {
+    "file": "node_modules/@oh-my-pi/pi-coding-agent/src/mnemopi/config.ts",
+    "projectBank": "per-project 库名 = [bank-]<cwd 末段>-<Bun.hash(绝对 cwd)>，只看 cwd，不看 git 根",
+    "legacyRescue": "同一 banks 目录下，行里记录的 cwd 全等于当前 cwd 的旧库也会被召回；路径变了就不匹配",
+    "globalScope": "scoping global 时库名就是 bank 配置值，召回只读这一个库",
+    "autolearn": "src/autolearn/managed-skills.ts 写死在 <agentDir>/managed-skills，src/discovery/builtin.ts 无条件发现它。不改 PI_CODING_AGENT_DIR 时 bot 学到的技能会进用户自己的 omp",
+    "memoryRole": "src/mnemopi/backend.ts 的 llmMode smol 按 memory 角色选模型，persona.mjs 现有的 memoryModelRoles 已经钉住它",
+    "embeddingsNotVerified": "multilingual-e5-small 在一次性 -p 进程里每次启动都记录 resuming interrupted embedding rebuild，进程退出前没建完，中文语义召回未测出"
+  }
+}

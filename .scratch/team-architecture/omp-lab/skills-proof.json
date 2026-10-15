@@ -1,0 +1,149 @@
+{
+  "ticket": "07-skill-library-allowlist",
+  "at": "2026-10-15T03:20:21.936Z",
+  "runs": {
+    "noLibraryConfigured": {
+      "chars": 10883,
+      "skills": [
+        "private-notes",
+        "same-name"
+      ],
+      "sameName": "private",
+      "bodyLeaked": false
+    },
+    "libraryAllSkills": {
+      "chars": 14075,
+      "skills": [
+        "lib-01",
+        "lib-02",
+        "lib-03",
+        "lib-04",
+        "lib-05",
+        "lib-06",
+        "lib-07",
+        "lib-08",
+        "lib-09",
+        "lib-10",
+        "lib-11",
+        "lib-12",
+        "lib-13",
+        "lib-14",
+        "lib-15",
+        "lib-16",
+        "lib-17",
+        "lib-18",
+        "lib-19",
+        "lib-20",
+        "lib-21",
+        "lib-22",
+        "lib-23",
+        "lib-24",
+        "lib-25",
+        "lib-26",
+        "lib-27",
+        "lib-28",
+        "lib-29",
+        "lib-30",
+        "private-notes",
+        "same-name"
+      ],
+      "sameName": "library",
+      "bodyLeaked": false
+    },
+    "libraryAllowTwoPlusPrivate": {
+      "chars": 11015,
+      "skills": [
+        "lib-01",
+        "lib-02",
+        "private-notes"
+      ],
+      "sameName": null,
+      "bodyLeaked": false
+    },
+    "libraryAllowTwoOnly": {
+      "chars": 10944,
+      "skills": [
+        "lib-01",
+        "lib-02"
+      ],
+      "sameName": null,
+      "bodyLeaked": false
+    },
+    "libraryEmptyInclude": {
+      "chars": 14075,
+      "skills": [
+        "lib-01",
+        "lib-02",
+        "lib-03",
+        "lib-04",
+        "lib-05",
+        "lib-06",
+        "lib-07",
+        "lib-08",
+        "lib-09",
+        "lib-10",
+        "lib-11",
+        "lib-12",
+        "lib-13",
+        "lib-14",
+        "lib-15",
+        "lib-16",
+        "lib-17",
+        "lib-18",
+        "lib-19",
+        "lib-20",
+        "lib-21",
+        "lib-22",
+        "lib-23",
+        "lib-24",
+        "lib-25",
+        "lib-26",
+        "lib-27",
+        "lib-28",
+        "lib-29",
+        "lib-30",
+        "private-notes",
+        "same-name"
+      ],
+      "sameName": "library",
+      "bodyLeaked": false
+    },
+    "libraryCliSkillsFilter": {
+      "chars": 11736,
+      "skills": [
+        "lib-01",
+        "lib-02",
+        "lib-03",
+        "lib-04",
+        "lib-05",
+        "lib-06",
+        "lib-07",
+        "lib-08",
+        "lib-09",
+        "private-notes"
+      ],
+      "sameName": null,
+      "bodyLeaked": false
+    },
+    "noSkillsFlag": {
+      "chars": 10558,
+      "skills": [],
+      "sameName": null,
+      "bodyLeaked": false
+    },
+    "sameNameBoth": {
+      "chars": 10812,
+      "skills": [
+        "same-name"
+      ],
+      "sameName": "library",
+      "bodyLeaked": false
+    }
+  },
+  "size": {
+    "skills0": 10558,
+    "skills10": 11769,
+    "skills30": 13849,
+    "perSkillChars": 110
+  }
+}

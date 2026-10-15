@@ -1,0 +1,61 @@
+{
+  "ticket": "01-per-bot-screens",
+  "check": "one official cua-spacesd 0.5.3 per screen, driven by @trycua/cua 0.4.1 like src/computer-backend.mjs",
+  "at": "2026-10-15T03:03:50.108Z",
+  "rounds": 10,
+  "bots": [
+    {
+      "user": "bot-a",
+      "port": 3311,
+      "clicks": 10,
+      "lines": 10,
+      "exactOrder": true,
+      "foreignTokens": false,
+      "screenshot": {
+        "width": 1280,
+        "height": 800,
+        "bytes": 82025
+      },
+      "windows": [
+        {
+          "title": "Cua.AgentCursorOverlay.default",
+          "focused": false
+        },
+        {
+          "title": "bot screen",
+          "focused": true,
+          "app": "Chromium-browser"
+        }
+      ],
+      "p50StepMs": 13
+    },
+    {
+      "user": "bot-b",
+      "port": 3312,
+      "clicks": 10,
+      "lines": 10,
+      "exactOrder": true,
+      "foreignTokens": false,
+      "screenshot": {
+        "width": 1280,
+        "height": 800,
+        "bytes": 81112
+      },
+      "windows": [
+        {
+          "title": "Cua.AgentCursorOverlay.default",
+          "focused": false
+        },
+        {
+          "title": "bot screen",
+          "focused": true,
+          "app": "Chromium-browser"
+        }
+      ],
+      "p50StepMs": 19
+    }
+  ],
+  "wrongTokenBlocked": true,
+  "wrongTokenError": "CuaError.Unauthenticated: unauthenticated: unauthenticated: missing or invalid bearer token (Unauthenticated)",
+  "pass": true
+}
