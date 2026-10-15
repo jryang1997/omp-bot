@@ -5,37 +5,67 @@
 # 许可归属：本项目 MIT（LICENSE）+ 随包内置的 OMP 及其 MIT 许可（desktop/OMP-LICENSE，
 # 由 scripts/prepare-desktop.mjs 复制到 resources/runtime/ 并写 VERSION/PROVENANCE.json）。
 # publish 保持 null：没有发布源，不做自动更新；也没有代码签名证书，安装包未做 Authenticode 签名。
-appId: org.ompbot.desktop
+#
+# 发行形态（npm run package:win = scripts/package-windows.mjs）：
+#   1. omp-bot-<version>-setup.exe    NSIS 安装包；
+#   2. omp-bot-<version>-portable.zip 解压一次即用的绿色版（取代旧的单文件 portable.exe）；
+#   3. omp-bot-computer-runtime.zip   电脑功能离线资源包（qemu/ + images/ + licenses/ + manifest），
+#      解压到 omp-bot.exe 旁或用户缓存即可用：主包不再内嵌 .computer-runtime（约 1.5GB，
+#      旧单文件便携版每次启动都要把它解包出来，是启动慢的根因）。
+appId: org.ompbot.app
 productName: omp-bot
 asar: true
 npmRebuild: false
+asarUnpack:
+  - "**/*.node"
+  - "**/*.dll"
+  - "node_modules/@trycua/**/*"
+  - "node_modules/@ubjs/**/*"
 electronDist: node_modules/electron/dist
+# 只保留应用实际使用的界面语言（en-US 必留），丢掉其余 52 个 .pak（约 46MB）。
+electronLanguages:
+  - en-US
+  - zh-CN
+  - zh-TW
 publish: null
 directories:
   output: release
 files:
   - desktop/main.mjs
   - desktop/OMP-LICENSE
+  - desktop/CUA-CLI-LICENSE
+  - desktop/CUA-SPACESD-LICENSE
   - src/**/*.mjs
   - web/**/*
   - package.json
   - README.md
   - CHANGELOG.md
   - LICENSE
+  # 内嵌运行时只用同包的 cua_sdk.dll（@ubjs/node resolveLibPath 解析，见 dist/native/node-runtime.js），
+  # cua.exe 只是 setup 专用 CLI（`cua --embedded image pull`），不参与加载：111MB，不进包。
+  - "!node_modules/@trycua/cua-win32-x64-msvc/cua.exe"
 extraResources:
   # 本机原生 OMP：omp.exe + OMP-LICENSE + VERSION + PROVENANCE.json（版本、来源、sha256）。
   - from: .desktop-runtime
     to: runtime
+  # 安卓伴侣 APK：由 npm run build:android 放进 release/，这里只负责带进包（构建流程不变）。
+  - from: release
+    to: mobile
+    filter:
+      - omp-bot-android.apk
+      - omp-bot-android.json
 win:
   icon: web/assets/app-icon.ico
+  # zip 便携版沿用旧 -portable 命名；nsis 的 artifactName 优先级更高，不受影响。
+  artifactName: omp-bot-${version}-portable.${ext}
   target:
-    - target: portable
+    - target: zip
       arch: x64
     - target: nsis
       arch: x64
-portable:
-  artifactName: omp-bot-${version}-portable.exe
 nsis:
+  # 保留旧 org.ompbot.desktop 派生的安装身份，升级仍识别已有安装。
+  guid: 4356571b-0a0e-5f7d-89dd-4cceb503b213
   artifactName: omp-bot-${version}-setup.exe
   oneClick: false
   perMachine: false

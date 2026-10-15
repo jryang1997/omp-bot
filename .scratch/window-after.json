@@ -1,0 +1,28 @@
+{
+  "observedAt": "2026-10-13T03:01:13.485Z",
+  "packaged": true,
+  "visible": true,
+  "title": "omp-bot",
+  "handle": "17173912",
+  "appPath": "C:\\Users\\Jerry\\Desktop\\omp_bot\\release\\win-unpacked\\resources\\app.asar",
+  "taskbarButton": {
+    "name": "omp-bot - 1 �����д���",
+    "class": "Taskbar.TaskListButtonAutomationPeer",
+    "x": 190,
+    "y": 868,
+    "width": 30,
+    "height": 32
+  },
+  "icons": [
+    {
+      "nativeWindowIcon": true,
+      "path": "C:\\Users\\Jerry\\Desktop\\omp_bot\\.scratch\\window-after-16.png",
+      "size": 16
+    },
+    {
+      "nativeWindowIcon": true,
+      "path": "C:\\Users\\Jerry\\Desktop\\omp_bot\\.scratch\\window-after-32.png",
+      "size": 32
+    }
+  ]
+}

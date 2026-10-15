@@ -1,0 +1,1 @@
+const space=await taskSpace(2);await space.finish({keep:[]});console.log({closedOwnedBrowserSpace:true});

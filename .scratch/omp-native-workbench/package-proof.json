@@ -1,22 +1,22 @@
 {
-  "checkedAt": "2026-10-12T14:21:54.5003357Z",
+  "checkedAt": "2026-10-13T00:53:54.5556040Z",
   "files": [
     {
       "path": "release/omp-bot-0.1.0-portable.exe",
-      "bytes": 189815285,
-      "sha256": "0eb5feb8136833f270f802297e07b94d8108979e3993b12fb19e82f393c851db",
+      "bytes": 190655156,
+      "sha256": "687bbf16798576982b38dce1c6b989ce1d28c0640da6d12946c33552d6525fd2",
       "signature": "NotSigned"
     },
     {
       "path": "release/omp-bot-0.1.0-setup.exe",
-      "bytes": 190079263,
-      "sha256": "a70e1089d1039ba9e7e949f000a0174bd69a6d962fad92807326cf3ad94500b3",
+      "bytes": 190919111,
+      "sha256": "f9d2b2351cc999249e8589d94417b71225cf38df675dcc996b74806edce40216",
       "signature": "NotSigned"
     },
     {
       "path": "release/win-unpacked/omp-bot.exe",
       "bytes": 246322176,
-      "sha256": "c8aa1c82188b4beb1dd1e5d1a6c77cf12f3afa22b888cf06ce37eb8f90de85ed",
+      "sha256": "35fe56464f6d064d36ec5942ed9bedb7cd776c2fb2ca4d4fb5ec1846b25ef8fb",
       "signature": "NotSigned"
     },
     {
@@ -25,5 +25,12 @@
       "sha256": "4694cf5c4b37a88036ed183b2459d9b61b6c2f16ba2f162a8a0b50aef7a988e4",
       "signature": "NotSigned"
     }
-  ]
+  ],
+  "smoke": {
+    "feishuState": "connected",
+    "startError": null,
+    "replayedRealEvents": 37,
+    "replayedReply": "FEISHU_REAL_OK_6428",
+    "replayError": null
+  }
 }

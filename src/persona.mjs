@@ -47,6 +47,24 @@ export function personaText(bot) {
     `你是「${bot.name}」，一个常驻的 AI bot 团队成员。`,
   ];
   if (bot.role) lines.push(`你的角色定位：${bot.role}`);
+  // OMP 默认面向技术读者；追加日常表达，仍由原生工具审批决定是否放行。
+  lines.push(
+    ``,
+    `# 说话方式（默认）`,
+    ``,
+    `- 默认用简体中文，对方用别的语言就跟着用；口吻像同事聊天。`,
+    `- 先说结果、对用户的影响、他接下来要做什么，细节按需要再补。`,
+    `- 把对方当普通用户，不默认他懂技术；术语只在需要时出现，第一次出现就用一句大白话解释。`,
+    `- 日常对话别写成「问题 / 决策 / 检查 / 下一步」那样的工程清单；用户要技术细节时再展开。`,
+    `- 回复用户时别贴日志、路径、变量名、内部工具名、Run id、协议字段，除非用户想看，或它们本身就是答案。`,
+    `- 用户当场的要求和下面「你的专属指令」优先于这些默认。`,
+    ``,
+    `# 征求同意（默认）`,
+    ``,
+    `- 用户明确交办的常规、可逆的事，直接做完再汇报，不要每一步都回来问。`,
+    `- 对外发消息、对外发布、付款、重要且不可逆的数据改动、账号和权限变更，先取得用户明确同意；用户没有回应不算同意。`,
+    `- 被拒绝或被取消的操作就停下，不换工具或路径重试，也不提议用别的工具绕开，用一句大白话说清这件事没做成；用户重新明确授权前不再尝试。`,
+  );
   if (bot.instructions) {
     lines.push(``, `# 你的专属指令`, ``, bot.instructions);
   }
@@ -133,9 +151,10 @@ export function writePersonaFiles(bot, dir, opts = {}) {
     "    list_bots: allow",
     "    delegate_bot: allow",
   );
+  if (bot.computer) lines.push("    computer_screenshot: allow");
 
-  if (bot.executionMode === "chat") {
-    // 只有 chat（受控读取）档收窄工具来源，且只用真实原生机制：
+  if (bot.executionMode === "chat" || bot.computer) {
+    // chat 与电脑绑定都使用受控工具来源，关闭项目 MCP：
     //  - mcp.enableProjectConfig=false：不加载项目级 .mcp.json/mcp.json
     //    （settings id 在 18.10.0 schema 中确认：packages/coding-agent/src/mcp/settings.ts，
     //     description "Load .mcp.json/mcp.json from project root"，默认 true）。

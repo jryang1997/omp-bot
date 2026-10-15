@@ -172,7 +172,14 @@ export class Orchestrator {
 
     try {
       // 特性层是必需依赖：缺模块/构造失败就初始化失败，不带着「没有附件与成果」继续跑。
-      this.features = opts.features ?? new WorkbenchFeatures({ orch: this, bin: this.bin });
+      this.features =
+        opts.features ??
+        new WorkbenchFeatures({
+          orch: this,
+          bin: this.bin,
+          computerBackend: opts.computerBackend ?? null,
+          computerRuntimeDir: opts.computerRuntimeDir ?? null,
+        });
       this._recover();
     } catch (e) {
       try {
@@ -323,7 +330,15 @@ export class Orchestrator {
     const executionMode = patch.executionMode ?? bot.executionMode;
     const approvalMode = patch.approvalMode ?? bot.approvalMode;
     if (patch.executionMode !== undefined || patch.approvalMode !== undefined) {
-      validateModeAuthority({ executionMode, approvalMode, confirm: patch });
+      validateModeAuthority({
+        executionMode,
+        approvalMode,
+        confirm: {
+          ...patch,
+          confirmExecutionMode: executionMode === bot.executionMode || patch.confirmExecutionMode === true,
+          confirmApprovalMode: approvalMode === bot.approvalMode || patch.confirmApprovalMode === true,
+        },
+      });
     }
     // 记忆开启的 bot 改模型同样要过前置关：否则会存下一个私有目录里没有定义的模型，
     // 之后每次启动都失败（私有 models.yml 只有原选定 provider/模型）。
@@ -339,13 +354,13 @@ export class Orchestrator {
     const next = { ...bot };
     for (const k of [
       "name", "role", "instructions", "model", "thinking", "isMain",
-      "executionMode", "approvalMode", "workspace", "memoryEnabled", "skills", "budget",
+      "executionMode", "approvalMode", "workspace", "memoryEnabled", "skills", "budget", "computer",
     ]) {
       if (patch[k] !== undefined) next[k] = patch[k];
     }
     const affectsRuntime = [
       "instructions", "model", "thinking", "role", "executionMode", "approvalMode",
-      "workspace", "memoryEnabled", "skills", "budget",
+      "workspace", "memoryEnabled", "skills", "budget", "computer",
     ].some((k) => JSON.stringify(patch[k]) !== JSON.stringify(bot[k]) && patch[k] !== undefined);
     const normalized = normalizeBot({ ...next, id });
     if (!normalized) throw httpErr(400, "更新后的 bot 记录不合法", "bot_invalid");
@@ -731,6 +746,9 @@ export class Orchestrator {
    * 委派准入：同工作区自动；越域（拿别的合作范围的私有上下文）一律拒绝。
    * 能力不扩权：以父 Run 的 bot 为准；万一拿不到父 Run（理论上不应发生），
    * 退回发起者自身做基准 —— 缺信息时只会收紧，不会放开。
+   * 电脑边界：绑定电脑的发送者不能把可执行工作交给「未绑定电脑且不是 chat」的收件人，
+   * 否则那条委派会在宿主本机执行，等于绕过电脑模式；chat 收件人（受控读取、无宿主工具）
+   * 与同样绑定电脑的同事都照常放行。未绑定发送者的行为完全不变。
    */
   _assertDelegationAllowed(fromBot, target, parentRun) {
     if ((fromBot.workspace ?? "") !== (target.workspace ?? "")) {
@@ -738,6 +756,14 @@ export class Orchestrator {
         403,
         `跨工作区私有上下文不共享：${fromBot.name} 与 ${target.name} 不在同一工作区，拒绝委派`,
         "cross_workspace_denied",
+      );
+    }
+    if (fromBot.computer && !target.computer && target.executionMode !== "chat") {
+      throw httpErr(
+        403,
+        `${fromBot.name} 绑定电脑，不能把工作交给未绑定电脑的 ${target.name}（${target.executionMode}）在本机执行；` +
+          "请委派给同样绑定电脑的同事，或让 chat 档收件人只做受控读取",
+        "computer_host_escape_denied",
       );
     }
     const basis = parentRun?.botId ? (this.getBot(parentRun.botId) ?? fromBot) : fromBot;
@@ -994,6 +1020,25 @@ export class Orchestrator {
       source,
       taskId,
     });
+    // 电脑粒度准入：同一台电脑跨 scope 只允许一个运行（不排队）。失败就落一条 failed，
+    // 绝不留下「已建但永不驱动」的运行，也不假装排队。
+    if (botId) {
+      try {
+        this.features?.computers?.acquireRunLease({ botId, scope, runId: run.id });
+      } catch (e) {
+        this._setRunState(run.id, RUN_STATES.FAILED, {
+          error: `电脑准入失败：${e?.message ?? String(e)}`,
+        });
+        this.emit("run_rejected", {
+          runId: run.id,
+          botId,
+          scope,
+          code: e?.code ?? "computer_admission_denied",
+          error: e?.message ?? String(e),
+        });
+        throw e;
+      }
+    }
     this.leases.set(leaseKey, run.id);
     const ctrl = {
       run,
@@ -1044,6 +1089,35 @@ export class Orchestrator {
       }
     });
     return starting ?? this.getRun(run.id) ?? run;
+  }
+
+  /**
+   * 记录「客机副作用未知」：某个客机动作无法确认终态（取消后 guest 命令是否真的结束未知）。
+   * 还没落定的 Run 只登记，由 _finishRun 统一升级成 reconciliation_required（取消/超时/正常收尾
+   * 都不会把它冲掉，也绝不假称 cancelled）；已经落定的 Run 只补记对账字段与事件。
+   */
+  noteSideEffectUnknown(runId, info = {}) {
+    const ctrl = runId ? this.runs.get(runId) : null;
+    if (!ctrl) return false;
+    const record = {
+      status: "side_effect_unknown",
+      reason: String(info.reason ?? "guest_effect_unknown"),
+      detail: info.detail ? String(info.detail) : null,
+      at: Date.now(),
+    };
+    ctrl.sideEffectUnknown = record;
+    this.emit("run_side_effect_unknown", { runId, botId: ctrl.run.botId ?? null, scope: ctrl.run.scope, ...record });
+    // 标记晚到、Run 已经落定：台账不允许重开终态（LEDGER_IMMUTABLE），
+    // 只能如实补记对账字段与事件，绝不把 cancelled 改写成别的状态。
+    const run = this.getRun(runId);
+    if (run && isTerminalRunState(run.state)) {
+      try {
+        this._patchRun(runId, { guestSideEffect: record, ...(run.recovery ? {} : { recovery: record }) });
+      } catch (e) {
+        this.emit("run_finalize_error", { runId, error: e?.message ?? String(e) });
+      }
+    }
+    return true;
   }
 
   /** 人工接管（浏览器/电脑操作）期间暂停新回合：没有这个闸门，接管入口就是谎话。 */
@@ -1292,16 +1366,20 @@ export class Orchestrator {
       const features = this.features;
       let prepared;
       try {
-        prepared = await features.preparePrompt(run);
+        prepared = await features.preparePrompt(run, { signal: ctrl.abort.signal });
       } catch (e) {
-        throw httpErr(400, `资料准备失败：${e?.message ?? String(e)}`, "prepare_failed");
+        // 电脑类失败（未就绪/接管/租约失效）保留真实 code 与状态码，其余仍按资料准备失败上报。
+        const code = typeof e?.code === "string" && e.code.startsWith("computer_") ? e.code : "prepare_failed";
+        const status = code === "prepare_failed" ? 400 : Number.isInteger(e?.status) ? e.status : 409;
+        throw httpErr(status, `资料准备失败：${e?.message ?? String(e)}`, code);
       }
       if (ctrl.cancelled) {
         return await this._finishRun(runId, RUN_STATES.CANCELLED, { error: "启动前已取消" });
       }
       if (run.kind === "room") return await this._driveRoomRun(runId, prepared);
+      const directChat = run.kind === "chat" && (run.source === "user" || run.source?.startsWith("device:"));
 
-      if (run.source === "user" && run.kind === "chat") {
+      if (directChat) {
         this.store.appendChat(run.botId, { role: "user", text: run.text, at: Date.now() });
         this.emit("user_to_bot", { runId, botId: run.botId, text: run.text });
       }
@@ -1330,11 +1408,9 @@ export class Orchestrator {
       if (ctrl.usageUnknown && run.budget) return await this._finishUnverifiable(runId);
 
       const reply = res.text ?? "";
-      if (run.kind === "chat") {
-        if (run.source === "user") {
-          this.store.appendChat(run.botId, { role: "assistant", text: reply, at: Date.now() });
-          this.emit("bot_to_user", { runId, botId: run.botId, text: reply });
-        }
+      if (directChat) {
+        this.store.appendChat(run.botId, { role: "assistant", text: reply, at: Date.now() });
+        this.emit("bot_to_user", { runId, botId: run.botId, text: reply });
       }
       return await this._finishRun(runId, RUN_STATES.COMPLETED, { reply });
     } catch (e) {
@@ -1372,8 +1448,24 @@ export class Orchestrator {
     return await this._finishRun(runId, RUN_STATES.COMPLETED, { reply });
   }
 
-  /** 单一原生回合入口：所有 native 投递（私聊/委派/群回合）都走这里。 */
-  async nativeTurn({ runtime, runId, botId, scope, signal, text, images, timeoutMs, depth }) {
+  /**
+   * 单一原生回合入口：所有 native 投递（私聊/委派/群回合）都走这里。
+   * 电脑粒度租约在这一层按回合持有：群回合没有单归属 Run 的准入，只有这里能覆盖整个回合；
+   * 私聊/委派 Run 已在 startRun 持有（引用计数 +1/-1，同一 Run 不会互相踢掉）。
+   */
+  async nativeTurn(input = {}) {
+    const { botId, scope, runId } = input;
+    const computers = this.features?.computers;
+    const leaseHeld = Boolean(computers && botId && runId);
+    if (leaseHeld) computers.acquireRunLease({ botId, scope, runId });
+    try {
+      return await this._nativeTurn(input);
+    } finally {
+      if (leaseHeld) computers.releaseRunLease(runId);
+    }
+  }
+
+  async _nativeTurn({ runtime, runId, botId, scope, signal, text, images, timeoutMs, depth }) {
     // Bot 自身额度的回合前闸门：非法预算不跑；额度已被花完/预留完则拒绝开新回合。
     // 对群回合尤其重要——群成员自己入群也不能绕过该 bot 的预算。
     const bot = botId ? this.getBot(botId) : null;
@@ -1565,6 +1657,7 @@ export class Orchestrator {
     if (isTerminalRunState(current.state)) {
       this._releaseReservation(runId);
       this._releaseLease(runId);
+      this.features?.computers?.releaseRunLease(runId);
       this._notifyRunWaiters(runId, current);
       return current;
     }
@@ -1618,6 +1711,15 @@ export class Orchestrator {
     if (ctrl?.cancelErrors?.length) {
       merged.error = [merged.error, ...ctrl.cancelErrors].filter(Boolean).join("; ");
     }
+    // 客机动作无法确认终态（取消没真正结束 guest 命令）：一律落对账态，
+    // 绝不假称 completed/cancelled。具体原因保留在 recovery 里供人工核对。
+    if (ctrl?.sideEffectUnknown && state !== RUN_STATES.RECONCILIATION_REQUIRED) {
+      const guest = { ...ctrl.sideEffectUnknown };
+      merged.recovery = merged.recovery ?? guest;
+      merged.guestSideEffect = guest;
+      merged.requestedState = state;
+      state = RUN_STATES.RECONCILIATION_REQUIRED;
+    }
     const next = this.ledger.updateRun(runId, { state, ...merged });
     this.emit("run_finished", {
       runId,
@@ -1628,6 +1730,7 @@ export class Orchestrator {
     });
     this._releaseReservation(runId);
     this._releaseLease(runId);
+    this.features?.computers?.releaseRunLease(runId);
     this._notifyRunWaiters(runId, next);
     return next;
   }
@@ -1814,6 +1917,8 @@ export class Orchestrator {
       }
     }
     this.emit("ui_request", { runId, botId, scope, approval: rec });
+    const notification = this.features?.notifyApproval?.(rec);
+    if (notification) this._background(notification);
     const timer = setTimeout(() => {
       this._expireApproval(rec.id).catch((e) =>
         this.emit("ui_expire_error", { approvalId: rec.id, error: e?.message ?? String(e) }),
@@ -1930,10 +2035,18 @@ export class Orchestrator {
   _resolveApproval(id, status) {
     const rec = this.ledger.get("approvals", id);
     if (!rec || rec.status !== "pending") return null;
+    const ctrl = rec.runId ? this.runs.get(rec.runId) : null;
+    const rt = ctrl?.runtime ?? this.runtimes.get(`${rec.botId}::${rec.scope}`);
+    if (rt?.alive && rec.nativeId) {
+      try {
+        rt.respondUi(rec.nativeId, { cancelled: true });
+      } catch (e) {
+        ctrl?.cancelErrors.push(`取消原生审批失败：${e?.message ?? String(e)}`);
+      }
+    }
     const next = { ...rec, status, resolvedAt: Date.now() };
     this.ledger.put("approvals", next);
     this._clearUiTimer(id);
-    const ctrl = rec.runId ? this.runs.get(rec.runId) : null;
     ctrl?.approvals.delete(id);
     this.emit("ui_resolved", { runId: rec.runId, botId: rec.botId, scope: rec.scope, approval: next });
     return next;
@@ -1998,30 +2111,37 @@ export class Orchestrator {
     const bot = this.getBot(botId);
     const rt = this.runtimes.get(`${botId}::${scope}`);
     const verdict = rt?.toolSurface ?? null;
-    // 如实披露：supervised 是原生审批档，不是 OS 沙箱；chat 的收窄程度以运行时工具面校验为准。
+    const narrowed = bot?.executionMode === "chat" || !!bot?.computer;
+    const mechanism = bot?.computer
+      ? "--no-tools + --no-extensions + --no-skills + mcp.enableProjectConfig:false + disabledExtensions mcp:<name>；工具面只允许团队工具与客机工具（computer_screenshot/input/shell/files/upload_attachment/publish_file）"
+      : "--no-tools + --no-extensions + mcp.enableProjectConfig:false + disabledExtensions mcp:<name>";
+    // 如实披露：supervised 是原生审批档，不是 OS 沙箱；chat/电脑档的收窄程度以运行时工具面校验为准。
     const disclosure = {
       executionMode: bot?.executionMode ?? null,
       approvalMode: bot?.approvalMode ?? null,
+      computer: bot?.computer ? { bound: true, runtime: bot.computer.runtime, kind: bot.computer.kind } : { bound: false },
       sandbox: false,
       sandboxNote: "本机没有经过验证的 OS 沙箱；supervised/chat/full 都不是沙箱，只是审批与工具范围差异",
-      toolSurface:
-        bot?.executionMode === "chat"
-          ? verdict
-            ? {
-                restricted: true,
-                nativeVerification: verdict.verified ? "verified" : "failed",
-                reported: verdict.reported ?? null,
-                violations: verdict.violations ?? [],
-              }
-            : {
-                restricted: true,
-                nativeVerification: "unverified",
-                mechanism:
-                  "--no-tools + --no-extensions + mcp.enableProjectConfig:false + disabledExtensions mcp:<name>",
-                reported: null,
-                violations: null,
-              }
-          : { restricted: false, nativeVerification: "n/a", reported: null, violations: null },
+      toolSurface: narrowed
+        ? verdict
+          ? {
+              restricted: true,
+              // 实际 dumpTools 的自报工具面：越界即拒绝回合（blocked 里带 violations）
+              nativeVerification: verdict.verified ? "verified" : "failed",
+              kind: verdict.kind ?? (bot?.computer ? "computer" : "chat"),
+              reported: verdict.reported ?? null,
+              allowed: verdict.allowed ?? null,
+              violations: verdict.violations ?? [],
+            }
+          : {
+              restricted: true,
+              nativeVerification: "unverified",
+              kind: bot?.computer ? "computer" : "chat",
+              mechanism,
+              reported: null,
+              violations: null,
+            }
+        : { restricted: false, nativeVerification: "n/a", reported: null, violations: null },
       ...(rt?.blocked ? { blocked: rt.blocked } : {}),
     };
     if (!rt) {
@@ -2176,11 +2296,19 @@ export class Orchestrator {
     }
     this.runtimes.clear();
     this.leases.clear();
-    this.store.flushExchanges();
-    this.store.releaseLock();
-    try {
-      this.ledger.close();
-    } catch {}
+    // 释放资源必须走到最后一步：任何一步失败都不能让 SQLite 句柄活过 shutdown
+    // （句柄没关时 Windows 清理 workbench.sqlite 会 EPERM）。失败当场经事件如实上报，不静默吞掉。
+    const release = (step, fn) => {
+      try {
+        fn();
+      } catch (e) {
+        this.emit("shutdown_error", { step, error: e?.message ?? String(e) });
+      }
+    };
+    // 只读 Store 从未接受过写入，flush 必然被只读守卫拒绝：按真实语义跳过，不是掩盖错误。
+    if (!this.store.readonly) release("store.flushExchanges", () => this.store.flushExchanges());
+    release("store.releaseLock", () => this.store.releaseLock());
+    release("ledger.close", () => this.ledger.close());
   }
 }
 

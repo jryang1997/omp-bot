@@ -1,0 +1,30 @@
+{
+  "status": "SEMANTIC_PASS",
+  "surface": "Installed Windows Ego Lite 0.5.2.15",
+  "spaceId": 4,
+  "result": [
+    {
+      "city": "北京",
+      "value": 37
+    }
+  ],
+  "snapshot": "[p1 \"OMP Bot browser fixture\" | space \"omp_bot browser efficiency probe\"(4): 1 managed, 0 untracked — p1* \"OMP Bot browser fixture\"]\nroot\n  heading\n    text \"浏览器自动化探针\"\n  container\n    text \"城市\"\n    textbox [ref=1]\n      text \"北京\"\n  button [ref=2]\n    text \"筛选\"\n  table\n    table_row\n      table_cell\n        text \"城市\"\n      table_cell\n        text \"数值\"\n    table_row\n      table_cell\n        text \"北京\"\n      table_cell\n        text \"37\"\n",
+  "egoTested": true,
+  "timingComparison": false,
+  "modelComparison": false,
+  "screenshot": {
+    "highLevel": "Page.captureScreenshot timed out in first round",
+    "rawCdp": "CDP request timed out: Page.captureScreenshot"
+  },
+  "closed": true,
+  "scope": "Capability smoke on own local fixture, not a performance benchmark",
+  "finishReceipt": {
+    "spaceId": 4,
+    "closedSpace": true,
+    "keptManagedLabels": [],
+    "closedManagedLabels": [
+      "p1"
+    ],
+    "preservedUnmanagedCount": 0
+  }
+}

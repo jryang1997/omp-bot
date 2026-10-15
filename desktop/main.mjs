@@ -12,6 +12,8 @@ const runFile = promisify(execFile);
 const MIN_OMP = [18, 10, 0];
 const MIN_NODE_MAJOR = 24;
 const RUN_LIST_LIMIT = 1000;
+// 打包身份与 installer 一致；开发版独立，避免 Electron 的外壳缓存污染正式版。
+const APP_USER_MODEL_ID = app.isPackaged ? "org.ompbot.app" : "org.ompbot.app.dev";
 
 function parseVersion(text) {
   const m = /(\d+)\.(\d+)\.(\d+)/.exec(String(text ?? ""));
@@ -98,11 +100,15 @@ function bundledProvenance() {
   }
 }
 
+function appIconFile() {
+  return join(app.getAppPath(), "web", "assets", process.platform === "win32" ? "app-icon.ico" : "app-icon.png");
+}
+
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   // Windows 上原生通知要归属到应用自己，否则可能挂在 electron 默认名下。
-  if (process.platform === "win32") app.setAppUserModelId("org.ompbot.desktop");
+  if (process.platform === "win32") app.setAppUserModelId(APP_USER_MODEL_ID);
   let phase = "starting"; // starting | running | stopping | stopped
   let backend;
   let window;
@@ -402,7 +408,7 @@ if (!app.requestSingleInstanceLock()) {
       width: 1280,
       height: 860,
       show: false,
-      icon: join(app.getAppPath(), "web", "assets", "app-icon.png"),
+      icon: appIconFile(),
       webPreferences: {
         sandbox: true,
         contextIsolation: true,
@@ -410,6 +416,25 @@ if (!app.requestSingleInstanceLock()) {
         devTools: !app.isPackaged,
       },
     });
+
+    // 任务栏按钮（含固定与分组）认的是窗口的 App User Model 身份，不是窗口图标：外壳读不到 app.asar 内的文件，
+    // 所以打包后用 EXE 里已烘焙的多尺寸图标，开发时用磁盘上的 ico。
+    if (process.platform === "win32") {
+      const portable = process.env.PORTABLE_EXECUTABLE_FILE;
+      // 便携版解包在临时目录，重启必须回到外壳 exe；开发版要带上项目目录，否则重启只会开出空的 Electron。
+      const relaunchCommand = portable
+        ? `"${portable}"`
+        : app.isPackaged
+          ? `"${process.execPath}"`
+          : `"${process.execPath}" "${app.getAppPath()}"`;
+      window.setAppDetails({
+        appId: APP_USER_MODEL_ID,
+        appIconPath: app.isPackaged ? portable || process.execPath : appIconFile(),
+        appIconIndex: 0,
+        relaunchCommand,
+        relaunchDisplayName: "omp-bot",
+      });
+    }
 
     const origin = new URL(backend.url).origin;
     function localUrl(target) {
@@ -461,7 +486,7 @@ if (!app.requestSingleInstanceLock()) {
     });
 
     // 托盘：关窗后仍能回到窗口或显式退出。
-    const iconFile = join(app.getAppPath(), "web", "assets", process.platform === "win32" ? "app-icon.ico" : "app-icon.png");
+    const iconFile = appIconFile();
     const icon = existsSync(iconFile) ? nativeImage.createFromPath(iconFile) : nativeImage.createEmpty();
     if (!icon.isEmpty()) {
       tray = new Tray(icon);

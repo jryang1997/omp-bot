@@ -199,7 +199,7 @@ export class PairingService {
       salt,
       botIds: [...ticket.botIds],
       permissions: [...ticket.permissions],
-      label: String(req.name ?? ticket.label ?? ""),
+      label: String(req.name || ticket.label || ""),
       ticketId: ticket.id,
       createdAt: at,
       revokedAt: null,
@@ -212,30 +212,48 @@ export class PairingService {
   }
 
   /**
-   * 校验设备 token。成功返回设备视图（含权限与作用域），失败返回 null。
-   * 不做任何 owner/admin 推断：设备只有 devices 记录里的权限。
+   * 按 token 找设备行（含已撤销），供 authenticate 与 revokedDevice 共用。
    *
    * 已知边界（本机单用户部署够用，不做通用注册表改造）：devices 类别同时放配对码与设备，
    * token 是随机串不可索引，因此这里按 Ledger 的 list 上限（1000 条，ITEM_LIMIT_MAX）线性扫描；
    * 超过上限后最旧的设备会扫不到（表现为认证失败）——需要时改按 token 摘要分桶建索引。
    */
-  authenticate(token) {
+  #deviceRowByToken(token) {
     const raw = typeof token === "string" ? token : "";
     if (!raw.startsWith(TOKEN_PREFIX) || raw.length < 32) return null;
     const rows = this.#ledger().list("devices", { limit: 1000 });
     for (const d of rows) {
-      if (d.type !== "device" || d.revokedAt || typeof d.salt !== "string") continue;
+      if (d.type !== "device" || typeof d.salt !== "string") continue;
       if (!safeEqualHex(d.tokenHash, sha256hex(d.salt + raw))) continue;
-      const at = this.now();
-      if (!d.lastUsedAt || at - d.lastUsedAt > 60_000) {
-        // 只用于展示「最近使用」；写失败（readonly 副本）不影响认证结果。
-        try {
-          this.#ledger().put("devices", { ...d, lastUsedAt: at });
-        } catch {}
-      }
-      return publicDevice({ ...d, lastUsedAt: at });
+      return d;
     }
     return null;
+  }
+
+  /**
+   * 校验设备 token。成功返回设备视图（含权限与作用域），失败返回 null。
+   * 不做任何 owner/admin 推断：设备只有 devices 记录里的权限。
+   */
+  authenticate(token) {
+    const row = this.#deviceRowByToken(token);
+    if (!row || row.revokedAt) return null;
+    const at = this.now();
+    if (!row.lastUsedAt || at - row.lastUsedAt > 60_000) {
+      // 只用于展示「最近使用」；写失败（readonly 副本）不影响认证结果。
+      try {
+        this.#ledger().put("devices", { ...row, lastUsedAt: at });
+      } catch {}
+    }
+    return publicDevice({ ...row, lastUsedAt: at });
+  }
+
+  /**
+   * 已撤销设备 token 的甄别：命中且已撤销 → 设备视图；无效或在效 → null。
+   * HTTP 层据此把「已撤销」与「从未有效」分开报（401 DEVICE_REVOKED），客户端才能去重新配对。
+   */
+  revokedDevice(token) {
+    const row = this.#deviceRowByToken(token);
+    return row?.revokedAt ? publicDevice(row) : null;
   }
 
   /** 作用域与权限检查：越界直接抛 403，不返回真假。 */

@@ -234,9 +234,6 @@ class FakeRuntime extends EventEmitter {
     for (const w of this._abortWaiters.splice(0)) {
       w.reject(Object.assign(new Error("aborted"), { name: "AbortError", code: "aborted", settled: true }));
     }
-    for (const w of this._uiWaiters.splice(0)) {
-      w.reject(Object.assign(new Error("aborted"), { name: "AbortError", code: "aborted", settled: true }));
-    }
     return { ok: true };
   }
 
@@ -584,6 +581,28 @@ await test("cancelRun：cancelling → 原生 abort → cancelled，随后可再
     fake.queue = [{ kind: "complete", text: "after-cancel" }];
     const next = t.orch.startRun({ botId: bot.id, text: "再来" });
     assert.equal((await t.orch.waitRun(next.id)).reply, "after-cancel");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+await test("取消挂起原生审批：解除 UI 等待、落 cancelled，随后可继续运行", async () => {
+  const t = newTeam();
+  try {
+    const bot = t.orch.addBot({ name: "CancelApprovalProbe" });
+    const fake = await t.orch.runtimeFor(bot.id, "private");
+    fake.queue = [{ kind: "ui", frame: {
+      type: "extension_ui_request", id: "cancel-ui", method: "confirm", title: "允许执行？",
+    } }];
+    const run = t.orch.startRun({ botId: bot.id, text: "等待审批" });
+    const approval = await waitFor(() => t.orch.ledger.list("approvals").find((a) => a.runId === run.id && a.status === "pending"));
+    const out = await t.orch.cancelRun(run.id);
+    assert.equal(out.run.state, "cancelled");
+    assert.equal(t.orch.ledger.get("approvals", approval.id).status, "cancelled");
+    assert.equal(fake.busy, false);
+    fake.queue = [{ kind: "complete", text: "after-approval-cancel" }];
+    const next = t.orch.startRun({ botId: bot.id, text: "继续" });
+    assert.equal((await t.orch.waitRun(next.id)).reply, "after-approval-cancel");
   } finally {
     await t.cleanup();
   }
@@ -1513,6 +1532,18 @@ await test("策略与记忆前置校验：sandbox 被拒、full/yolo 需显式�
     assert.equal(legit.executionMode, "full");
     assert.equal(legit.approvalMode, "yolo");
     assert.deepEqual(legit.skills, ["git-*"]);
+    assert.equal(t.orch.updateBot(legit.id, { approvalMode: "write" }).approvalMode, "write");
+    assert.equal(t.orch.getBot(legit.id).executionMode, "full");
+    assert.throws(
+      () => t.orch.updateBot(legit.id, { approvalMode: "yolo" }),
+      (e) => e.code === "confirm_approval_required",
+    );
+    assert.equal(t.orch.updateBot(legit.id, { approvalMode: "yolo", confirmApprovalMode: true }).approvalMode, "yolo");
+    assert.equal(t.orch.updateBot(legit.id, { executionMode: "supervised" }).executionMode, "supervised");
+    assert.throws(
+      () => t.orch.updateBot(legit.id, { executionMode: "full" }),
+      (e) => e.code === "confirm_execution_required",
+    );
 
     assert.throws(
       () => t.orch.updateBot(legit.id, { executionMode: "sandbox" }),
@@ -1847,6 +1878,31 @@ await test("会话与原生命令：运行中拒绝、空闲可调用、导出�
     await t.orch.cancelRun(run.id);
   } finally {
     await t.cleanup();
+  }
+});
+
+await test("只读副本 shutdown：台账句柄必须被关掉，不留给清理动作 EPERM", async () => {
+  const home = mkdtempSync(join(tmpdir(), "ompbot-runs-"));
+  let writer;
+  let reader;
+  try {
+    writer = new Orchestrator({ home, bin: "omp-fixture", runtimeFactory: (o) => new FakeRuntime(o), features: stubFeatures() });
+    reader = new Orchestrator({ home, bin: "omp-fixture", runtimeFactory: (o) => new FakeRuntime(o), features: stubFeatures() });
+    assert.equal(reader.store.readonly, true, "同一 home 的第二个实例必须是只读副本");
+    await writer.shutdown();
+    // 只读 store 的 flush 曾被只读守卫拒绝，shutdown 在 ledger.close() 之前中断，句柄活过关停。
+    await reader.shutdown();
+    assert.throws(() => reader.ledger.usage(), (e) => e.code === "LEDGER_CLOSED", "shutdown 后台账必须已关闭");
+    rmSync(home, { recursive: true, force: true }); // 句柄还活着时 Windows 会在这里 EPERM
+    assert.equal(existsSync(home), false);
+  } finally {
+    try {
+      await reader?.shutdown();
+    } catch {}
+    try {
+      await writer?.shutdown();
+    } catch {}
+    rmSync(home, { recursive: true, force: true });
   }
 });
 

@@ -1,9 +1,15 @@
 // 边界：模型循环、压缩、技能、连接器、浏览器仍由 OMP 原生负责，这里不建第二套引擎。
 //
-// 投递语义（at-most-once，明确写出）：事件在回 200 之前先落一条 inbound 记录（去重标记），
+// 入站有两条链路，认证之后共用同一份 intake（身份白名单 → 落库去重 → 排队）：
+// http = 本地 receiver，飞书加密回调 + 签名/verificationToken 校验；
+// websocket = 官方 SDK 长连接，鉴权在握手阶段由 appId+appSecret 完成、事件为明文（不需要
+// verificationToken/encryptKey），所以没有任何公网入口，也就没有可绕过的回调路由。
+//
+// 投递语义（at-most-once，明确写出）：事件在确认之前先落一条 inbound 记录（去重标记），
 // 之后才在内存队列里处理。因此「已确认但未跑完」在重启后只会显示为 interrupted，绝不自动重放；
-// 飞书重投同一 event_id 会被去重拒绝。未配置 encryptKey 时只做 token 校验（官方该模式无签名），
-// status().inbound.signatureMode 会如实暴露 token-only。
+// 去重按 message_id（官方文档：同一条消息重投时 event_id 可能不同），event_id 只作诊断字段。
+// HTTP 链路未配置 encryptKey 时只做 token 校验（官方该模式无签名），status().inbound.signatureMode
+// 会如实暴露 token-only 或 sdk-long-connection。
 
 import { createServer } from "node:http";
 import { createHash, createDecipheriv, timingSafeEqual } from "node:crypto";
@@ -16,6 +22,10 @@ export const CHANNEL_CONFIG_FILE = "channels.feishu.json";
 
 const MAX_SKEW_DEFAULT_MS = 5 * 60 * 1000;
 const MAX_BODY_DEFAULT = 256 * 1024;
+/** 长连接首次连上的等待上限；同时作为 SDK 单次握手的超时。 */
+const CONNECT_TIMEOUT_DEFAULT_MS = 15_000;
+/** 官方长连接的 appId 形状（SDK WSClient.start 用同一个正则校验，不匹配就静默不连）。 */
+const APP_ID_PATTERN = /^cli_[0-9a-fA-F]{16}$/;
 const INBOUND_KEEP = 500;
 const INBOUND_PREFIX = "feishu_inbound_";
 
@@ -124,6 +134,15 @@ export function normalizeChannelConfig(config = {}) {
   }
   const path = String(config.path ?? "/api/channels/feishu/events");
   if (!path.startsWith("/")) throw new ChannelsError("FEISHU_BAD_CONFIG", "path 必须以 / 开头", 400);
+  // 缺省 http：老配置（没有 transport 字段）继续走本地回调，行为不变；新配置由界面写 websocket。
+  const transport = String(config.transport ?? "http");
+  if (transport !== "http" && transport !== "websocket") {
+    throw new ChannelsError("FEISHU_BAD_CONFIG", `transport 只支持 http 或 websocket，收到 ${String(config.transport)}`, 400);
+  }
+  const connectTimeoutMs = Number(config.connectTimeoutMs ?? CONNECT_TIMEOUT_DEFAULT_MS);
+  if (!Number.isFinite(connectTimeoutMs) || connectTimeoutMs <= 0) {
+    throw new ChannelsError("FEISHU_BAD_CONFIG", "connectTimeoutMs 必须是正数（毫秒）", 400);
+  }
   const maxSkewMs = Number(config.maxSkewMs ?? MAX_SKEW_DEFAULT_MS);
   if (!Number.isFinite(maxSkewMs) || maxSkewMs < 0) {
     throw new ChannelsError("FEISHU_BAD_CONFIG", "maxSkewMs 必须是非负数", 400);
@@ -138,6 +157,9 @@ export function normalizeChannelConfig(config = {}) {
   }
   return {
     enabled: config.enabled === true,
+    transport,
+    // 存盘原值（没存过就是 null）：状态里回显它，界面才能区分「从没配过」与「存的是 http」。
+    transportStored: config.transport === undefined ? null : transport,
     host,
     port,
     path,
@@ -151,6 +173,9 @@ export function normalizeChannelConfig(config = {}) {
     encryptKeyEnv: config.encryptKeyEnv ? String(config.encryptKeyEnv) : null,
     identities: normalizeIdentities(config.identities ?? []),
     maxSkewMs,
+    connectTimeoutMs,
+    // 长连接客户端的注入点（默认用官方 SDK 的 WSClient）；事件解析始终是官方 EventDispatcher。
+    wsClientFactory: typeof config.wsClientFactory === "function" ? config.wsClientFactory : null,
     maxBodyBytes: Number.isFinite(config.maxBodyBytes) ? config.maxBodyBytes : MAX_BODY_DEFAULT,
     allowNonLoopback: config.allowNonLoopback === true,
     fetchImpl: config.fetchImpl ?? globalThis.fetch,
@@ -182,6 +207,22 @@ export function identityKeyOf(event) {
   const openId = String(ev?.sender?.sender_id?.open_id ?? "");
   const chatId = String(ev?.message?.chat_id ?? "");
   return `${openId}:${chatId}`;
+}
+
+/**
+ * 事件信封：HTTP 回调是嵌套 v2（header/event），官方 SDK 长连接把 header 与 event
+ * 摊平到顶层再交给 handler（见 SDK RequestHandle.parse）。两种形状都归一成
+ * { eventId, eventType, event }，好让两条入站链路共用同一份 intake。
+ */
+function eventEnvelope(payload) {
+  if (payload?.header || payload?.event) {
+    return {
+      eventId: String(payload.header?.event_id ?? ""),
+      eventType: payload.header?.event_type,
+      event: payload.event ?? {},
+    };
+  }
+  return { eventId: String(payload?.event_id ?? ""), eventType: payload?.event_type, event: payload };
 }
 
 function resolveBotRef(ref, bots) {
@@ -331,6 +372,7 @@ export class FeishuBridge {
     this.config = normalizeChannelConfig(config);
     this.identities = new Map(this.config.identities.map((i) => [i.key, i]));
     this.server = null;
+    this.socket = null;
     this.port = null;
     this.started = false;
     this.pending = new Set();
@@ -351,16 +393,15 @@ export class FeishuBridge {
     return l;
   }
 
-  /** 启动前缺什么（可执行清单）。 */
   missing() {
     const c = this.config;
+    if (c.transport === "websocket") return this.outboundMissing();
     const out = [];
     if (!c.verificationToken) out.push("verificationToken（或 verificationTokenEnv）");
     if (!c.identities.length) out.push("identities（open_id+chat_id → botIds）");
     return out;
   }
 
-  /** 出站缺什么（不影响入站，但发送会返回可执行错误）。 */
   outboundMissing() {
     const c = this.config;
     const out = [];
@@ -369,37 +410,50 @@ export class FeishuBridge {
     return out;
   }
 
-  /** 只读状态：显示「是否配置」，永不回显密钥。 */
   status() {
     const c = this.config;
-    const running = this.started && !!this.server;
+    const websocket = c.transport === "websocket";
+    const socketState = this.socket?.getConnectionStatus?.() ?? null;
+    const running = websocket ? socketState?.state === "connected" : this.started && !!this.server;
     return {
       enabled: c.enabled,
-      receiver: {
-        running,
-        host: c.host,
-        port: this.port ?? c.port,
-        path: c.path,
-        url: running ? `http://${c.host === "::1" ? "[::1]" : c.host}:${this.port}${c.path}` : null,
-        loopbackOnly: isLoopback(c.host),
-        remoteHint: isLoopback(c.host)
-          ? null
-          : "已显式允许非回环绑定：远端接入请自备 HTTPS 反向代理与访问控制，本服务不建隧道",
-      },
+      receiver: websocket
+        ? {
+            transport: c.transport,
+            running,
+            state: socketState?.state ?? "idle",
+            reconnectAttempts: socketState?.reconnectAttempts ?? 0,
+            nextConnectTime: socketState?.nextConnectTime ?? null,
+          }
+        : {
+            transport: c.transport,
+            running,
+            host: c.host,
+            port: this.port ?? c.port,
+            path: c.path,
+            url: running ? `http://${c.host === "::1" ? "[::1]" : c.host}:${this.port}${c.path}` : null,
+            loopbackOnly: isLoopback(c.host),
+            remoteHint: isLoopback(c.host)
+              ? null
+              : "已显式允许非回环绑定：远端接入请自备 HTTPS 反向代理与访问控制，本服务不建隧道",
+          },
       inbound: {
         verificationTokenConfigured: !!c.verificationToken,
         encryptKeyConfigured: !!c.encryptKey,
-        signatureRequired: !!c.encryptKey,
-        signatureMode: c.encryptKey ? "signed" : "token-only",
-        signatureWarning: c.encryptKey
+        signatureRequired: !websocket && !!c.encryptKey,
+        signatureMode: websocket ? "sdk-long-connection" : c.encryptKey ? "signed" : "token-only",
+        signatureWarning: websocket || c.encryptKey
           ? null
           : "未配置 encryptKey：该模式下飞书不提供签名，仅用 verificationToken 认证，时间戳/重放窗口不生效；该 token 泄漏即可伪造身份，请尽快配置 encryptKey",
         identities: this.identities.size,
+        identityWarning: websocket && !this.identities.size
+          ? "未配置 identities：长连接可以建立，但任何身份的事件都会被拒绝且不回执"
+          : null,
         maxSkewMs: c.maxSkewMs,
         seenEvents: this.seen,
         events: this.#inboundStats(),
         interruptedOnStartup: this.recovered,
-        delivery: "at-most-once：先落 inbound 记录再回 200，重启后未完成的只标 interrupted，不自动重放",
+        delivery: "at-most-once：先落 inbound 记录再确认（HTTP 回 200 / 长连接回 code 0），按 message_id 去重；重启后未完成的只标 interrupted，不自动重放",
       },
       outbound: {
         configured: !!(c.appId && c.appSecret),
@@ -409,6 +463,7 @@ export class FeishuBridge {
       },
       missing: c.enabled ? this.missing() : [],
       configuration: {
+        transport: c.transportStored,
         host: c.host, port: c.port, path: c.path,
         appId: c.appId, appSecretEnv: c.appSecretEnv,
         verificationTokenEnv: c.verificationTokenEnv, encryptKeyEnv: c.encryptKeyEnv,
@@ -420,28 +475,27 @@ export class FeishuBridge {
     };
   }
 
-  /** 显式开关：关闭时真的关掉 receiver 并释放端口。 */
   async setEnabled(flag) {
     this.config.enabled = flag === true;
     if (!this.config.enabled) await this.close();
     return this.status();
   }
 
-  /** 启动 receiver。禁用时只返回状态，不 bind、不建隧道。 */
   async start() {
     if (this.started) return this.status();
     const c = this.config;
     if (!c.enabled) return this.status();
+    const websocket = c.transport === "websocket";
     const missing = this.missing();
     if (missing.length) {
       throw new ChannelsError(
         "FEISHU_NOT_CONFIGURED",
-        `飞书入站未启用：缺少 ${missing.join("、")}。补齐后重试（可用环境变量引用，不要把密钥写进仓库）`,
+        `飞书${websocket ? "长连接" : "回调接收器"}未启用：缺少 ${missing.join("、")}。补齐后重试（可用环境变量引用，不要把密钥写进仓库）`,
         503,
       );
     }
+    if (websocket) return this.#startSocket();
     if (!c.appSecret && !c.appSecretEnv) {
-      // 入站可独立工作，但状态里明确标出站未配置，避免以为闭环已通。
       this.lastError = { at: this.#now(), code: "FEISHU_OUTBOUND_NOT_CONFIGURED", message: "出站未配置：结果无法回发飞书" };
     }
     const server = createServer((req, res) => this.#onRequest(req, res));
@@ -460,33 +514,114 @@ export class FeishuBridge {
     return this.status();
   }
 
-  /** 关闭 receiver：停止监听、断开存量连接；在飞处理最多等 2s，不让长 Run 卡住关闭。 */
+  async #startSocket() {
+    const c = this.config;
+    if (!APP_ID_PATTERN.test(c.appId)) {
+      // SDK 的 WSClient.start 对形状不对的 appId 只记一条日志就静默返回（不连、不回调），这里提前给出可执行错误。
+      throw new ChannelsError(
+        "FEISHU_BAD_CONFIG",
+        `长连接要求 appId 形如 cli_ + 16 位十六进制，当前为「${c.appId || "（空）"}」`,
+        400,
+      );
+    }
+    // 动态导入：只用 HTTP 回落的部署不必加载这 6MB SDK。
+    const { WSClient, EventDispatcher, LoggerLevel } = await import("@larksuiteoapi/node-sdk");
+    let settleFirst;
+    const firstConnect = new Promise((resolve) => {
+      settleFirst = resolve;
+    });
+    const settle = (result) => {
+      const resolve = settleFirst;
+      settleFirst = null;
+      if (resolve) resolve(result);
+    };
+    const params = {
+      appId: c.appId,
+      appSecret: c.appSecret,
+      // 显式 info：SDK 的 debug 日志会打印带一次性 ticket 的长连接地址。
+      loggerLevel: LoggerLevel.info,
+      handshakeTimeoutMs: c.connectTimeoutMs,
+      onReady: () => settle({ ok: true }),
+      onError: (e) => {
+        const message = `飞书长连接失败：${e?.message ?? String(e)}`;
+        this.lastError = { at: this.#now(), code: "FEISHU_SOCKET_FAILED", message };
+        settle({ ok: false, code: "FEISHU_SOCKET_FAILED", message });
+      },
+    };
+    const socket = c.wsClientFactory ? await c.wsClientFactory(params) : new WSClient(params);
+    // 事件解析用官方 EventDispatcher（长连接已鉴权，故 needCheck=false）。
+    const dispatcher = new EventDispatcher({}).register({
+      "im.message.receive_v1": (data) => this.#onSocketEvent(data),
+    });
+    this.socket = socket;
+    try {
+      await socket.start({ eventDispatcher: dispatcher });
+      let timer;
+      const timedOut = new Promise((resolve) => {
+        timer = setTimeout(
+          () =>
+            resolve({
+              ok: false,
+              code: "FEISHU_SOCKET_TIMEOUT",
+              message: `飞书长连接 ${c.connectTimeoutMs}ms 内未连上（已停止重连，可稍后重试）`,
+            }),
+          c.connectTimeoutMs,
+        );
+        timer.unref();
+      });
+      const result = await Promise.race([firstConnect, timedOut]);
+      clearTimeout(timer);
+      if (!result.ok) throw new ChannelsError(result.code, result.message, 503);
+    } catch (e) {
+      this.lastError = { at: this.#now(), code: e?.code ?? "FEISHU_SOCKET_FAILED", message: e?.message ?? String(e) };
+      await this.close();
+      throw e;
+    }
+    this.started = true;
+    this.recovered = this.#reconcileInbound();
+    return this.status();
+  }
+
   async close() {
     const server = this.server;
+    const socket = this.socket;
     this.server = null;
+    this.socket = null;
     this.started = false;
     this.tokenCache = null;
     if (server) {
-      await new Promise((resolve) => server.close(() => resolve()));
-      server.closeAllConnections?.();
+      await new Promise((resolve) => {
+        server.close(() => resolve());
+        server.closeAllConnections?.();
+      });
     }
+    // force：SDK 的非强制 close 会把 socket 留到对端应答（ws 默认 30s）才真正结束，这里要立刻释放。
+    socket?.close?.({ force: true });
     await Promise.race([this.drain(), new Promise((resolve) => setTimeout(resolve, 2000).unref())]);
     return this.status();
   }
 
-  /** 等待所有已排队的入站处理结束（测试与优雅关闭用）。 */
   async drain() {
     while (this.pending.size) await Promise.allSettled([...this.pending]);
   }
 
-  /** 配置自检。live=true 才发真实请求（本地 fixture 或真实飞书）；默认只做静态检查。 */
   async test({ live = false } = {}) {
     const c = this.config;
+    const websocket = c.transport === "websocket";
+    const st = this.status();
     const checks = [
       { name: "enabled", ok: c.enabled, detail: c.enabled ? "已启用" : "config.enabled 未设为 true" },
       { name: "inbound-config", ok: this.missing().length === 0, detail: this.missing().join("、") || "ok" },
-      { name: "identities", ok: this.identities.size > 0, detail: `${this.identities.size} 条映射` },
-      { name: "receiver", ok: this.started, detail: this.started ? `监听 ${this.status().receiver.url}` : "未启动" },
+      {
+        name: "identities",
+        ok: websocket || this.identities.size > 0,
+        detail: `${this.identities.size} 条映射${websocket ? "：长连接下未映射身份一律拒绝且不回执" : ""}`,
+      },
+      {
+        name: "receiver",
+        ok: st.receiver.running,
+        detail: this.started ? (websocket ? `长连接 ${st.receiver.state}` : `监听 ${st.receiver.url}`) : "未启动",
+      },
       {
         name: "outbound-config",
         ok: this.outboundMissing().length === 0,
@@ -562,23 +697,19 @@ export class FeishuBridge {
   handleCallback(rawBody, headers = {}) {
     const c = this.config;
     const raw = typeof rawBody === "string" ? rawBody : (rawBody ?? Buffer.alloc(0)).toString("utf8");
-    const reject = (status, code, message) => {
-      if (status >= 400) this.lastError = { at: this.#now(), code, message };
-      return { status, body: { code, msg: message } };
-    };
-    if (!c.verificationToken) return reject(503, "FEISHU_NOT_CONFIGURED", "未配置 verificationToken，拒绝回调");
+    if (!c.verificationToken) return this.#reject(503, "FEISHU_NOT_CONFIGURED", "未配置 verificationToken，拒绝回调");
 
     if (c.encryptKey) {
       const timestamp = String(headers["x-lark-request-timestamp"] ?? "");
       const nonce = String(headers["x-lark-request-nonce"] ?? "");
       const signature = String(headers["x-lark-signature"] ?? "");
       const expect = sha256hex({ timestamp, nonce, encryptKey: c.encryptKey, rawBody: raw });
-      if (!safeEqualStr(expect, signature)) return reject(401, "FEISHU_BAD_SIGNATURE", "回调签名校验失败");
+      if (!safeEqualStr(expect, signature)) return this.#reject(401, "FEISHU_BAD_SIGNATURE", "回调签名校验失败");
       const ts = Number(timestamp);
-      if (!Number.isFinite(ts)) return reject(400, "FEISHU_STALE_REPLAY", "缺少可校验的 X-Lark-Request-Timestamp");
-      const skew = Math.abs(this.#now() - ts);
+      if (!Number.isFinite(ts)) return this.#reject(400, "FEISHU_STALE_REPLAY", "缺少可校验的 X-Lark-Request-Timestamp");
+      const skew = Math.abs(this.#now() - (ts < 1e12 ? ts * 1000 : ts));
       if (c.maxSkewMs && skew > c.maxSkewMs) {
-        return reject(
+        return this.#reject(
           400,
           "FEISHU_STALE_REPLAY",
           `回调时间戳偏差 ${Math.round(skew / 1000)}s 超过上限 ${Math.round(c.maxSkewMs / 1000)}s，按重放拒绝`,
@@ -590,60 +721,103 @@ export class FeishuBridge {
     try {
       payload = decryptCallback(JSON.parse(raw), c.encryptKey);
     } catch (e) {
-      return reject(400, "FEISHU_BAD_PAYLOAD", `回调体解析失败：${e.message}`);
+      return this.#reject(400, "FEISHU_BAD_PAYLOAD", `回调体解析失败：${e.message}`);
     }
     const header = payload?.header ?? {};
     // v2 事件把 token 放在 header，URL 校验回包放在顶层；两者都接受。
     const token = payload?.token ?? header.token ?? "";
     if (!safeEqualStr(token, c.verificationToken)) {
-      return reject(401, "FEISHU_BAD_TOKEN", "回调 verification token 不匹配");
+      return this.#reject(401, "FEISHU_BAD_TOKEN", "回调 verification token 不匹配");
     }
     if (payload?.type === "url_verification") {
       return { status: 200, body: { challenge: String(payload.challenge ?? "") } };
     }
-    const eventId = String(header.event_id ?? "");
-    if (!eventId) return reject(400, "FEISHU_NO_EVENT_ID", "回调缺少 header.event_id，无法去重");
-    if (header.event_type !== "im.message.receive_v1") {
-      return { status: 200, body: { code: 0, msg: `ignored ${header.event_type ?? "unknown"}` } };
-    }
-    const event = payload.event ?? {};
-    const identity = this.identities.get(identityKeyOf(event));
-    if (!identity) {
-      // 未映射身份：明确拒绝，不进队列、不建 Run、不回执。
-      return reject(
-        403,
-        "FEISHU_IDENTITY_UNKNOWN",
-        `未授权会话 open_id+chat_id=${identityKeyOf(event)}，拒绝处理`,
-      );
-    }
-    // 先持久登记再回 200：写入失败就回 5xx（让飞书重投），绝不在没记住的情况下确认为已接收。
-    let claim;
-    try {
-      claim = this.#claimInbound({ eventId, chatId: String(event?.message?.chat_id ?? ""), identity });
-    } catch (e) {
-      this.lastError = { at: this.#now(), code: "FEISHU_DURABLE_WRITE_FAILED", message: e?.message ?? String(e) };
-      return reject(503, "FEISHU_DURABLE_WRITE_FAILED", `入站事件未能落库（${e?.message ?? e}），未确认，等飞书重投`);
-    }
-    if (claim.duplicate) return { status: 200, body: { code: 0, msg: "duplicate ignored" } };
-    this.#queue(() => this.#handleInbound(claim.record, event, identity));
-    return { status: 200, body: { code: 0 } };
+    return this.#renderIntake(this.#intake(payload));
+  }
+
+  /** 入站拒绝的统一出口（签名/token/解析这类 intake 之前的失败）：记 lastError 并给出 HTTP 响应。 */
+  #reject(status, code, message) {
+    if (status >= 400) this.lastError = { at: this.#now(), code, message };
+    return { status, body: { code, msg: message } };
+  }
+
+  /** 把 intake 结果翻成 HTTP 响应：2xx 才是「已确认」，5xx 让飞书重投。 */
+  #renderIntake(r) {
+    if (r.outcome === "accepted") return { status: 200, body: { code: 0 } };
+    if (r.outcome === "duplicate" || r.outcome === "ignored") return { status: 200, body: { code: 0, msg: r.message } };
+    return { status: r.status, body: { code: r.code, msg: r.message } };
   }
 
   /**
-   * 持久登记一条入站事件（同时是 event_id 去重标记）：status='accepted' + 之后的 runId。
+   * @returns {{outcome:string, status:number, code:string, message:string, retry:boolean}}
+   *   retry=true 表示没被确认（HTTP 得回 5xx、长连接得回 code=500），让平台重投。
+   */
+  #intake(payload) {
+    const refused = (outcome, status, code, message, retry) => {
+      this.lastError = { at: this.#now(), code, message };
+      return { outcome, status, code, message, retry };
+    };
+    const { eventId, eventType, event } = eventEnvelope(payload);
+    const message = event?.message ?? {};
+    // 去重键用 message_id：官方文档说明同一条消息被重投时 event_id 可能不同，event_id 只作诊断字段。
+    const messageId = String(message.message_id ?? "");
+    if (!messageId && !eventId) {
+      return refused("no_event_id", 400, "FEISHU_NO_EVENT_ID", "事件既无 message.message_id 也无 event_id，无法去重，未确认", true);
+    }
+    if (eventType !== "im.message.receive_v1") {
+      return { outcome: "ignored", status: 200, code: "OK", message: `ignored ${eventType ?? "unknown"}`, retry: false };
+    }
+    const key = identityKeyOf(event);
+    const identity = this.identities.get(key);
+    if (!identity) {
+      return refused("refused", 403, "FEISHU_IDENTITY_UNKNOWN", `未授权会话 open_id+chat_id=${key}，拒绝处理`, false);
+    }
+    let claim;
+    try {
+      claim = this.#claimInbound({ eventId, messageId, chatId: String(message.chat_id ?? ""), identity });
+    } catch (e) {
+      return refused("failed", 503, "FEISHU_DURABLE_WRITE_FAILED", `入站事件未能落库（${e?.message ?? e}），未确认，等飞书重投`, true);
+    }
+    if (claim.duplicate) return { outcome: "duplicate", status: 200, code: "OK", message: "duplicate ignored", retry: false };
+    this.#queue(() => this.#handleInbound(claim.record, event, identity));
+    return { outcome: "accepted", status: 200, code: "OK", message: "ok", retry: false };
+  }
+
+  /**
+   * SDK 长连接事件入口。连接已在握手阶段用 appId+appSecret 鉴权、事件是明文，
+   * 所以这里不校验 token/签名、不解密；其余步骤与 HTTP 回调共用同一份 intake。
+   */
+  #onSocketEvent(data) {
+    const result = this.#intake(data);
+    // 没被确认（落库失败 / 无法去重）就抛错：SDK 会把应答帧置成 code=500，飞书据此重投。
+    if (result.retry) throw new ChannelsError(result.code, result.message, result.status);
+  }
+
+  /**
+   * 持久登记一条入站事件（同时是去重标记）：status='accepted' + 之后的 runId。
    * 有界：只保留最近 INBOUND_KEEP 条。`accepted` 而进程退出 = 未完成，启动时改标 interrupted，不重放。
    * @returns {{duplicate:boolean, record?:object}}
    */
-  #claimInbound({ eventId, chatId, identity }) {
+  #claimInbound({ eventId, messageId, chatId, identity }) {
     const ledger = this.#ledger();
-    const id = INBOUND_PREFIX + createHash("sha256").update(eventId).digest("hex").slice(0, 32);
+    const id = INBOUND_PREFIX + createHash("sha256").update(messageId || eventId).digest("hex").slice(0, 32);
     const prev = ledger.get("settings", id);
     if (prev) return { duplicate: true };
+    if (messageId && eventId) {
+      const legacyId = INBOUND_PREFIX + createHash("sha256").update(eventId).digest("hex").slice(0, 32);
+      const legacy = ledger.get("settings", legacyId);
+      if (legacy?.type === "feishu_inbound" && !legacy.messageId && legacy.identity === identity.key) {
+        ledger.put("settings", { ...legacy, id, messageId });
+        ledger.remove("settings", legacyId);
+        return { duplicate: true };
+      }
+    }
     const now = this.#now();
     const record = {
       id,
       type: "feishu_inbound",
       eventId,
+      messageId,
       chatId,
       identity: identity.key,
       status: "accepted",
@@ -746,8 +920,25 @@ export class FeishuBridge {
     if (plan.kind === "cancel") return this.#cancel(identity, chatId, plan);
     if (plan.kind === "approve") return this.#approve(identity, chatId, plan);
     // help / error：直接回执，不建 Run。
-    await this.#deliver({ chatId, key: `msg_${record.eventId}`, text: plan.kind === "help" ? HELP_TEXT : plan.reason });
+    await this.#deliver({ chatId, key: record.id, text: plan.kind === "help" ? HELP_TEXT : plan.reason });
     return { action: plan.kind, runId: null };
+  }
+
+  async notifyApproval(approval) {
+    if (!this.config.enabled || approval.status !== "pending" || !approval.runId) return;
+    const run = this.orch.getRun?.(approval.runId);
+    if (!run?.source?.startsWith("feishu:")) return;
+    const identity = this.identities.get(run.source.slice("feishu:".length));
+    if (!identity?.botIds.includes(run.botId)) return;
+    let text = `Run ${run.id} 等待审批 ${approval.id}。请在工作台回答。`;
+    if (identity.permissions.includes("approve")) {
+      try {
+        approvalResponse(approval, true);
+        approvalResponse(approval, false);
+        text = `Run ${run.id} 等待审批：\n${approval.title || "原生工具请求"}\n批准：/approve ${approval.id} allow\n拒绝：/approve ${approval.id} deny`;
+      } catch {}
+    }
+    return this.#deliver({ chatId: identity.chatId, key: `pending_${approval.id}`, runId: run.id, text });
   }
 
   async #startRun(identity, chatId, plan) {
@@ -759,6 +950,7 @@ export class FeishuBridge {
       await this.#deliver({ chatId, key: `err_${identity.key}_${this.#now()}`, text: `无法发起任务：${e.message}` });
       return { action: "run_rejected", runId: null };
     }
+    await this.#deliver({ chatId, key: `start_${run.id}`, runId: run.id, text: `已开始 Run ${run.id}（${plan.botName}）。取消：/cancel ${run.id}` });
     let text;
     try {
       const done = await this.orch.waitRun(run.id);

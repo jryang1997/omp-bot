@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createCipheriv, createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
+import { connect } from "node:net";
 
 import { Ledger } from "../src/ledger.mjs";
 import { PairingError, PairingService } from "../src/pairing.mjs";
@@ -41,6 +42,7 @@ const tempHome = () => mkdtempSync(join(tmpdir(), "ompbot-channels-"));
 /** 真实 Ledger + 最小团队门面（Run 走 Ledger，不调模型）。 */
 function makeTeam({ ledger, bots = BOTS }) {
   const calls = [];
+  let nextRun = 0;
   const team = {
     ledger,
     calls,
@@ -50,13 +52,7 @@ function makeTeam({ ledger, bots = BOTS }) {
     getRun: (id) => ledger.getRun(id),
     listRuns: () => [],
     startRun: (input) => {
-      // 内容决定 id：便于验证「同一次投递不会重复发送」。
-      const id = `run_${sha(`${input.source}\u0000${input.botId}\u0000${input.text}`).slice(0, 12)}`;
-      const existing = ledger.getRun(id);
-      if (existing) {
-        calls.push({ m: "startRun", input, reused: true });
-        return existing;
-      }
+      const id = `run_fixture_${++nextRun}`;
       ledger.createRun({
         id,
         kind: input.kind ?? "chat",
@@ -167,6 +163,53 @@ const baseConfig = (fake, extra = {}) => ({
   ...extra,
 });
 
+function wsSocketFactory({ mode = "ready" } = {}) {
+  const out = { mode, socket: null };
+  out.factory = (params) => {
+    const socket = {
+      params,
+      state: "idle",
+      closed: null,
+      dispatch: null,
+      start({ eventDispatcher }) {
+        socket.dispatch = (payload) => eventDispatcher.invoke(payload, { needCheck: false });
+        if (mode === "ready") {
+          queueMicrotask(() => {
+            socket.state = "connected";
+            params.onReady?.();
+          });
+        }
+        if (mode === "error") {
+          queueMicrotask(() => params.onError?.(new Error("pullConnectConfig failed: code=10003, msg=app_id or app_secret invalid")));
+        }
+        return Promise.resolve();
+      },
+      getConnectionStatus: () => ({
+        state: socket.state,
+        reconnectAttempts: socket.state === "reconnecting" ? 3 : 0,
+      }),
+      close(params) {
+        socket.closed = params ?? {};
+        socket.state = "idle";
+      },
+    };
+    out.socket = socket;
+    return socket;
+  };
+  return out;
+}
+
+const wsConfig = (extra = {}) => ({
+  enabled: true,
+  transport: "websocket",
+  appId: "cli_0123456789abcdef",
+  appSecret: "secret_test",
+  verificationToken: null,
+  encryptKey: null,
+  identities: [{ openId: "ou_alice", chatId: "oc_room", botIds: ["bot_1"], permissions: ["read", "run", "approve"] }],
+  ...extra,
+});
+
 /** 起一套临时环境并保证回收。 */
 async function scenario({ config = {}, fakeOpts = {} } = {}, fn) {
   const home = tempHome();
@@ -242,6 +285,8 @@ async function postEvent(bridge, payload, { encryptKey = "ek_test", timestamp = 
 }
 
 const outbox = (bridge, key) => bridge.orch.ledger.get("outbox", `out_feishu_${key}`);
+
+const messages = (fake) => fake.calls.filter((c) => c.url.startsWith("/open-apis/im/v1/messages")).map((c) => ({ ...JSON.parse(c.body.content), chatId: c.body.receive_id }));
 
 // ================= 配对 =================
 
@@ -588,9 +633,9 @@ test("飞书：p2p 文本 → startRun → 官方接口回执，event_id 重投�
     assert.strictEqual(inboundRows[0].action, "run");
     assert.strictEqual(bridge.status().inbound.events.completed, 1);
 
-    const sendCall = fake.calls.find((c) => c.url.startsWith("/open-apis/im/v1/messages"));
+    const sendCall = fake.calls.filter((c) => c.url.startsWith("/open-apis/im/v1/messages")).at(-1);
     assert.strictEqual(sendCall.body.receive_id, "oc_room");
-    assert.deepStrictEqual(JSON.parse(sendCall.body.content), { text: "echo:帮我看下日志" });
+    assert.strictEqual(messages(fake)[0].text, `已开始 Run ${runs[0].id}（Alice）。取消：/cancel ${runs[0].id}`);
     assert.strictEqual(sendCall.auth, "Bearer t-fake-token");
 
     // 准入拒绝路径的证据：同 run 的 outbox 里不出现长期凭据
@@ -609,18 +654,6 @@ test("飞书：p2p 文本 → startRun → 官方接口回执，event_id 重投�
   });
 });
 
-test("飞书：同一次投递不会重复发送（outbox 幂等）", async () => {
-  await scenario({}, async ({ bridge, fake }) => {
-    await bridge.start();
-    await postEvent(bridge, messageEvent({ text: "同样的内容", eventId: "ev_a" }));
-    await postEvent(bridge, messageEvent({ text: "同样的内容", eventId: "ev_b" }));
-    await bridge.drain();
-    const sent = fake.calls.filter((c) => c.url.startsWith("/open-apis/im/v1/messages"));
-    assert.strictEqual(sent.length, 1, "同一 outbox id 只发一次");
-    const rows = bridge.orch.ledger.list("outbox");
-    assert.strictEqual(rows.filter((r) => r.status === "sent").length, 1);
-  });
-});
 
 test("飞书：群聊指令 /run /cancel /approve，审批只认发起身份", async () => {
   await scenario(
@@ -641,11 +674,11 @@ test("飞书：群聊指令 /run /cancel /approve，审批只认发起身份", a
       assert.strictEqual(bridge.orch.ledger.listRuns().length, 1);
 
       // /run 越界 bot：拒绝且不建 Run
-      await postEvent(bridge, messageEvent({ text: "/run Bob 越界", chatType: "group", eventId: "ev_run2" }));
+      const denyEv = messageEvent({ text: "/run Bob 越界", chatType: "group", eventId: "ev_run2" });
+      await postEvent(bridge, denyEv);
       await bridge.drain();
       assert.strictEqual(bridge.orch.ledger.listRuns().length, 1);
-      const denyRec = outbox(bridge, "msg_ev_run2");
-      assert.match(denyRec.text, /未被授权操作 bot Bob/);
+      assert.match(messages(fake).at(-1).text, /未被授权操作 bot Bob/);
 
       // /cancel：先种一条运行中的 Run
       bridge.orch.seedRun({ id: "run_seed", botId: "bot_1", source: "feishu:ou_alice:oc_room" });
@@ -656,9 +689,10 @@ test("飞书：群聊指令 /run /cancel /approve，审批只认发起身份", a
 
       // 审批：carol 没有 approve 权限 → 不能回答（即使同 bot 作用域）
       bridge.orch.seedApproval({ id: "ap_1", runId: "run_seed", botId: "bot_1", method: "confirm" });
-      await postEvent(bridge, messageEvent({ openId: "ou_carol", text: "/approve ap_1 allow", chatType: "group", eventId: "ev_ap1" }));
+      const apEv = messageEvent({ openId: "ou_carol", text: "/approve ap_1 allow", chatType: "group", eventId: "ev_ap1" });
+      await postEvent(bridge, apEv);
       await bridge.drain();
-      assert.match(outbox(bridge, "msg_ev_ap1").text, /审批权限/);
+      assert.match(messages(fake).at(-1).text, /审批权限/);
 
       // 审批：alice 有权限，但 Run 由别人发起 → 不得代答（key 带时间戳，直接扫 outbox）
       bridge.orch.seedRun({ id: "run_other", botId: "bot_1", source: "feishu:ou_carol:oc_room" });
@@ -801,11 +835,14 @@ test("飞书：入站落库失败不确认（只读账本 → 5xx，且不抛出
 
 test("飞书：重启后未完成的入站标 interrupted、状态可见、重投不重放", async () => {
   await scenario({}, async ({ bridge, ledger }) => {
-    const id = `feishu_inbound_${sha("ev_interrupted").slice(0, 32)}`;
+    // 去重键是 message_id（官方文档：重投时 event_id 可能变），所以种子记录按 message_id 命名。
+    const ev = messageEvent({ text: "hi", eventId: "ev_interrupted" });
+    const id = `feishu_inbound_${sha(ev.event.message.message_id).slice(0, 32)}`;
     ledger.put("settings", {
       id,
       type: "feishu_inbound",
       eventId: "ev_interrupted",
+      messageId: ev.event.message.message_id,
       chatId: "oc_room",
       identity: "ou_alice:oc_room",
       status: "accepted",
@@ -822,7 +859,8 @@ test("飞书：重启后未完成的入站标 interrupted、状态可见、重�
     assert.match(rec.error, /不自动重放/);
     assert.match(st.inbound.delivery, /at-most-once/);
 
-    const again = await postEvent(bridge, messageEvent({ text: "hi", eventId: "ev_interrupted" }));
+    // 同一条消息重投（换个 event_id 也一样）只会被去重，不会重放
+    const again = await postEvent(bridge, { ...ev, header: { ...ev.header, event_id: "ev_interrupted_again" } });
     assert.strictEqual(again.status, 200);
     assert.match(again.body.msg, /duplicate/);
     await bridge.drain();
@@ -853,7 +891,7 @@ test("飞书：缺凭据 / 平台错误 / 网络中断三种出站结果都不�
     assert.strictEqual(rec.status, "failed");
     assert.match(rec.error, /code=230002/);
     const before = fake.calls.filter((c) => c.url.startsWith("/open-apis/im")).length;
-    assert.strictEqual(before, 1);
+    assert.strictEqual(before, 2);
   });
 
   // 3) 网络中断（无响应）→ unknown，不自动重试
@@ -864,7 +902,7 @@ test("飞书：缺凭据 / 平台错误 / 网络中断三种出站结果都不�
     const rec = bridge.orch.ledger.list("outbox").find((r) => r.type === "feishu_outbound");
     assert.strictEqual(rec.status, "unknown");
     assert.match(rec.error, /副作用未知/);
-    assert.strictEqual(fake.calls.filter((c) => c.url.startsWith("/open-apis/im")).length, 1);
+    assert.strictEqual(fake.calls.filter((c) => c.url.startsWith("/open-apis/im")).length, 2);
   });
 
   // 4) 鉴权失败 → failed，错误里不带 app_secret
@@ -927,6 +965,211 @@ test("飞书：配置只落私有文件或环境变量，状态不回显密钥",
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+
+test("飞书：长连接收 SDK 摊平后的事件，未授权身份不建 Run、不排队、不回执", async () => {
+  const ws = wsSocketFactory();
+  await scenario({ config: wsConfig({ wsClientFactory: ws.factory }) }, async ({ bridge, ledger, fake }) => {
+    const st = await bridge.start();
+    assert.strictEqual(st.receiver.transport, "websocket");
+    assert.strictEqual(st.receiver.running, true, "连上之后才报运行中");
+    assert.strictEqual(st.receiver.state, "connected");
+    assert.deepStrictEqual(st.missing, [], "长连接不需要 verificationToken/identities 之外的配置");
+    assert.strictEqual(st.inbound.signatureMode, "sdk-long-connection");
+    assert.strictEqual(st.inbound.signatureWarning, null);
+    assert.strictEqual(st.inbound.verificationTokenConfigured, false, "没配 token 也照样能收事件");
+
+    const stranger = await ws.socket.dispatch(messageEvent({ openId: "ou_stranger", text: "hi" }));
+    assert.strictEqual(stranger, undefined);
+    assert.strictEqual(ledger.listRuns().length, 0);
+    assert.strictEqual(ledger.list("settings").filter((r) => r.type === "feishu_inbound").length, 0);
+    assert.strictEqual(ledger.list("outbox").length, 0);
+    assert.strictEqual(bridge.status().lastError.code, "FEISHU_IDENTITY_UNKNOWN");
+    assert.strictEqual(fake.calls.filter((c) => c.url.startsWith("/open-apis/im")).length, 0);
+
+    const ev = messageEvent({ text: "看下日志", eventId: "ev_ws_1" });
+    assert.strictEqual(await ws.socket.dispatch(ev), undefined);
+    await bridge.drain();
+    const runs = ledger.listRuns();
+    assert.strictEqual(runs.length, 1);
+    assert.strictEqual(runs[0].source, "feishu:ou_alice:oc_room");
+    const inbound = ledger.list("settings").find((r) => r.type === "feishu_inbound");
+    assert.strictEqual(inbound.status, "completed");
+    assert.strictEqual(outbox(bridge, `run_${runs[0].id}`).status, "sent");
+    assert.strictEqual(fake.calls.filter((c) => c.url.startsWith("/open-apis/im")).length, 2);
+  });
+});
+
+test("飞书：连上之前不算运行，断开时如实显示重连，close 释放长连接", async () => {
+  const ws = wsSocketFactory();
+  await scenario({ config: wsConfig({ wsClientFactory: ws.factory }) }, async ({ bridge }) => {
+    assert.strictEqual(bridge.status().receiver.running, false, "启动前不假装在跑");
+    assert.strictEqual(bridge.status().receiver.state, "idle");
+
+    await bridge.start();
+    assert.strictEqual(bridge.status().receiver.running, true);
+
+    ws.socket.state = "reconnecting";
+    const down = bridge.status();
+    assert.strictEqual(down.receiver.running, false);
+    assert.strictEqual(down.receiver.state, "reconnecting");
+    assert.strictEqual(down.receiver.reconnectAttempts, 3);
+
+    await bridge.close();
+    assert.deepStrictEqual(ws.socket.closed, { force: true }, "关闭必须真正终止 socket（非强制 close 会拖着等对端）");
+    const after = bridge.status();
+    assert.strictEqual(after.receiver.state, "idle");
+    assert.strictEqual(after.receiver.running, false);
+  });
+});
+
+test("飞书：长连接鉴权失败与首连超时都如实报错并释放，不留下后台重连", async () => {
+  const failed = wsSocketFactory({ mode: "error" });
+  await scenario({ config: wsConfig({ wsClientFactory: failed.factory }) }, async ({ bridge }) => {
+    await assert.rejects(
+      () => bridge.start(),
+      (e) => e instanceof ChannelsError && e.code === "FEISHU_SOCKET_FAILED" && e.status === 503,
+    );
+    const st = bridge.status();
+    assert.strictEqual(st.receiver.running, false);
+    assert.strictEqual(st.receiver.state, "idle");
+    assert.deepStrictEqual(failed.socket.closed, { force: true });
+    assert.match(st.lastError.message, /长连接失败/);
+    assert.strictEqual(st.lastError.message.includes("secret_test"), false, "错误里不能带 app_secret");
+  });
+
+  const hang = wsSocketFactory({ mode: "hang" });
+  await scenario({ config: wsConfig({ wsClientFactory: hang.factory, connectTimeoutMs: 40 }) }, async ({ bridge }) => {
+    await assert.rejects(
+      () => bridge.start(),
+      (e) => e.code === "FEISHU_SOCKET_TIMEOUT" && e.status === 503,
+    );
+    assert.strictEqual(bridge.status().receiver.running, false);
+    assert.deepStrictEqual(hang.socket.closed, { force: true });
+  });
+});
+
+test("飞书：appId 形状不对时立刻报错（SDK 对不匹配的 appId 只会静默不连）", async () => {
+  const ws = wsSocketFactory();
+  await scenario({ config: wsConfig({ appId: "cli_short", wsClientFactory: ws.factory }) }, async ({ bridge }) => {
+    await assert.rejects(() => bridge.start(), (e) => e.code === "FEISHU_BAD_CONFIG" && e.status === 400);
+    assert.strictEqual(ws.socket, null, "连客户端都不该建出来");
+  });
+});
+
+test("飞书：长连接落库失败不确认（handler 抛错让 SDK 回 500，飞书才会重投）", async () => {
+  const home = tempHome();
+  const writable = new Ledger({ home });
+  writable.close();
+  const readonly = new Ledger({ home, readonly: true });
+  const ws = wsSocketFactory();
+  const bridge = new FeishuBridge({
+    orch: { ledger: readonly, listBots: () => BOTS },
+    config: wsConfig({ wsClientFactory: ws.factory }),
+  });
+  try {
+    await bridge.start();
+    await assert.rejects(
+      () => ws.socket.dispatch(messageEvent({ text: "hi", eventId: "ev_ws_ro" })),
+      (e) => e.code === "FEISHU_DURABLE_WRITE_FAILED" && e.status === 503,
+    );
+    assert.match(bridge.status().lastError.message, /未确认/);
+    assert.strictEqual(readonly.listRuns().length, 0);
+  } finally {
+    await bridge.close();
+    readonly.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("飞书：去重看 message_id——重投换 event_id 只跑一次，event_id 相同但消息不同各自跑", async () => {
+  const ws = wsSocketFactory();
+  await scenario({ config: wsConfig({ wsClientFactory: ws.factory }) }, async ({ bridge, ledger, fake }) => {
+    await bridge.start();
+    const ev = messageEvent({ text: "重投测试", eventId: "ev_first" });
+    await ws.socket.dispatch(ev);
+    await ws.socket.dispatch({ ...ev, header: { ...ev.header, event_id: "ev_redelivered" } });
+    await bridge.drain();
+    assert.strictEqual(ledger.listRuns().length, 1);
+    assert.strictEqual(ledger.list("settings").filter((r) => r.type === "feishu_inbound").length, 1);
+    assert.strictEqual(fake.calls.filter((c) => c.url.startsWith("/open-apis/im")).length, 2);
+
+    await ws.socket.dispatch(messageEvent({ text: "第一条", eventId: "ev_same" }));
+    await ws.socket.dispatch(messageEvent({ text: "第二条", eventId: "ev_same" }));
+    await bridge.drain();
+    assert.strictEqual(ledger.listRuns().length, 3);
+  });
+});
+
+test("飞书：审批通知仅发起身份可见，重复事件不重复通知，输入请求不泄露标题", async () => {
+  await scenario({}, async ({ bridge, team, fake }) => {
+    await bridge.start();
+    team.seedRun({ id: "notify_own", botId: "bot_1", source: "feishu:ou_alice:oc_room" });
+    const approval = team.seedApproval({ id: "notify_select", runId: "notify_own", botId: "bot_1", method: "select", options: ["Approve", "Deny"] });
+    await bridge.notifyApproval(approval);
+    await bridge.notifyApproval(approval);
+    assert.deepStrictEqual(messages(fake), [{ chatId: "oc_room", text: "Run notify_own 等待审批：\n原生工具请求\n批准：/approve notify_select allow\n拒绝：/approve notify_select deny" }]);
+    team.seedRun({ id: "notify_foreign", botId: "bot_1", source: "feishu:ou_other:oc_room" });
+    await bridge.notifyApproval({ ...approval, id: "foreign", runId: "notify_foreign" });
+    await bridge.notifyApproval({ ...approval, id: "late_orphan", runId: null });
+    assert.strictEqual(messages(fake).length, 1);
+    await bridge.notifyApproval({ ...approval, id: "input_secret", method: "input", title: "PRIVATE_INPUT_SECRET" });
+    assert.deepStrictEqual(messages(fake).at(-1), { chatId: "oc_room", text: "Run notify_own 等待审批 input_secret。请在工作台回答。" });
+  });
+});
+
+test("飞书：HTTP 关闭不会被未完成请求拖住", async () => {
+  await scenario({}, async ({ bridge }) => {
+    await bridge.start();
+    const socket = connect({ host: "127.0.0.1", port: bridge.status().receiver.port });
+    socket.on("error", () => {});
+    await new Promise((resolve) => socket.once("connect", resolve));
+    socket.write("POST /api/channels/feishu/events HTTP/1.1\r\nHost: localhost\r\nContent-Length: 1000\r\n\r\n{");
+    const closed = bridge.close();
+    let timer;
+    try {
+      await Promise.race([closed, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("接收器未结束未完成请求")), 1000); })]);
+    } finally {
+      clearTimeout(timer);
+      socket.destroy();
+      await closed;
+    }
+    assert.strictEqual(bridge.status().receiver.running, false);
+  });
+});
+
+test("飞书：旧 event_id 去重记录迁移后不重放，后续不同事件号也去重", async () => {
+  const ws = wsSocketFactory();
+  await scenario({ config: wsConfig({ wsClientFactory: ws.factory }) }, async ({ bridge, ledger, fake }) => {
+    await bridge.start();
+    const oldId = "feishu_inbound_b30c4c437b4753033225cc907017c803";
+    ledger.put("settings", { id: oldId, type: "feishu_inbound", eventId: "legacy-event-6428", identity: "ou_alice:oc_room", chatId: "oc_room", status: "interrupted", runId: "old_run", createdAt: 1, updatedAt: 1 });
+    const event = messageEvent({ text: "升级前已处理的任务", eventId: "legacy-event-6428" });
+    await ws.socket.dispatch(event);
+    await ws.socket.dispatch({ ...event, header: { ...event.header, event_id: "after-upgrade-redelivery" } });
+    await bridge.drain();
+    assert.deepStrictEqual(ledger.listRuns(), []);
+    assert.deepStrictEqual(messages(fake), []);
+    assert.strictEqual(ledger.get("settings", oldId), null);
+    const migrated = ledger.list("settings").find((r) => r.type === "feishu_inbound");
+    assert.strictEqual(migrated.messageId, event.event.message.message_id);
+    assert.strictEqual(migrated.runId, "old_run");
+    assert.strictEqual(migrated.status, "interrupted");
+  });
+});
+
+test("飞书：签名时间戳按秒发送时仍验证重放窗口", async () => {
+  await scenario({}, async ({ bridge, ledger }) => {
+    await bridge.start();
+    const fresh = await postEvent(bridge, messageEvent({ text: "秒时间戳" }), { timestamp: Math.floor(Date.now() / 1000) });
+    assert.strictEqual(fresh.status, 200);
+    const stale = await postEvent(bridge, messageEvent({ text: "过期秒时间戳" }), { timestamp: Math.floor(Date.now() / 1000) - 600 });
+    assert.strictEqual(stale.status, 400);
+    assert.strictEqual(stale.body.code, "FEISHU_STALE_REPLAY");
+    await bridge.drain();
+    assert.strictEqual(ledger.listRuns().length, 1);
+  });
 });
 
 let passed = 0;

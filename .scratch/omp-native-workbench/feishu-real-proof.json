@@ -1,0 +1,68 @@
+{
+  "appId": "cli_aa4645d90c789be9",
+  "sdkVersion": "1.75.0",
+  "transport": "websocket",
+  "ownerOnly": true,
+  "packagedExecutable": "release/win-unpacked/omp-bot.exe",
+  "privateChatRun": {
+    "id": "run_mv5w1j0i_4e78ea9a",
+    "state": "completed",
+    "reply": "FEISHU_REAL_OK_6428"
+  },
+  "approval": {
+    "id": "ui_mv5wawvi_1",
+    "status": "answered",
+    "response": "{\"value\":\"Approve\"}"
+  },
+  "deliveries": [
+    {
+      "runId": "run_mv5wauad_6c625751",
+      "status": "sent",
+      "messageId": "om_x100b63e341d8d4a0b3ebc7e2058fc50"
+    },
+    {
+      "runId": "run_mv5w1j0i_4e78ea9a",
+      "status": "sent",
+      "messageId": "om_x100b63e2a965a0a0b14a7d37de858a8"
+    },
+    {
+      "runId": "run_mv5wauad_6c625751",
+      "status": "sent",
+      "messageId": "om_x100b63e341ac1ca4b3dd24cf1439c84"
+    }
+  ],
+  "file": {
+    "name": "feishu-approval-proof.txt",
+    "actualContent": "FEISHU_APPROVED_6428"
+  },
+  "remaining": [
+    "real user-message cancellation was not completed; user no longer asked to perform technical QA"
+  ],
+  "automaticCancel": {
+    "intake": "local signed HTTP event, not a real platform inbound message",
+    "execution": "real OMP",
+    "outbound": "official Feishu API to approved own private chat",
+    "state": "cancelled",
+    "fileCreated": false,
+    "approvalNotificationSent": true,
+    "cancelAcknowledged": true,
+    "receipts": [
+      {
+        "status": "sent",
+        "messageId": "om_x100b63e3bde2d4a8b22a320d6fcb96b"
+      },
+      {
+        "status": "sent",
+        "messageId": "om_x100b63e3bde114b0b32a1b20397e06b"
+      },
+      {
+        "status": "sent",
+        "messageId": "om_x100b63e3bde73ca4b3f715c2a51d91d"
+      },
+      {
+        "status": "sent",
+        "messageId": "om_x100b63e3bc388ca4b1cca2fd39d035a"
+      }
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "observedAt": "2026-10-13T02:28:48.885Z",
+  "packaged": true,
+  "visible": true,
+  "title": "omp-bot",
+  "handle": "2951968",
+  "appPath": "C:\\Users\\Jerry\\Desktop\\omp_bot\\release\\win-unpacked\\resources\\app.asar",
+  "icons": [
+    {
+      "nativeWindowIcon": true,
+      "path": "C:\\Users\\Jerry\\Desktop\\omp_bot\\.scratch\\window-before-16.png",
+      "size": 16
+    },
+    {
+      "nativeWindowIcon": true,
+      "path": "C:\\Users\\Jerry\\Desktop\\omp_bot\\.scratch\\window-before-32.png",
+      "size": 32
+    }
+  ]
+}

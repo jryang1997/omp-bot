@@ -1,5 +1,6 @@
 // server.mjs — 常驻 HTTP 服务：GUI / Desktop 的后端。
 // 零依赖（node:http），127.0.0.1 本地监听：静态文件 + JSON API + SSE 事件流。
+// 手机伴侣入口（设备专用、默认关闭）在 mobile.mjs，由本文件装配：owner 经 /api/mobile 启停。
 //
 // 边界（全部前置，业务之前）：Host/Origin 严格同源回环、进程 token 或 HttpOnly 会话 cookie、
 // mutation 仅 JSON、路径严格分段解码、请求体上限，OPTIONS 不开 CORS。
@@ -16,6 +17,14 @@ import { NATIVE_COMMAND_ALLOWLIST } from "./constants.mjs";
 import { ACTIVE_STATES } from "./ledger.mjs";
 import { PairingService } from "./pairing.mjs";
 import { collectUsage } from "./usage.mjs";
+import {
+  MobileGateway,
+  resolveMobileApk,
+  deviceSafeBot,
+  deviceSafeRun,
+  deviceSafeArtifact,
+  deviceSafeEvent,
+} from "./mobile.mjs";
 import {
   newSecret,
   secretEqual,
@@ -164,7 +173,7 @@ export async function readServerDescriptor(home) {
   };
 }
 
-export async function startServer({ port = 3099, host = "127.0.0.1", home, bin = "omp", debug = false, defaultThinking = "low" } = {}) {
+export async function startServer({ port = 3099, host = "127.0.0.1", home, bin = "omp", debug = false, defaultThinking = "low", computerBackend, computerRuntimeDir, mobile: mobileOptions = null, runtimeFactory = null } = {}) {
   const resolvedHome = home ?? defaultHome();
   await assertWritableHome(resolvedHome);
 
@@ -173,6 +182,10 @@ export async function startServer({ port = 3099, host = "127.0.0.1", home, bin =
     bin,
     debug,
     defaultThinking,
+    computerBackend,
+    computerRuntimeDir,
+    // 测试夹具运行时（Orchestrator 已支持的注入点）：只在显式传入时透传，生产不启用。
+    ...(runtimeFactory ? { runtimeFactory } : {}),
     onEvent: () => {},
   });
   if (orch.store?.readonly) {
@@ -187,6 +200,17 @@ export async function startServer({ port = 3099, host = "127.0.0.1", home, bin =
   // 设备配对服务：Orchestrator 未自建时由 server 组装并挂回 orch.pairing（不复制设备逻辑）。
   const pairing = orch.pairing ?? new PairingService({ orch });
   orch.pairing = pairing;
+
+  // 手机伴侣入口：设备专用、默认关闭，opt-in 配置持久化在 home/mobile.json。
+  // 回环基址 listen 之后才确定，因此传取值函数而不是值。
+  let loopbackBase = null;
+  const mobile = new MobileGateway({
+    home: resolvedHome,
+    loopbackBase: () => loopbackBase,
+    ownerToken: token,
+    apkPath: mobileOptions?.apkPath ?? resolveMobileApk(),
+    debug,
+  });
 
   const bind = () => ({ port: actualPort, host });
 
@@ -207,12 +231,13 @@ export async function startServer({ port = 3099, host = "127.0.0.1", home, bin =
     principal?.kind === "device" ? new Set(principal.device.botIds ?? []) : null;
 
   /** 设备授权：权限不足/越界由 PairingService 抛 403，不在这里复制判定。 */
-  function deviceAuthorize(ctx, action, botId) {
-    const device = deviceOf(ctx);
+  function authorizeDevice(principal, action, botId) {
+    const device = principal?.kind === "device" ? principal.device : null;
     if (!device) return null;
     pairing.authorize(device, { action, ...(botId ? { botId } : {}) });
     return device;
   }
+  const deviceAuthorize = (ctx, action, botId) => authorizeDevice(ctx?.principal, action, botId);
 
   // ---- 事件与 SSE ----
   const sseClients = new Set();
@@ -238,6 +263,7 @@ export async function startServer({ port = 3099, host = "127.0.0.1", home, bin =
       client.lastSent = seq;
     }
     if (client.scope && !client.scope.has(evt?.botId)) return; // 设备只看自己被授权的 bot
+    if (client.deviceId) evt = deviceSafeEvent(evt); // 设备看不到宿主路径字段
     if (client.res.writableLength > SSE_HIGH_WATER) return dropClient(client); // 有界缓冲
     try {
       client.res.write(frame(evt));
@@ -374,11 +400,11 @@ export async function startServer({ port = 3099, host = "127.0.0.1", home, bin =
 
   /** 状态快照；设备只看到自己被授权 bot 的花名册、Run 与待办。 */
   function stateSnapshot(principal) {
+    const lastSeq = ledger()?.lastSeq() ?? 0;
     const bots = orch.listBots();
     const rooms = orch.listRooms();
     const runs = orch.listRuns({ limit: 500 }) ?? [];
     const approvals = pendingApprovals();
-    const lastSeq = ledger()?.lastSeq() ?? 0;
     const scope = deviceScope(principal);
     if (!scope) {
       return { bots, rooms, activeRuns: runs.filter((r) => ACTIVE_STATES.includes(r.state)), pendingApprovals: approvals, lastSeq };
@@ -400,9 +426,10 @@ export async function startServer({ port = 3099, host = "127.0.0.1", home, bin =
       });
     }
     return {
-      bots: myBots,
+      // 设备只看展示字段：bot 的 instructions/workspace/budget 与 run 的宿主 session 路径都不外传。
+      bots: myBots.map(deviceSafeBot),
       rooms: rooms2,
-      activeRuns: runs.filter((r) => ACTIVE_STATES.includes(r.state) && ids.has(r.botId)),
+      activeRuns: runs.filter((r) => ACTIVE_STATES.includes(r.state) && ids.has(r.botId)).map(deviceSafeRun),
       pendingApprovals: approvals.filter((a) => ids.has(a.botId)),
       lastSeq,
     };
@@ -580,6 +607,15 @@ export async function startServer({ port = 3099, host = "127.0.0.1", home, bin =
       return out;
     } },
 
+    // ---- 手机伴侣入口（owner 侧控制面）：默认关闭；只在回环服务上，设备入口不发布这些路径 ----
+    { method: "GET", path: ["api", "mobile"], run: () => mobile.status() },
+    { method: "POST", path: ["api", "mobile"], run: (c) => mobile.apply(c.body ?? {}) },
+    { method: "POST", path: ["api", "mobile", "invitation"], run: (c) => mobile.invitation(c.body ?? {}, { pairing }) },
+    { method: "GET", path: ["api", "mobile", "apk"], run: (c) => {
+      mobile.serveApk(c.res);
+      return HANDLED;
+    } },
+
     { method: "GET", path: ["api", "events"], access: "any", run: (c) => openSse(c) },
 
     { method: "GET", path: ["api", "events", "history"], access: "any", run: (c) => {
@@ -590,13 +626,15 @@ export async function startServer({ port = 3099, host = "127.0.0.1", home, bin =
       const runId = c.query.get("runId") ?? undefined;
       const scope = deviceScope(c.principal);
       const events = l.eventsSince(since, { ...(runId ? { runId } : {}), limit });
-      return { events: scope ? events.filter((e) => scope.has(e?.botId)) : events, lastSeq: l.lastSeq() ?? 0 };
+      const visible = scope ? events.filter((e) => scope.has(e?.botId)) : events;
+      return { events: scope ? visible.map(deviceSafeEvent) : visible, lastSeq: l.lastSeq() ?? 0 };
     } },
 
     { method: "GET", path: ["api", "runs"], access: "any", run: (c) => {
       const scope = deviceScope(c.principal);
       const runs = orch.listRuns(runFilters(c.query)) ?? [];
-      return { runs: scope ? runs.filter((r) => scope.has(r.botId)) : runs };
+      const visible = scope ? runs.filter((r) => scope.has(r.botId)) : runs;
+      return { runs: scope ? visible.map(deviceSafeRun) : visible };
     } },
 
     { method: "POST", path: ["api", "runs"], access: "any", status: 202, run: async (c) => {
@@ -604,17 +642,41 @@ export async function startServer({ port = 3099, host = "127.0.0.1", home, bin =
       const text = typeof b.text === "string" ? b.text.trim() : "";
       if (!text) throw httpError(400, "text 必填");
       if (!b.botId && !b.roomId) throw httpError(400, "botId 或 roomId 必填");
-      if (deviceOf(c) && !b.botId) throw httpError(403, "设备只能向被授权的 bot 派活，不能发起群运行", "DEVICE_OUT_OF_SCOPE");
+      const device = deviceOf(c);
+      if (device && !b.botId) throw httpError(403, "设备只能向被授权的 bot 派活，不能发起群运行", "DEVICE_OUT_OF_SCOPE");
+      if (device) {
+        // 设备请求体只接受契约字段：parentRunId/taskId/depth/budget/timeoutMs/images/source 等一律拒绝，
+        // 内部编排字段（委派链、额度、来源）不能由手机自行填写，防止借它们扩大授权。
+        const allowed = ["botId", "text", "attachmentIds"];
+        const extra = Object.keys(b).filter((k) => !allowed.includes(k));
+        if (extra.length) {
+          throw httpError(400, `设备派活不接受字段：${extra.join("、")}（只允许 ${allowed.join("、")}）`, "DEVICE_FIELD_DENIED");
+        }
+        if (b.attachmentIds !== undefined && !Array.isArray(b.attachmentIds)) {
+          throw httpError(400, "attachmentIds 必须是数组", "DEVICE_FIELD_DENIED");
+        }
+      }
       if (b.botId) deviceAuthorize(c, "run", b.botId);
       if (b.botId && !orch.getBot(b.botId)) throw httpError(404, "bot 不存在");
       if (b.roomId && !orch.getRoom(b.roomId)) throw httpError(404, "room 不存在");
+      const attachmentIds = Array.isArray(b.attachmentIds) ? b.attachmentIds : [];
+      if (device && attachmentIds.length) {
+        // 以附件登记记录为准核对归属：跨 bot 引用在派活前拒绝，不留给运行时再炸。
+        for (const id of attachmentIds) {
+          const rec = orch.features?.attachments?.get?.(id);
+          if (!rec) throw httpError(404, `附件不存在：${id}`, "attachment_not_found");
+          if (rec.botId !== b.botId) {
+            throw httpError(403, `附件 ${id} 属于另一个 Bot，设备不能跨 Bot 引用`, "DEVICE_RESOURCE_OUT_OF_SCOPE");
+          }
+        }
+      }
       const run = await orch.startRun({
         ...(b.botId ? { botId: b.botId } : {}),
         ...(b.roomId ? { roomId: b.roomId } : {}),
         text,
-        attachmentIds: Array.isArray(b.attachmentIds) ? b.attachmentIds : [],
+        attachmentIds,
         depth: Number.isInteger(b.depth) ? b.depth : 0,
-        source: deviceOf(c) ? `device:${deviceOf(c).id}` : typeof b.source === "string" && b.source ? b.source : "user",
+        source: device ? `device:${device.id}` : typeof b.source === "string" && b.source ? b.source : "user",
         ...(b.images !== undefined ? { images: b.images } : {}),
         ...(b.timeoutMs !== undefined ? { timeoutMs: Number(b.timeoutMs) } : {}),
         ...(b.budget !== undefined ? { budget: b.budget } : {}),
@@ -630,7 +692,13 @@ export async function startServer({ port = 3099, host = "127.0.0.1", home, bin =
       deviceAuthorize(c, "status", run.botId);
       const l = ledger();
       const byRun = (kind) => (l ? (l.list(kind, { limit: 500 }) ?? []).filter((x) => x?.runId === run.id) : []);
-      return { run, approvals: byRun("approvals"), artifacts: byRun("artifacts") };
+      const device = deviceOf(c);
+      const artifacts = byRun("artifacts");
+      return {
+        run: device ? deviceSafeRun(run) : run,
+        approvals: byRun("approvals"),
+        artifacts: device ? artifacts.map(deviceSafeArtifact) : artifacts,
+      };
     } },
 
     { method: "POST", path: ["api", "runs", "*", "cancel"], access: "any", status: 202, run: async (c) => {
@@ -776,9 +844,11 @@ export async function startServer({ port = 3099, host = "127.0.0.1", home, bin =
       return { ok: true };
     } },
 
-    { method: "GET", path: ["api", "chat", "*"], run: (c) => {
-      if (!orch.getBot(c.segs[2])) throw httpError(404, "bot 不存在");
-      return { messages: orch.getChat(c.segs[2]) };
+    { method: "GET", path: ["api", "chat", "*"], access: "any", run: (c) => {
+      const botId = c.segs[2];
+      if (!orch.getBot(botId)) throw httpError(404, "bot 不存在");
+      deviceAuthorize(c, "read", botId); // 设备读私聊历史同样受 read 权限 + bot 作用域约束
+      return { messages: orch.getChat(botId) };
     } },
     { method: "DELETE", path: ["api", "chat", "*"], run: (c) => {
       if (!orch.getBot(c.segs[2])) throw httpError(404, "bot 不存在");
@@ -879,9 +949,20 @@ export async function startServer({ port = 3099, host = "127.0.0.1", home, bin =
     let principal = null;
     if (access !== "public") {
       principal = principalOf(req);
-      if (!principal) return fail(res, 401, "缺少有效凭证（session cookie 或 Bearer token）", "unauthorized");
-      // 花名册/策略/连接器/特性只认 owner 凭证：设备 token 走到这里由 PairingService 明确拒绝。
-      if (principal.kind === "device" && access !== "any") pairing.authorizeAdmin();
+      if (!principal) {
+        // 已撤销的设备 token 与「从未有效」分开报：客户端据此提示重新配对。
+        const bearerValue = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization ?? ""))?.[1]?.trim();
+        if (bearerValue && pairing.revokedDevice?.(bearerValue)) {
+          return fail(res, 401, "设备凭证已撤销，请重新配对", "DEVICE_REVOKED");
+        }
+        return fail(res, 401, "缺少有效凭证（session cookie 或 Bearer token）", "unauthorized");
+      }
+      // 花名册/策略/连接器等功能面只认 owner 凭证：设备 token 只放行标注为设备可用的端点
+      // （server 路由的 access:"any"，以及 features 路由表里显式 device 的附件/成果端点）。
+      if (principal.kind === "device" && access !== "any" && !orch.features?.allowsDevice?.(method, rawPath)) {
+        pairing.authorizeAdmin();
+      }
+      if (principal.kind === "device" && method === "GET") pairing.authorize(principal.device, { action: "read" });
     }
 
     let body = null;
@@ -901,10 +982,15 @@ export async function startServer({ port = 3099, host = "127.0.0.1", home, bin =
       return json(res, route.status ?? 200, out);
     }
 
-    // 产品特性端点（附件/成果/计划/能力…）只在这里接一次；安全判断已在上面完成，只能是 owner。
+    // 产品特性端点（附件/成果/计划/能力…）只在这里接一次；鉴权与设备放行已在前面的边界完成。
     if (orch.features) {
       const url = new URL(rawUrl, `http://${host.includes(":") ? `[${host}]` : host}:${actualPort}`);
-      if (await orch.features.handleRequest(req, res, url, body, json)) return;
+      const security = {
+        principal,
+        deviceScope: deviceScope(principal),
+        authorizeDevice: (action, botId) => authorizeDevice(principal, action, botId),
+      };
+      if (await orch.features.handleRequest(req, res, url, body, json, security)) return;
     }
 
     if (methodMiss) return fail(res, 405, `不允许的方法 ${method}`, "method_not_allowed");
@@ -948,6 +1034,9 @@ export async function startServer({ port = 3099, host = "127.0.0.1", home, bin =
   });
   actualPort = server.address()?.port ?? port;
   const base = `http://${host.includes(":") ? `[${host}]` : host}:${actualPort}`;
+  // 设备入口转发到回环：通配绑定（0.0.0.0/::）落到 127.0.0.1，Host 归一化后必过 hostOk。
+  const connectHost = host === "0.0.0.0" || host === "::" || host === "" ? "127.0.0.1" : host;
+  loopbackBase = `http://${connectHost.includes(":") ? `[${connectHost}]` : connectHost}:${actualPort}`;
 
   // owner 发现文件：让 CLI/桌面把控制命令发给这个活着的进程，而不是再起一个引擎。
   const descriptorPath = serverDescriptorPath(resolvedHome);
@@ -990,7 +1079,9 @@ export async function startServer({ port = 3099, host = "127.0.0.1", home, bin =
     await writeDescriptor();
     await orch.ensureFeatures?.(); // 懒装载 WorkbenchFeatures；缺失时保留 null 门面，特性路由显式 404
     await orch.features?.start?.();
+    await mobile.startFromConfig(); // 持久化 opt-in 才拉起；绑定失败只记 lastError，不阻断主服务
   } catch (e) {
+    await mobile.close();
     await new Promise((res) => {
       server.close(() => res());
       server.closeAllConnections?.();
@@ -1007,6 +1098,7 @@ export async function startServer({ port = 3099, host = "127.0.0.1", home, bin =
     launchUrl: `${base}/#${token}`,
     token,
     async close() {
+      await mobile.close(); // 先停设备入口，再断 SSE 与回环服务
       clearInterval(heartbeat);
       for (const c of [...sseClients]) dropClient(c);
       await new Promise((res) => {

@@ -2,6 +2,7 @@
 // 领域建模：花名册/群用 registry（id→记录），bot 运行态用显式状态机，
 // 消息用带 kind 的统一形状，避免散落的布尔判断。
 
+import { createHash } from "node:crypto";
 import {
   ROOM_MODES,
   PASS_TOKEN,
@@ -20,6 +21,32 @@ let idSeq = 0;
 export function genId(prefix) {
   idSeq += 1;
   return `${prefix}_${Date.now().toString(36)}_${idSeq.toString(36)}`;
+}
+
+// ---- 独立电脑（每个 Bot 一台客机）----
+// 绑定只由服务端持有：bot.computer 是 null 或 {runtime,kind,image}，
+// 不接受客户端指定电脑 id、地址、token 或宿主文件。电脑 id 由 botId 派生，稳定且不可伪造。
+
+/** 支持的电脑运行时与形态（当前只有应用自管的 QEMU 客机）。 */
+export const COMPUTER_RUNTIMES = ["qemu"];
+export const COMPUTER_KINDS = ["vm"];
+
+/** 归一化电脑绑定；非法形状显式报错，绝不静默当成未绑定。 */
+export function normalizeComputer(raw) {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw !== "object" || Array.isArray(raw)) throw new Error("bot.computer 必须是对象或 null");
+  if (!COMPUTER_RUNTIMES.includes(raw.runtime)) throw new Error(`未知电脑运行时: ${raw.runtime}`);
+  if (!COMPUTER_KINDS.includes(raw.kind)) throw new Error(`未知电脑类型: ${raw.kind}`);
+  const image = typeof raw.image === "string" ? raw.image.trim() : "";
+  if (!image) throw new Error("bot.computer.image 必填（镜像标识）");
+  return { runtime: raw.runtime, kind: raw.kind, image };
+}
+
+/** 服务端电脑 id 规则：pc_ + sha256(botId) 前 24 位十六进制。 */
+export function computerIdFor(botId) {
+  const id = String(botId ?? "");
+  if (!id) throw new Error("computerIdFor 需要 botId");
+  return `pc_${createHash("sha256").update(id).digest("hex").slice(0, 24)}`;
 }
 
 /**
@@ -42,6 +69,7 @@ export function makeBot({
   memoryEnabled = DEFAULT_MEMORY_ENABLED,
   skills = null,
   budget = null,
+  computer = null,
 } = {}) {
   if (!id) throw new Error("bot 需要 id");
   if (!name) throw new Error("bot 需要 name");
@@ -63,6 +91,7 @@ export function makeBot({
     memoryEnabled: memoryEnabled === true,
     skills: skills === null ? null : [...skills],
     budget: normalizedBudget,
+    computer: normalizeComputer(computer),
     createdAt: Date.now(),
   };
 }
@@ -196,7 +225,7 @@ export function roomPrompt({ room, members, self, turnNumber, after = [], notice
 // ---- 运行策略：进程复用签名 / 预算与能力收窄 ----
 
 /** 策略版本：语义变化时必须改，避免旧版本的宽松进程被新版本复用。 */
-export const POLICY_VERSION = 1;
+export const POLICY_VERSION = 2;
 
 /**
  * 把旧记录补齐成当前形状（升级时用，不改用户已有取值）。
@@ -228,6 +257,7 @@ export function normalizeBot(raw) {
       memoryEnabled: raw.memoryEnabled ?? DEFAULT_MEMORY_ENABLED,
       skills: raw.skills ?? null,
       budget,
+      computer: raw.computer ?? null,
     });
     return budgetInvalid ? { ...bot, budgetInvalid } : bot;
   } catch {
@@ -237,11 +267,13 @@ export function normalizeBot(raw) {
 
 /**
  * runtime 复用签名。执行模式、审批档、工作区、模型、思考档、技能过滤、
- * 记忆开关任何一个变了都必须重建进程：宽权限进程不得承接收窄后的 Run。
+ * 记忆开关、电脑绑定任何一个变了都必须重建进程：宽权限进程不得承接收窄后的 Run，
+ * 绑定电脑后进程必须按电脑档（无原生工具/扩展/skills/MCP）重新起。
  * @param {object} bot
  * @param {{cwd:string, scope:string}} ctx
  */
 export function policySignature(bot, ctx) {
+  const c = bot.computer ?? null;
   const parts = [
     `v${POLICY_VERSION}`,
     `mode=${bot.executionMode ?? DEFAULT_EXECUTION_MODE}`,
@@ -251,6 +283,7 @@ export function policySignature(bot, ctx) {
     `thinking=${bot.thinking ?? ""}`,
     `skills=${(bot.skills ?? []).join(",")}`,
     `memory=${bot.memoryEnabled === true ? 1 : 0}`,
+    `computer=${c ? `${c.runtime}:${c.kind}:${c.image}` : "-"}`,
     `cwd=${ctx?.cwd ?? ""}`,
     `scope=${ctx?.scope ?? ""}`,
   ];

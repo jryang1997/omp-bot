@@ -1,7 +1,7 @@
 {
   "name": "omp-bot",
-  "version": "0.1.0",
-  "description": "基于 omp 的常驻 AI Bot 团队，提供 Windows 桌面应用、网页界面和 CLI。",
+  "version": "0.1.5",
+  "description": "基于 omp 的常驻 AI Bot 团队，提供 Windows 桌面应用、安卓伴侣应用、网页界面和 CLI。",
   "type": "module",
   "main": "desktop/main.mjs",
   "bin": {
@@ -9,22 +9,30 @@
   },
   "scripts": {
     "demo": "node ompbot.mjs demo",
-    "test": "node test/unit.mjs && node test/shutdown.mjs && node test/ledger.mjs && node test/runs.mjs && node test/features.mjs && node test/http-boundaries.mjs && node test/rpc-client.mjs && node test/channels.mjs && node smoke-gui.mjs && node gate.mjs && node smoke-b2b.mjs && node smoke-group.mjs && node smoke-persist.mjs",
+    "test": "node test/unit.mjs && node test/workbench-runs.mjs && node test/attachment-drafts.mjs && node test/shutdown.mjs && node test/ledger.mjs && node test/runs.mjs && node test/features.mjs && node test/http-boundaries.mjs && node test/mobile.mjs && node test/computers.mjs && node test/rpc-client.mjs && node test/channels.mjs && node smoke-gui.mjs && node gate.mjs && node smoke-b2b.mjs && node smoke-group.mjs && node smoke-persist.mjs",
     "serve": "node ompbot.mjs serve",
     "desktop": "electron .",
-    "package:win": "node scripts/prepare-desktop.mjs && electron-builder --win --x64 --publish never",
+    "package:win": "node scripts/package-windows.mjs",
+    "build:android": "node scripts/build-android.mjs",
+    "build:android:debug": "node scripts/build-android.mjs --debug",
     "test:unit": "node test/unit.mjs",
+    "test:workbench": "node test/workbench-runs.mjs",
+    "test:attachments": "node test/attachment-drafts.mjs",
     "test:shutdown": "node test/shutdown.mjs",
     "test:ledger": "node test/ledger.mjs",
     "test:runs": "node test/runs.mjs",
     "test:features": "node test/features.mjs",
     "test:http": "node test/http-boundaries.mjs",
+    "test:computers": "node test/computers.mjs",
     "test:rpc": "node test/rpc-client.mjs",
     "test:channels": "node test/channels.mjs",
+    "test:mobile": "node test/mobile.mjs",
     "gate": "node gate.mjs",
     "smoke:gui": "node smoke-gui.mjs",
     "smoke:b2b": "node smoke-b2b.mjs",
     "smoke:group": "node smoke-group.mjs",
+    "setup:computers": "node scripts/setup-computers.mjs",
+    "smoke:computers": "node smoke-computers.mjs",
     "smoke:persist": "node smoke-persist.mjs"
   },
   "engines": {
@@ -42,5 +50,10 @@
   "devDependencies": {
     "electron": "44.7.0",
     "electron-builder": "26.15.3"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "1.75.0",
+    "@trycua/cua": "0.4.1",
+    "qrcode": "^1.5.4"
   }
 }

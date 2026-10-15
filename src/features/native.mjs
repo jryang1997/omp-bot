@@ -7,17 +7,35 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import { clone, ferr, humanBytes, isInsideRoot } from "./util.mjs";
 import { memoryPrereqStatus } from "../memory-config.mjs";
 import { buildRuntimeEnv } from "../bot.mjs";
+import { COMPUTER_TOOL_NAMES } from "./computers.mjs";
+import { computerIdFor } from "../domain.mjs";
 
+/**
+ * 记忆路径必须在 Bot 私有目录内，且链路上不能有符号链接/junction。
+ * 逐级 lstat（不跟随）判定：stat/existsSync 会穿透 reparse point，Windows 上对 junction 内的路径
+ * 还可能直接报 UNKNOWN，靠 existsSync 往上找「最近存在的祖先」会把 junction 整级跳过。
+ */
 function assertMemoryPath(root, target) {
   if (!lexicallyUnder(root, target)) throw ferr(403, "memory_out_of_bot", "记忆路径不在 Bot 私有目录内");
-  let existing = target;
-  while (!existsSync(existing) && dirname(existing) !== existing) existing = dirname(existing);
-  if (!isInsideRoot(root, existing) || lstatSync(existing).isSymbolicLink()) {
-    throw ferr(403, "memory_out_of_bot", "记忆路径经过符号链接或超出 Bot 私有目录");
+  const rel = relative(root, target);
+  if (isAbsolute(rel) || rel.split(/[\\/]+/).includes("..")) {
+    throw ferr(403, "memory_out_of_bot", "记忆路径不在 Bot 私有目录内");
+  }
+  let current = root;
+  for (const part of rel.split(/[\\/]+/).filter(Boolean)) {
+    current = join(current, part);
+    let st;
+    try {
+      st = lstatSync(current);
+    } catch (e) {
+      if (e?.code === "ENOENT") break; // 尾部还不存在：没有可借道的实体，后续 mkdir 会重建
+      throw ferr(403, "memory_out_of_bot", `记忆路径无法安全校验（${e?.code ?? e?.message}）`);
+    }
+    if (st.isSymbolicLink()) throw ferr(403, "memory_out_of_bot", "记忆路径经过符号链接或超出 Bot 私有目录");
   }
 }
 
@@ -283,6 +301,24 @@ export class NativeFeatures {
         sandbox: false,
         note: "supervised 是 OMP 原生审批档，不是 OS 沙箱；本机没有已核实的 Windows 沙箱实现。",
       },
+      // 电脑档披露：客机档（非 chat）绑定后原生本机工具/扩展/skills/MCP 全部关闭，
+      // 工具面只允许团队工具与客机工具；chat 档没有客机工具，保留既有受控宿主读取工具。
+      // 真实生效与否看 tools.names（原生 dumpTools）与 getNativeState.toolSurface 的越界判定。
+      computer: bot.computer
+        ? {
+            bound: true,
+            id: computerIdFor(bot.id),
+            runtime: bot.computer.runtime,
+            kind: bot.computer.kind,
+            executionMode: bot.executionMode,
+            hostToolsBlocked: bot.executionMode !== "chat",
+            guestTools: bot.executionMode === "chat" ? [] : [...COMPUTER_TOOL_NAMES],
+            note:
+              bot.executionMode === "chat"
+                ? "chat 档绑定电脑只提供桌面（人工接管/截图），聊天仍只有聊天：没有客机工具，也不依赖运行中的客机。"
+                : "绑定电脑后原生本机工具/扩展/skills/用户与项目 MCP 全部关闭；客机工具与团队工具走原生审批档。",
+          }
+        : { bound: false, id: null, hostToolsBlocked: false, guestTools: [] },
       mcp: this.mcpStatus(botId, scope),
       skills: await this.skillsStatus(botId, scope, commands),
       memory: this.memoryStatus(botId, scope),
@@ -633,8 +669,9 @@ export class NativeFeatures {
     const cleared = [];
     for (const file of ["MEMORY.md", "learned.md"]) {
       const path = status.files[file].path;
-      if (!existsSync(path)) continue;
+      // 先做路径围栏再判存在：existsSync 会穿过 junction，先跳过就把逃逸路径静默当成「没有这个文件」。
       assertMemoryPath(this.paths(botId, scope).baseDir, path);
+      if (!existsSync(path)) continue;
       mkdirSync(backupRoot, { recursive: true });
       const backup = join(backupRoot, `${file}.${Date.now()}.bak`);
       writeFileSync(backup, readFileSync(path));
