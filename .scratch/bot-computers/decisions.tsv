@@ -1,0 +1,19 @@
+ts	phase	decision	why	evidence	result
+2026-10-13T02:55:06.044Z	frame	采用每 Bot 持久 Linux 电脑并保留本地 OMP	用户已授权研究推荐方案，模型认证和会话继续复用	docs/research/2026-10-13-bot-computers.md; .scratch/bot-computers/spec.md	open
+2026-10-13T02:55:06.044Z	runtime	先验证官方 CLI 加 QEMU 的本机 VM 路径	本机无容器引擎或 WSL且非管理员，先测免系统功能改动路径	.scratch/bot-computers/runtime/source.json	INCONCLUSIVE
+2026-10-13T03:12:03.999Z	runtime	官方 CLI 与 QEMU 本地解包后 doctor 报 QEMU ready	不安装 WSL 或改变系统功能即可验证 VM 路径	.scratch/bot-computers/runtime/doctor-after.json	VERIFIED：二进制与发现，客机启动仍待验
+2026-10-13T03:12:03.999Z	baseline	记录现有电脑状态接口为 HTTP 404	以真实消费者接口确认本次新增行为的基线	.scratch/bot-computers/baseline.json	VERIFIED
+2026-10-13T03:16:47.953Z	runtime	拒绝把 runtime doctor ready 当作电脑已可运行	真实启动暴露 WHPX VP exit 4，Cua 0.4.1 Windows pid_alive 恒 false	.scratch/bot-computers/cua-probe-home/vmm/qemu/ompbot-probe-a/qemu.log; .scratch/bot-computers/vendor/cua/libs/cua/crates/cua-vmm/src/host.rs:197	NOT VERIFIED：继续改部署路径
+2026-10-13T03:33:41.497Z	runtime	关闭 WHPX 内核中断控制器后 Linux 客机健康响应 204	同一磁盘与其余参数不变，旧暂停进程先经 QMP 核对名称后停止	.scratch/bot-computers/qemu-whpx-noirq-proof.json	VERIFIED：客机启动；操作与停启待验
+2026-10-13T03:33:41.497Z	client	采用进程内官方 SDK 的固定客机客户端	Windows 原生绑定实测加载成功，避免逐动作启动 CLI且可按 tag 取消	.scratch/bot-computers/sdk-probe/inspect.mjs	VERIFIED：加载，客机调用待验
+2026-10-13T06:16:09.459Z	client	官方 SDK 已完成 Linux 命令和1280×800截图	修正 timeoutMs 为 number后真实guest执行成功	.scratch/bot-computers/sdk-probe/guest.mjs; .scratch/bot-computers/real-guest-screen.png	VERIFIED
+2026-10-13T06:16:09.459Z	security	移除裸 TCP QMP/VNC，采用持久 raw会话与认证命名管道监督	客机可接宿主环回；原始QEMU pipe不能直接重连	.scratch/bot-computers/qmp-pipe-proof.json; .scratch/bot-computers/qmp-broker-proof.json	VERIFIED：私有通道原型，正式guest待验
+2026-10-13T06:16:09.459Z	control	在发送前验证authority，归还先阻断并确认所有在途动作	旧模型点击在接管完成后仍落到guest，postcheck不能撤销	 test/computers.mjs	VERIFIED：失败前OLD_AGENT_CLICK；修复后8/8通过
+2026-10-13T06:16:09.459Z	packaging	全量解包官方SDK依赖并从物理asar.unpacked路径加载	仅解包node/dll仍使官方resolver返回app.asar虚拟DLL路径	.scratch/bot-computers/sdk-asar-proof.json; .scratch/bot-computers/sdk-asar-fixed-proof.json	VERIFIED：实际Electron44.7 archive失败前1/修复后0
+2026-10-13T06:16:09.459Z	licensing	setup直接复制已随代码保存的官方许可原文	去除瞬时联网失败导致资产完成但CLI通知缺失的路径	.computer-runtime/manifest.json; desktop/CUA-CLI-LICENSE; desktop/CUA-SPACESD-LICENSE	VERIFIED：资源准备1.11s成功并记录两份SHA
+2026-10-13T07:44:25.265Z	control	所有不明客机输入与附件传输都标记待核对，确认停机前拒绝自动回合	普通RPC断流也可能留下副作用；固定错误码不足以判定	test/computers.mjs	VERIFIED：11/11消费者回归
+2026-10-13T07:44:25.265Z	input	文字经官方SDK粘贴到最初聚焦窗口	官方逐字Unicode输入实测把电脑写成脑脑；固定window.ref避免中途换窗口	.scratch/bot-computers/input-inspection.json; .scratch/bot-computers/clipboard-proof.json	VERIFIED：真实终端6次中文emoji、真实Chromium
+2026-10-13T07:44:25.265Z	lifecycle	慢管理通道拒绝替换活机，关闭串口文件输出	600ms状态失联不能证明孤儿；无界serial文件可被guest写满宿主盘	 src/computer-backend.mjs; agent://ComputerSecurityFinal	VERIFIED：独立安全审查PASS，包内guest运行与停机PASS
+2026-10-13T07:44:25.265Z	ui	队列记录入队代号，文本发送结束继续发送排队按键	第二窗口归还再接管不许给旧意图补新代号；文本等待期间Enter不能丢弃	.scratch/bot-computers/gui-proof.json; .scratch/bot-computers/gui-input-proof.json	VERIFIED：generation3至5无重放，真实客机GUI-INPUT-QUEUED
+2026-10-13T07:44:25.265Z	packaging	保留正在使用的OMP，单独复制核验引擎并采用normal压缩	原引擎被运行进程锁定；store档>2GiB触发NSIS mmap限制	.scratch/bot-computers/electron-builder-final.yml; .desktop-runtime-computer-final/PROVENANCE.json	VERIFIED：原件保留；压缩包待最终构建
+2026-10-13T08:08:06.233Z	delivery	最终Windows便携与安装产物已生成，核心代码与已验源码字节相同	最后程序重新完成真实客机开机、命令、截图和停机	.scratch/bot-computers/package-source-proof.json; .scratch/bot-computers/packaged-proof.json; .scratch/bot-computers/delivery-manifest.json	VERIFIED：两份约1.48GiB，NotSigned；未执行安装卸载

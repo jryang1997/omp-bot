@@ -1,0 +1,60 @@
+{
+  "startedAt": "2026-10-13T06:21:45.279Z",
+  "home": "C:\\Users\\Jerry\\Desktop\\omp_bot\\.scratch\\bot-computers\\smoke-home",
+  "model": "magpie/codex/gpt-6.1-sol",
+  "checks": [
+    {
+      "name": "两 Bot 的真实 Linux 电脑与同源桌面截图",
+      "computerA": "pc_7ddbf19f7fbd94ee205cb4fe",
+      "computerB": "pc_9d1f13200b44613953e8116f",
+      "dimensionsA": {
+        "width": 1280,
+        "height": 800
+      },
+      "dimensionsB": {
+        "width": 1280,
+        "height": 800
+      }
+    },
+    {
+      "name": "客机不能连接任何未认证 VNC 管理端口"
+    },
+    {
+      "name": "真实 OMP 消费随机桌面图像，附件到客机再生成可下载成果",
+      "runId": "run_mv6anf2x_a96d65c0",
+      "visualMarker": "VIZ_A_ad848f.txt",
+      "artifactId": "art_mv6ao4df_8"
+    },
+    {
+      "name": "真实 dumpTools 核对所属电脑工具，宿主工具未进入模型",
+      "tools": [
+        "message_bot",
+        "delegate_bot",
+        "computer_screenshot",
+        "computer_input",
+        "computer_shell",
+        "computer_files",
+        "computer_upload_attachment",
+        "computer_publish_file",
+        "list_bots"
+      ]
+    }
+  ],
+  "bots": [
+    {
+      "id": "bot_mv6amhur_1",
+      "name": "Computer A 1181e2"
+    },
+    {
+      "id": "bot_mv6amhv6_2",
+      "name": "Computer B 1181e2"
+    }
+  ],
+  "status": "FAIL",
+  "error": {
+    "name": "AssertionError",
+    "code": "ERR_ASSERTION",
+    "message": "The expression evaluated to a falsy value:\n\n  assert.ok(doneB.reply?.includes(markerB))\n"
+  },
+  "finishedAt": "2026-10-13T06:23:49.206Z"
+}

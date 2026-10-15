@@ -1,0 +1,8 @@
+{
+  "checks": [
+    "real stopped VM relocates identical base image and retains guest file",
+    "real missing guest disk rebuild clears obsolete stamp and boots new disk",
+    "recreated real VM returns SDK screenshot"
+  ],
+  "status": "PASS"
+}

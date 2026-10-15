@@ -1,0 +1,6 @@
+{
+  "exitCode": 0,
+  "stdout": "{\"status\":\"PASS\",\"state\":\"running\",\"stdout\":\"PACKAGED_GUEST_OK\",\"width\":1280,\"height\":800,\"node\":\"24.21.0\",\"electron\":\"44.7.0\"}\n",
+  "stderr": "",
+  "error": null
+}

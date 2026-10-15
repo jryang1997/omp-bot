@@ -1,0 +1,8 @@
+{
+  "status": "PASS",
+  "computerStates": [
+    "stopped",
+    "stopped"
+  ],
+  "removedOwnedTemporaryHome": true
+}

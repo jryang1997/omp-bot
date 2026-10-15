@@ -1,0 +1,17 @@
+import { createPackageWithOptions } from '@electron/asar';
+import { cpSync, mkdirSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { join, resolve } from 'node:path';
+const root = resolve('.scratch/bot-computers/sdk-asar-probe');
+const source = join(root, 'input');
+mkdirSync(join(source, 'node_modules'), { recursive: true });
+for (const scope of ['@trycua', '@ubjs']) cpSync(join('node_modules', scope), join(source, 'node_modules', scope), { recursive: true });
+writeFileSync(join(source, 'package.json'), JSON.stringify({ type: 'module' }));
+writeFileSync(join(source, 'probe.mjs'), "const { pathToFileURL, fileURLToPath } = await import('node:url'); const path = fileURLToPath(new URL('./node_modules/@trycua/cua/dist/index.js', import.meta.url)).replace('.asar/', '.asar.unpacked/').replace('.asar\\\\', '.asar.unpacked\\\\'); const { embedded } = await import(pathToFileURL(path).href); const runtime = embedded(); console.log(JSON.stringify({nativeSdkLoaded:true,spacesd:typeof runtime.spacesd,node:process.versions.node,electron:process.versions.electron}));");
+const archive = join(root, 'app.asar');
+await createPackageWithOptions(source, archive, { unpackDir: 'node_modules/{@trycua,@ubjs}/**' });
+const result = spawnSync(resolve('node_modules/electron/dist/electron.exe'), [join(archive, 'probe.mjs')], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', CUA_HOME: join(root, 'cua-home'), DO_NOT_TRACK: '1' }, encoding: 'utf8', windowsHide: true, timeout: 30000 });
+const proof = { exitCode: result.status, stdout: result.stdout, stderr: result.stderr, error: result.error?.message ?? null };
+writeFileSync(resolve('.scratch/bot-computers/sdk-asar-fixed-proof.json'), JSON.stringify(proof, null, 2));
+console.log(JSON.stringify(proof));
+process.exitCode = result.status ?? 1;

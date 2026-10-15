@@ -1,0 +1,32 @@
+{
+  "version": "0.1.5",
+  "artifacts": [
+    { "file": "release/omp-bot-0.1.5-setup.exe", "bytes": 235337400 },
+    { "file": "release/omp-bot-0.1.5-portable.zip", "bytes": 305377159 },
+    { "file": "release/omp-bot-computer-runtime.zip", "bytes": 1368014223 }
+  ],
+  "checks": [
+    "npm test completed successfully, including real OMP gate, B2B, group and persistence smoke",
+    "Real two-computer smoke passed all 13 scenarios with magpie/codex/gpt-6.1-sol",
+    "Empty desktop shortcut Ctrl+Alt+T opened focused terminal and text input executed command writing exact marker",
+    "Missing disk rebuild refreshed stale image stamp",
+    "Legacy raw backing image relocation retained raw format and read exact bytes",
+    "Final package build reused unchanged computer runtime archive after content hash verification",
+    "Final ZIP extracted and actual omp-bot.exe launched with isolated acceptance home",
+    "Final packaged application started real guest, sent keyboard and text, wrote exact file, and retained file after stop/restart",
+    "Final packaged Android APK download returned actual companion bytes",
+    "Final native computer panel started guest through visible controls, showed running desktop state, and stopped guest through visible controls"
+  ],
+  "evidence": {
+    "realComputerProof": ".scratch/bot-computers/smoke-proof.json",
+    "packagedProof": ".scratch/qa-loop/packaged-proof.json",
+    "packagedGuestScreenshot": ".scratch/qa-loop/packaged-desktop.png",
+    "nativeUIScreenshot": ".scratch/qa-loop/final-packaged-ui.png",
+    "priorStartupMeasurement": ".scratch/app-size/verification.json"
+  },
+  "limitations": [
+    "Windows installer installation/uninstallation was not exercised",
+    "Startup comparison is the prior 0.1.4 single-launch measurement, not a new 0.1.5 benchmark",
+    "Independent Linux desktops still require the shared external computer runtime pack"
+  ]
+}

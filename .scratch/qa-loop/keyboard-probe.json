@@ -1,0 +1,14 @@
+{
+  "before": {
+    "windows": 0,
+    "focused": []
+  },
+  "keyboard": "virtual keyboard accepted",
+  "after": {
+    "windows": 1,
+    "focused": [
+      "xfce4-terminal"
+    ]
+  },
+  "status": "PASS"
+}

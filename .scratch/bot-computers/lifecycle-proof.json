@@ -1,0 +1,25 @@
+{
+  "startedAt": "2026-10-13T06:36:05.969Z",
+  "checks": [
+    {
+      "name": "Node exits abruptly and fresh backend reconnects to same live VM",
+      "pid": 24480
+    },
+    {
+      "name": "Real supervisor rejects wrong key and host monitor command"
+    },
+    {
+      "name": "Guest UTF-8 characters survive deliberately split writes",
+      "stdout": "中文流输出"
+    },
+    {
+      "name": "Stale pid pointing at live unrelated Node is cleared without killing it"
+    },
+    {
+      "name": "Same-size backing-image replacement is rejected before launch",
+      "bytes": 1306198016
+    }
+  ],
+  "status": "PASS",
+  "finishedAt": "2026-10-13T06:36:46.847Z"
+}

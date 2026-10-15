@@ -1,0 +1,54 @@
+appId: org.ompbot.app
+productName: omp-bot
+asar: true
+npmRebuild: false
+compression: normal
+asarUnpack:
+  - "**/*.node"
+  - "**/*.dll"
+  - "node_modules/@trycua/**/*"
+  - "node_modules/@ubjs/**/*"
+electronDist: node_modules/electron/dist
+publish: null
+directories:
+  output: release-computer-final
+files:
+  - desktop/main.mjs
+  - desktop/OMP-LICENSE
+  - desktop/CUA-CLI-LICENSE
+  - desktop/CUA-SPACESD-LICENSE
+  - src/**/*.mjs
+  - web/**/*
+  - package.json
+  - README.md
+  - CHANGELOG.md
+  - LICENSE
+extraResources:
+  - from: .desktop-runtime-computer-final
+    to: runtime
+  - from: .computer-runtime
+    to: computer-runtime
+  - from: release
+    to: mobile
+    filter:
+      - omp-bot-android.apk
+      - omp-bot-android.json
+win:
+  icon: web/assets/app-icon.ico
+  target:
+    - target: portable
+      arch: x64
+    - target: nsis
+      arch: x64
+portable:
+  artifactName: omp-bot-${version}-portable.exe
+nsis:
+  guid: 4356571b-0a0e-5f7d-89dd-4cceb503b213
+  artifactName: omp-bot-${version}-setup.exe
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: omp-bot
+  deleteAppDataOnUninstall: false

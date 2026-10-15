@@ -1,0 +1,11 @@
+{
+  "delivery": {
+    "stdout": "{\"DISPLAY\": \":1\"}\n{\"exitCode\": 0, \"stderr\": \"\"}\n",
+    "stderr": "",
+    "exitCode": 0,
+    "timedOut": false
+  },
+  "focused": [
+    "xfce4-terminal"
+  ]
+}

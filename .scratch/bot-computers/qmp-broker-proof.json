@@ -1,0 +1,21 @@
+{
+  "success": true,
+  "controlTransport": "Windows named pipe",
+  "persistentRawSession": true,
+  "first": {
+    "return": {
+      "name": "ompbot-broker-proof"
+    },
+    "id": 2
+  },
+  "second": {
+    "return": {
+      "name": "ompbot-broker-proof"
+    },
+    "id": 3
+  },
+  "invalidKey": {
+    "error": "unauthorized"
+  },
+  "stderr": ""
+}

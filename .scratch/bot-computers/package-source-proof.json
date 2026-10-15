@@ -1,0 +1,18 @@
+[
+  {
+    "file": "src/features/computers.mjs",
+    "exactSourceMatch": true
+  },
+  {
+    "file": "web/workbench-computer.js",
+    "exactSourceMatch": true
+  },
+  {
+    "file": "src/computer-backend.mjs",
+    "exactSourceMatch": true
+  },
+  {
+    "file": "src/computer-qmp-supervisor.mjs",
+    "exactSourceMatch": true
+  }
+]

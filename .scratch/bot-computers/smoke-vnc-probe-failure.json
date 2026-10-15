@@ -1,0 +1,37 @@
+{
+  "startedAt": "2026-10-13T06:19:36.284Z",
+  "home": "C:\\Users\\Jerry\\Desktop\\omp_bot\\.scratch\\bot-computers\\smoke-home",
+  "model": "magpie/codex/gpt-6.1-sol",
+  "checks": [
+    {
+      "name": "两 Bot 的真实 Linux 电脑与同源桌面截图",
+      "computerA": "pc_8b2c865609e2a36ef864adb9",
+      "computerB": "pc_37655fe312d3d8b8ce1fdc5e",
+      "dimensionsA": {
+        "width": 1280,
+        "height": 800
+      },
+      "dimensionsB": {
+        "width": 1280,
+        "height": 800
+      }
+    }
+  ],
+  "bots": [
+    {
+      "id": "bot_mv6ajqca_1",
+      "name": "Computer A ffdc99"
+    },
+    {
+      "id": "bot_mv6ajqcq_2",
+      "name": "Computer B ffdc99"
+    }
+  ],
+  "status": "FAIL",
+  "error": {
+    "name": "AssertionError",
+    "code": "ERR_ASSERTION",
+    "message": "Expected values to be strictly equal:\n\n'[5985]' !== '[]'\n"
+  },
+  "finishedAt": "2026-10-13T06:20:17.100Z"
+}

@@ -1,0 +1,13 @@
+{
+  "checks": [
+    "actual ZIP packaged application boots real Linux VM using shared external resources",
+    "packaged real keyboard input writes exact guest file",
+    "packaged stop and restart retains guest file",
+    "packaged companion APK download remains available"
+  ],
+  "screen": {
+    "width": 1280,
+    "height": 800
+  },
+  "status": "PASS"
+}

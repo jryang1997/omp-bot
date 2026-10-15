@@ -1,0 +1,12 @@
+{
+  "beforeFocus": [],
+  "keyboard": {
+    "report": {
+      "delivery": "DELIVERY_FOREGROUND",
+      "detail": "x11 XTest into the focused window"
+    }
+  },
+  "focused": [
+    "xfce4-terminal"
+  ]
+}

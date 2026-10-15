@@ -1,0 +1,51 @@
+{
+  "startedAt": "2026-10-13T06:18:27.839Z",
+  "home": "C:\\Users\\Jerry\\Desktop\\omp_bot\\.scratch\\bot-computers\\backend-hardened-proof-home",
+  "computerId": "pc_000000000000000000000002",
+  "created": {
+    "state": "running",
+    "runtime": "qemu",
+    "kind": "vm",
+    "os": "linux",
+    "display": {
+      "width": 1280,
+      "height": 800
+    },
+    "error": null
+  },
+  "command": {
+    "stdout": "Linux\nbackend-ready",
+    "stderr": "",
+    "exitCode": 0,
+    "timedOut": false
+  },
+  "screenshot": {
+    "width": 1280,
+    "height": 800,
+    "bytes": 21718
+  },
+  "stopped": {
+    "state": "stopped",
+    "runtime": "qemu",
+    "kind": "vm",
+    "os": "linux",
+    "display": {
+      "width": 1280,
+      "height": 800
+    },
+    "error": null
+  },
+  "status": "PASS",
+  "finalStopped": {
+    "state": "stopped",
+    "runtime": "qemu",
+    "kind": "vm",
+    "os": "linux",
+    "display": {
+      "width": 1280,
+      "height": 800
+    },
+    "error": null
+  },
+  "finishedAt": "2026-10-13T06:18:41.749Z"
+}

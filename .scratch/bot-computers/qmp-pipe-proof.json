@@ -1,0 +1,31 @@
+{
+  "pipeName": "ompbot-qmp-proof-10088d9ef4c495d1",
+  "args": [
+    "-machine",
+    "none",
+    "-nodefaults",
+    "-display",
+    "none",
+    "-monitor",
+    "none",
+    "-vnc",
+    "none",
+    "-name",
+    "ompbot-pipe-proof",
+    "-qmp",
+    "pipe:ompbot-qmp-proof-10088d9ef4c495d1"
+  ],
+  "success": false,
+  "connections": [
+    {
+      "return": {
+        "name": "ompbot-pipe-proof"
+      },
+      "id": 2
+    }
+  ],
+  "error": {
+    "message": "QMP pipe session timed out"
+  },
+  "stderr": ""
+}

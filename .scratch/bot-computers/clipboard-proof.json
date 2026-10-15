@@ -1,0 +1,79 @@
+{
+  "checks": [
+    {
+      "name": "Terminal Ctrl+Shift+V pastes exact Unicode and emoji",
+      "iteration": 0
+    },
+    {
+      "name": "Terminal Ctrl+Shift+V pastes exact Unicode and emoji",
+      "iteration": 1
+    },
+    {
+      "name": "Terminal Ctrl+Shift+V pastes exact Unicode and emoji",
+      "iteration": 2
+    },
+    {
+      "name": "Terminal Ctrl+Shift+V pastes exact Unicode and emoji",
+      "iteration": 3
+    },
+    {
+      "name": "Terminal Ctrl+Shift+V pastes exact Unicode and emoji",
+      "iteration": 4
+    },
+    {
+      "name": "Terminal Ctrl+Shift+V pastes exact Unicode and emoji",
+      "iteration": 5
+    },
+    {
+      "name": "Chrome address bar Ctrl+V pastes exact Unicode and emoji"
+    }
+  ],
+  "terminalWindow": {
+    "ref": {
+      "id": "target-e7f3095d-62c9-414f-827a-01fb74807956",
+      "epoch": "1"
+    },
+    "title": "Terminal - cua@pccec0c9997dbaa614db1c6cbe: /work",
+    "app": {
+      "name": "Xfce4-terminal",
+      "appId": "xfce4-terminal",
+      "pid": 577
+    },
+    "bounds": {
+      "x": 5,
+      "y": 29,
+      "width": 817,
+      "height": 483
+    },
+    "displayId": "0",
+    "state": "WINDOW_STATE_NORMAL",
+    "kind": "WINDOW_KIND_STANDARD",
+    "focused": true,
+    "onScreen": true
+  },
+  "browserWindow": {
+    "ref": {
+      "id": "target-2a5f04c6-fcbb-4024-b0e8-871b356e9c0b",
+      "epoch": "1"
+    },
+    "title": "Untitled - Chromium",
+    "app": {
+      "name": "Chromium",
+      "appId": "chromium (/work/clipboard-browser-profile)",
+      "pid": 715
+    },
+    "bounds": {
+      "x": 10,
+      "y": 37,
+      "width": 1050,
+      "height": 753
+    },
+    "displayId": "0",
+    "state": "WINDOW_STATE_NORMAL",
+    "kind": "WINDOW_KIND_STANDARD",
+    "focused": true,
+    "onScreen": true,
+    "zOrder": 3
+  },
+  "status": "PASS"
+}

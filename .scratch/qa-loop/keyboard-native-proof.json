@@ -1,0 +1,15 @@
+{
+  "config": {
+    "stdout": "/usr/bin/xdotool\nexo-open --launch TerminalEmulator\n",
+    "stderr": "/bin/sh: 1: xinput: not found\n",
+    "exitCode": 127,
+    "timedOut": false
+  },
+  "native": {
+    "stdout": "",
+    "stderr": "Error: Can't open display: (null)\nFailed creating new xdo instance\n",
+    "exitCode": 1,
+    "timedOut": false
+  },
+  "focused": []
+}

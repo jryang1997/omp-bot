@@ -1,0 +1,108 @@
+{
+  "startedAt": "2026-10-14T12:13:31.022Z",
+  "home": "C:\\Users\\Jerry\\AppData\\Local\\Temp\\ompbot-computer-smoke-aXTiwP",
+  "model": "magpie/codex/gpt-6.1-sol",
+  "checks": [
+    {
+      "name": "两 Bot 的真实 Linux 电脑与同源桌面截图",
+      "computerA": "pc_c3895edf1b6d791fab5c582d",
+      "computerB": "pc_b53a291b45d0a9bc1c29fdec",
+      "dimensionsA": {
+        "width": 1280,
+        "height": 800
+      },
+      "dimensionsB": {
+        "width": 1280,
+        "height": 800
+      }
+    },
+    {
+      "name": "客机不能连接任何未认证 VNC 管理端口"
+    },
+    {
+      "name": "真实 OMP 消费随机桌面图像，附件到客机再生成可下载成果",
+      "runId": "run_mv82obbb_dc00e5e2",
+      "visualMarker": "VIZ_A_517bc6.txt",
+      "artifactId": "art_mv82oo05_8"
+    },
+    {
+      "name": "真实 dumpTools 核对所属电脑工具，宿主工具未进入模型",
+      "tools": [
+        "message_bot",
+        "delegate_bot",
+        "computer_screenshot",
+        "computer_input",
+        "computer_shell",
+        "computer_files",
+        "computer_upload_attachment",
+        "computer_publish_file",
+        "list_bots"
+      ]
+    },
+    {
+      "name": "第二台电脑与文件隔离，跨 Bot 附件被拒绝",
+      "runId": "run_mv82osok_f4ce2c04",
+      "visualMarker": "VIZ_B_2eea70.txt",
+      "rejectedRunId": "run_mv82p563_314c4bf0"
+    },
+    {
+      "name": "第二台电脑的真实桌面按键、文本输入与点击"
+    },
+    {
+      "name": "人工接管的真实快捷键、中文输入和点击，归还拒绝旧代输入",
+      "generation": 1
+    },
+    {
+      "name": "取消真正终止客机 sleep 300 子进程",
+      "value": {
+        "stdout": "",
+        "stderr": "",
+        "exitCode": null,
+        "timedOut": false
+      }
+    },
+    {
+      "name": "同机跨群与私聊互斥，运行中接管真正杀客机命令，取消收尾且旧输入作废",
+      "rejectedRoomRunId": "run_mv82pcgu_6a904439",
+      "cancelledRunId": "run_mv82p7w5_99ca0164"
+    },
+    {
+      "name": "停启保留客机工作文件与真实 Chromium 浏览器 localStorage",
+      "browser": "/usr/bin/chromium",
+      "profile": "/home/cua/.config/ompbot-smoke-browser",
+      "browserMarker": "PROFILE_d0469a"
+    },
+    {
+      "name": "真实 guest 命令沿用 native write 审批卡与明确批准",
+      "runId": "run_mv82q5fx_b0ae3981",
+      "approvalId": "ui_mv82qc9g_l"
+    },
+    {
+      "name": "绑定电脑的只聊天模式在人工接管与关机时仍可聊天和读取附件",
+      "heldRunId": "run_mv82qggu_ed16d768",
+      "stoppedRunId": "run_mv82qm3q_cff8befb",
+      "tools": [
+        "read_workspace_file",
+        "list_workspace",
+        "fetch_public_url",
+        "list_bots"
+      ]
+    },
+    {
+      "name": "编排服务重启后恢复同一绑定与持久磁盘",
+      "computerId": "pc_c3895edf1b6d791fab5c582d"
+    }
+  ],
+  "bots": [
+    {
+      "id": "bot_mv82mptw_1",
+      "name": "Computer A d0469a"
+    },
+    {
+      "id": "bot_mv82mpu7_2",
+      "name": "Computer B d0469a"
+    }
+  ],
+  "status": "PASS",
+  "finishedAt": "2026-10-14T12:16:45.882Z"
+}

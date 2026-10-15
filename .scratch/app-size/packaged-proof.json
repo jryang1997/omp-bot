@@ -1,0 +1,16 @@
+{
+  "checks": [
+    "packaged EXE boots real Linux VM from shared external resource cache",
+    "packaged human input reaches focused guest terminal and writes exact marker",
+    "packaged SDK loads DLL and returns real guest desktop without cua.exe",
+    "packaged VM stops and restarts same computer",
+    "packaged Android APK download serves actual existing companion"
+  ],
+  "screenshot": {
+    "width": 1280,
+    "height": 800,
+    "bytes": 76457
+  },
+  "apkHttpStatus": 200,
+  "status": "PASS"
+}

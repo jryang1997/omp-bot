@@ -1,0 +1,772 @@
+{
+  "samples": [
+    {
+      "elapsedMs": 22440,
+      "initialized": true,
+      "features": [
+        {
+          "name": "a11y",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "audio.desktop",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "audio.opus",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "audio.per_app",
+          "supported": true,
+          "limitation": "per-app capture needs the app to play through PulseAudio/PipeWire; otherwise the desktop mix is sent with desktop_fallback",
+          "attributes": {}
+        },
+        {
+          "name": "audio.uplink",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "background_input",
+          "supported": true,
+          "limitation": "background input uses XSendEvent, which GTK3/GTK4 and Chromium ignore: AUTO delivers to those with foreground XTest (CUA_ENV_AUTO_FOREGROUND=0 makes it fail instead) and BACKGROUND to them fails with WOULD_REQUIRE_ACTIVATION; use AccessibilityService.Act for true background",
+          "attributes": {}
+        },
+        {
+          "name": "clipboard.files",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "clipboard.image",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "clipboard.text",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "desktop_stream",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "driver",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "fs_watch",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "h264_hw",
+          "supported": false,
+          "limitation": "no hardware H.264 encoder was found (NVENC, VA-API, QSV, AMF)",
+          "attributes": {}
+        },
+        {
+          "name": "h264_sw",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "hotspot",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "launch_app",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "presence",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "presence.cursor_shape",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "pty",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "quic_media",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "relay_attach",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.chrome",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.claude-code",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.discord",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.firefox",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.notion",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.slack",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.steam",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.unity-hub",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.vscode",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.whatsapp",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.wipe",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "tunnel.forward",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "volume.mount",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "window_stream",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "windows",
+          "supported": true,
+          "attributes": {}
+        }
+      ],
+      "windows": [
+        {
+          "title": "Cua.AgentCursorOverlay.default"
+        }
+      ],
+      "processes": "    PID COMMAND\n    479 xfce4-session\n    595 xfwm4\n"
+    },
+    {
+      "elapsedMs": 27577,
+      "initialized": true,
+      "features": [
+        {
+          "name": "a11y",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "audio.desktop",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "audio.opus",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "audio.per_app",
+          "supported": true,
+          "limitation": "per-app capture needs the app to play through PulseAudio/PipeWire; otherwise the desktop mix is sent with desktop_fallback",
+          "attributes": {}
+        },
+        {
+          "name": "audio.uplink",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "background_input",
+          "supported": true,
+          "limitation": "background input uses XSendEvent, which GTK3/GTK4 and Chromium ignore: AUTO delivers to those with foreground XTest (CUA_ENV_AUTO_FOREGROUND=0 makes it fail instead) and BACKGROUND to them fails with WOULD_REQUIRE_ACTIVATION; use AccessibilityService.Act for true background",
+          "attributes": {}
+        },
+        {
+          "name": "clipboard.files",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "clipboard.image",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "clipboard.text",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "desktop_stream",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "driver",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "fs_watch",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "h264_hw",
+          "supported": false,
+          "limitation": "no hardware H.264 encoder was found (NVENC, VA-API, QSV, AMF)",
+          "attributes": {}
+        },
+        {
+          "name": "h264_sw",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "hotspot",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "launch_app",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "presence",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "presence.cursor_shape",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "pty",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "quic_media",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "relay_attach",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.chrome",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.claude-code",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.discord",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.firefox",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.notion",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.slack",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.steam",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.unity-hub",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.vscode",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.whatsapp",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.wipe",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "tunnel.forward",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "volume.mount",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "window_stream",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "windows",
+          "supported": true,
+          "attributes": {}
+        }
+      ],
+      "windows": [],
+      "processes": "    PID COMMAND\n    479 xfce4-session\n    595 xfwm4\n    626 xfdesktop\n"
+    },
+    {
+      "elapsedMs": 32733,
+      "initialized": true,
+      "features": [
+        {
+          "name": "a11y",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "audio.desktop",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "audio.opus",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "audio.per_app",
+          "supported": true,
+          "limitation": "per-app capture needs the app to play through PulseAudio/PipeWire; otherwise the desktop mix is sent with desktop_fallback",
+          "attributes": {}
+        },
+        {
+          "name": "audio.uplink",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "background_input",
+          "supported": true,
+          "limitation": "background input uses XSendEvent, which GTK3/GTK4 and Chromium ignore: AUTO delivers to those with foreground XTest (CUA_ENV_AUTO_FOREGROUND=0 makes it fail instead) and BACKGROUND to them fails with WOULD_REQUIRE_ACTIVATION; use AccessibilityService.Act for true background",
+          "attributes": {}
+        },
+        {
+          "name": "clipboard.files",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "clipboard.image",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "clipboard.text",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "desktop_stream",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "driver",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "fs_watch",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "h264_hw",
+          "supported": false,
+          "limitation": "no hardware H.264 encoder was found (NVENC, VA-API, QSV, AMF)",
+          "attributes": {}
+        },
+        {
+          "name": "h264_sw",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "hotspot",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "launch_app",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "presence",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "presence.cursor_shape",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "pty",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "quic_media",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "relay_attach",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.chrome",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.claude-code",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.discord",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.firefox",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.notion",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.slack",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.steam",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.unity-hub",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.vscode",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.whatsapp",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.wipe",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "tunnel.forward",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "volume.mount",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "window_stream",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "windows",
+          "supported": true,
+          "attributes": {}
+        }
+      ],
+      "windows": [],
+      "processes": "    PID COMMAND\n    479 xfce4-session\n    595 xfwm4\n    626 xfdesktop\n"
+    },
+    {
+      "elapsedMs": 37813,
+      "initialized": true,
+      "features": [
+        {
+          "name": "a11y",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "audio.desktop",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "audio.opus",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "audio.per_app",
+          "supported": true,
+          "limitation": "per-app capture needs the app to play through PulseAudio/PipeWire; otherwise the desktop mix is sent with desktop_fallback",
+          "attributes": {}
+        },
+        {
+          "name": "audio.uplink",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "background_input",
+          "supported": true,
+          "limitation": "background input uses XSendEvent, which GTK3/GTK4 and Chromium ignore: AUTO delivers to those with foreground XTest (CUA_ENV_AUTO_FOREGROUND=0 makes it fail instead) and BACKGROUND to them fails with WOULD_REQUIRE_ACTIVATION; use AccessibilityService.Act for true background",
+          "attributes": {}
+        },
+        {
+          "name": "clipboard.files",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "clipboard.image",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "clipboard.text",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "desktop_stream",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "driver",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "fs_watch",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "h264_hw",
+          "supported": false,
+          "limitation": "no hardware H.264 encoder was found (NVENC, VA-API, QSV, AMF)",
+          "attributes": {}
+        },
+        {
+          "name": "h264_sw",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "hotspot",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "launch_app",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "presence",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "presence.cursor_shape",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "pty",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "quic_media",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "relay_attach",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.chrome",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.claude-code",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.discord",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.firefox",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.notion",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.slack",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.steam",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.unity-hub",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.vscode",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.whatsapp",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "teleport.wipe",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "tunnel.forward",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "volume.mount",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "window_stream",
+          "supported": true,
+          "attributes": {}
+        },
+        {
+          "name": "windows",
+          "supported": true,
+          "attributes": {}
+        }
+      ],
+      "windows": [],
+      "processes": "    PID COMMAND\n    479 xfce4-session\n    595 xfwm4\n    626 xfdesktop\n"
+    }
+  ]
+}

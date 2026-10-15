@@ -1,0 +1,82 @@
+[
+  {
+    "home": "C:\\Users\\Jerry\\Desktop\\omp_bot\\.scratch\\bot-computers\\smoke-home",
+    "id": "pc_37655fe312d3d8b8ce1fdc5e",
+    "state": "stopped"
+  },
+  {
+    "home": "C:\\Users\\Jerry\\Desktop\\omp_bot\\.scratch\\bot-computers\\smoke-home",
+    "id": "pc_7ddbf19f7fbd94ee205cb4fe",
+    "state": "stopped"
+  },
+  {
+    "home": "C:\\Users\\Jerry\\Desktop\\omp_bot\\.scratch\\bot-computers\\smoke-home",
+    "id": "pc_8b2c865609e2a36ef864adb9",
+    "state": "stopped"
+  },
+  {
+    "home": "C:\\Users\\Jerry\\Desktop\\omp_bot\\.scratch\\bot-computers\\smoke-home",
+    "id": "pc_9d1f13200b44613953e8116f",
+    "state": "stopped"
+  },
+  {
+    "home": "C:\\Users\\Jerry\\Desktop\\omp_bot\\.scratch\\bot-computers\\smoke-final-home",
+    "id": "pc_a094b5104e40b94b558cb4ab",
+    "state": "stopped"
+  },
+  {
+    "home": "C:\\Users\\Jerry\\Desktop\\omp_bot\\.scratch\\bot-computers\\smoke-final-home",
+    "id": "pc_cec0c9997dbaa614db1c6cbe",
+    "state": "stopped"
+  },
+  {
+    "home": "C:\\Users\\Jerry\\Desktop\\omp_bot\\.scratch\\bot-computers\\smoke-verified-home",
+    "id": "pc_6e6e1cc78b702953af8c79be",
+    "state": "stopped"
+  },
+  {
+    "home": "C:\\Users\\Jerry\\Desktop\\omp_bot\\.scratch\\bot-computers\\smoke-verified-home",
+    "id": "pc_f9875ec358e5a36a4a48af58",
+    "state": "stopped"
+  },
+  {
+    "home": "C:\\Users\\Jerry\\Desktop\\omp_bot\\.scratch\\bot-computers\\smoke-delivery-home",
+    "id": "pc_874946c2d4182474d1937efa",
+    "state": "stopped"
+  },
+  {
+    "home": "C:\\Users\\Jerry\\Desktop\\omp_bot\\.scratch\\bot-computers\\smoke-delivery-home",
+    "id": "pc_ced36e1ebb98cfae624b151c",
+    "state": "stopped"
+  },
+  {
+    "home": "C:\\Users\\Jerry\\Desktop\\omp_bot\\.scratch\\bot-computers\\smoke-acceptance-home",
+    "id": "pc_460f691d008166887a7cc8dd",
+    "state": "stopped"
+  },
+  {
+    "home": "C:\\Users\\Jerry\\Desktop\\omp_bot\\.scratch\\bot-computers\\smoke-acceptance-home",
+    "id": "pc_8b1c016fd36c8987dfc30ff1",
+    "state": "stopped"
+  },
+  {
+    "home": "C:\\Users\\Jerry\\Desktop\\omp_bot\\.scratch\\bot-computers\\smoke-complete-home",
+    "id": "pc_0592b9aadf82df009b4a559d",
+    "state": "stopped"
+  },
+  {
+    "home": "C:\\Users\\Jerry\\Desktop\\omp_bot\\.scratch\\bot-computers\\smoke-complete-home",
+    "id": "pc_d483973c86e9dae259e92ca9",
+    "state": "stopped"
+  },
+  {
+    "home": "C:\\Users\\Jerry\\Desktop\\omp_bot\\.scratch\\bot-computers\\smoke-approved-home",
+    "id": "pc_0e53d20ba60175fd9adb4afa",
+    "state": "stopped"
+  },
+  {
+    "home": "C:\\Users\\Jerry\\Desktop\\omp_bot\\.scratch\\bot-computers\\smoke-approved-home",
+    "id": "pc_6d858ae3ae168c90bc5acb8c",
+    "state": "stopped"
+  }
+]

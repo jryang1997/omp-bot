@@ -1,0 +1,12 @@
+[
+  {
+    "file": "release-computer-final/omp-bot-0.1.1-portable.exe",
+    "bytes": 1584775493,
+    "sha256": "784b7537e94c4b7c49ee16d8ca94fbc9b9cd6d1a2a432ff9fcc73b2258a38b6d"
+  },
+  {
+    "file": "release-computer-final/omp-bot-0.1.1-setup.exe",
+    "bytes": 1585039433,
+    "sha256": "30a6ddd03a2d56cf9c92a652e6a30216699ad5c0a02bc48bab0c8b48349328ef"
+  }
+]

@@ -1,0 +1,45 @@
+{
+  "version": "0.1.4",
+  "measurements": {
+    "oldPortable": {
+      "backendReadyMs": 49087,
+      "domContentLoadedMs": 49351
+    },
+    "newZipPortable": {
+      "backendReadyMs": 526,
+      "domContentLoadedMs": 845
+    },
+    "method": "One launch per artifact on this workstation with isolated user-data-dir and OMPBOT_HOME; UI time from renderer performance navigation entry; ZIP extraction time excluded."
+  },
+  "reclaimedGeneratedGiB": 13.431354014202952,
+  "artifacts": [
+    {
+      "file": "release/omp-bot-0.1.4-setup.exe",
+      "bytes": 235334335
+    },
+    {
+      "file": "release/omp-bot-0.1.4-portable.zip",
+      "bytes": 305372862
+    },
+    {
+      "file": "release/omp-bot-computer-runtime.zip",
+      "bytes": 1368014223
+    }
+  ],
+  "checks": [
+    "Computer HTTP transitions 11/11",
+    "Core unit behavior 11/11",
+    "Real guest resource relocation retained persistent file",
+    "Actual portable ZIP extracted and rendered connected UI",
+    "Resource ZIP 7zip integrity test passed",
+    "Actual ZIP app starts, stops and restarts real Linux VM from shared cache",
+    "Packaged physical keyboard and clipboard input writes exact terminal marker; visible screenshot inspected",
+    "Packaged Android APK download HTTP 200 with actual companion bytes",
+    "Packaged task page opened and inspected"
+  ],
+  "limitations": [
+    "Windows installer install/uninstall not exercised",
+    "No cold boot statistical benchmark",
+    "Computer resource pack still required for independent Linux desktops"
+  ]
+}
