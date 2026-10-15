@@ -25,3 +25,8 @@ bot 既有本机 bash/read/edit，又有 computer_shell/files/screenshot/input�
 工具面清单、审批规则、要删的门控代码列进 Answer。
 
 ## Comments
+
+- 2026-10-15 用户授权按建议定的部分。
+  - 客机工具的名称和描述都写明"Linux 共享电脑"，本机工具写明"Windows 本机"。`team/AGENTS.md` 再写一段两台机器的分工，包括依赖和构建产物放客机本地盘（04）。
+  - 删掉绑定电脑时加的 `--no-tools --no-extensions --no-skills` 和关项目 MCP 的门控，`src/features/native.mjs` 里的披露文案一起改。
+- 待用户定。客机侧审批放不放宽，9 种组合要不要收成 3 档。问题、利弊和建议已发给用户。

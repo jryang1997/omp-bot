@@ -2,7 +2,7 @@
 
 Type: grilling
 Label: wayfinder:grilling
-Status: open
+Status: resolved
 Blocked by: 06, 07, 08
 
 ## Question
@@ -18,6 +18,55 @@ team 目录放在哪，要不要 git，用户怎么查看和编辑，旧数据�
 ## Done when
 
 目录树、git 规则、迁移步骤写进 Answer。
+
+## Answer
+
+2026-10-15 用户授权"能给建议的都按建议来"，下面按建议定。
+
+### 位置
+
+`~/.ompbot/team`，跟着 `OMPBOT_HOME` 走。Windows 资源管理器不会隐藏点开头的目录，界面再加一个"打开 team 目录"按钮。不放"文档"和"桌面"，这两个目录常被 OneDrive 接管，SQLite 记忆库和同步盘一起用可能损坏。
+
+### 目录树
+
+```
+~/.ompbot/team/           git 仓库
+  AGENTS.md               团队共识，Main Bot 和用户写
+  .gitignore              忽略 .memory/、workspace/、bots/*/sessions/、bots/*/work/
+  skills/<名>/SKILL.md    共享技能库
+  workspace/              挂到客机 /workspace
+  .memory/mnemopi.db      所有 bot 的记忆，按 bank: bot-<id> 分开
+  bots/<id>/
+    AGENTS.md             个人身份
+    .omp/skills/          私有技能
+    work/                 私有文件，挂到客机里这个 bot 的 ~/work
+    sessions/<scope>/     会话仍按私聊、群聊分开
+```
+
+- 目录名用 bot 的稳定 id，改显示名不动目录。
+- 04 留下的问题按它的建议定。`bots/<id>/work` 单独挂进客机，`uid=bot-<id>,umask=0077`，只有这个 bot 能看。
+- `--add-dir` 带进来的项目 AGENTS.md 照读。bot 在用户项目里干活就守那个项目的规则。
+
+### git 规则
+
+- omp-bot 负责提交，bot 不直接跑 git。
+- `AGENTS.md`、`skills/`、`bots/*/AGENTS.md`、`bots/*/.omp/skills/` 每次改动提交一次，提交信息写清谁改的、为什么改。
+- 界面能看历史、能回滚单次改动。
+- 记忆、共享工作区、会话不进 git。
+
+### 迁移
+
+旧数据是 `~/.ompbot/bots/<id>/<scope>/{work,sessions,agent}`。只复制，不删旧目录，用户确认后再清理。
+
+1. 身份。花名册里的名字、角色、说明写成 `bots/<id>/AGENTS.md`。
+2. 会话。`<scope>/sessions` 搬到 `bots/<id>/sessions/<scope>/`，续接不受影响。
+3. 工作文件。私聊 scope 的 `work` 放进 `bots/<id>/work/`，其他 scope 放进 `bots/<id>/work/from-<scope>/`。不做自动去重，同名文件都保留。
+4. 记忆。旧的 local 记忆是生成的摘要，不能直接导入。迁移时给每个开过记忆的 bot 开一次会话，把摘要交给它 retain 进新库。原文件保留。
+5. 私有技能搬到 `bots/<id>/.omp/skills/`，和库里重名的改名并提示用户。
+
+### 群聊召回
+
+群聊照常自动召回。私聊内容外泄靠 08 的三条缓解，消息标场景和发送者、AGENTS.md 写规矩、面板能删记忆。
 
 ## Comments
 

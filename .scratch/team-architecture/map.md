@@ -45,16 +45,16 @@ Status: open
 - D10 team 目录是 git 仓库，omp 找 AGENTS.md 停在 team 根上。overlay 只关用户级 AGENTS.md，bot 读到 team 和自己两层，按通用到具体排列。身份挪进 `team/bots/<id>/AGENTS.md`，persona.md 只留团队工具说明。见 [06](issues/06-agents-md-boundary.md)。
 - D11 技能库放 `team/skills/`，overlay 用 `customDirectories` 指向它，白名单沿用 `bot.skills` 到 `--skills`。私有技能要并进白名单，同名时库里那份赢，所以装技能时禁止重名。每个技能约占 110 字符，描述只露前 100 字符左右。见 [07](issues/07-skill-library-allowlist.md)。
 - D12 记忆用 mnemopi，`scoping: global` 加 `bank: bot-<id>`，库文件放 `team/.memory/`。不再改 `PI_CODING_AGENT_DIR`，`memory-config.mjs` 基本删掉，autolearn 关掉。团队共识只写 `team/AGENTS.md`，由 Main Bot 和用户写。见 [08](issues/08-memory-per-bot.md)。
+- D13 team 目录在 `~/.ompbot/team`，git 由 omp-bot 按每次改动提交，记忆、工作区、会话不进 git。bot 私有文件在 `bots/<id>/work`，单独挂进客机。旧数据只复制不删。用户授权按建议定。见 [09](issues/09-team-directory.md)。
 
 ## Fog
 
-- 共享浏览器登录与多屏并行的冲突。见 02。
-- 两台机器的工具同时在场，模型怎么分清，审批怎么覆盖。见 05。
-- team 目录放哪、旧数据怎么迁。`--add-dir` 带进来的项目 AGENTS.md 接不接受，群聊要不要关自动召回。见 09。
+- 共享浏览器登录与多屏并行的冲突。网站登录全员共用还是按站点分配，等用户定。见 02。
+- 客机侧审批放不放宽，审批档要不要收成 3 档，等用户定。见 05。
 - 中文记忆召回要靠嵌入模型，沙盒没测出来。要在常驻进程里测，见 08 待验。
 - 共享虚拟机给多大。见 10。
-- 已有的每 bot 虚拟机怎么处理。见 11。
-- 吉祥物怎么移植进无构建的原生 DOM 前端，拿哪些功能。见 13、14。
+- 已有的每 bot 虚拟机怎么处理，删除不可逆，等用户定。见 11。
+- 吉祥物的 Blob Studio 来源怎么处理、Main Bot 用什么形象，等用户定。移植效果见 13。
 
 ## Out of scope
 
@@ -75,7 +75,7 @@ Status: open
 | [06](issues/06-agents-md-boundary.md) | research | AGENTS.md 往上找的边界 | | resolved |
 | [07](issues/07-skill-library-allowlist.md) | prototype | 共享技能库加每 bot 白名单 | | resolved |
 | [08](issues/08-memory-per-bot.md) | research | 记忆每 bot 一库与共识写入 | | resolved |
-| [09](issues/09-team-directory.md) | grilling | team 目录放哪、怎么管 | 06, 07, 08 | open |
+| [09](issues/09-team-directory.md) | grilling | team 目录放哪、怎么管 | 06, 07, 08 | resolved |
 | [10](issues/10-shared-computer-size.md) | research | 共享电脑的规格 | 01, 02 | open |
 | [11](issues/11-existing-computers.md) | grilling | 已有的每 bot 电脑怎么办 | 02, 03, 09 | open |
 | [12](issues/12-avatar-research.md) | research | OpenMausBot 头像的许可、功能与移植成本 | | resolved |
@@ -84,4 +84,4 @@ Status: open
 
 建议先做 01 和 03。01 决定"共用一台、每 bot 一块屏"能不能成立，03 决定后面所有隔离设计的力度。04 是这个方向最大的体验风险，可以并行。
 
-2026-10-15 进度。01、03、04、06、07、08、12 已 resolved。剩下的 grilling 05、09、11、14 要用户回答，prototype 02、13 各占一个会话，10 等 02。
+2026-10-15 进度。01、03、04、06、07、08、09、12 已 resolved。05、11、14 和 02、13 的前置问题已发给用户。prototype 02、13 各占一个会话，10 等 02。
