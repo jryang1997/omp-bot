@@ -4,8 +4,9 @@
  * Every panel is driven by a real endpoint; a missing endpoint renders an honest
  * pending note instead of a fake control.
  */
-import { el, button, toast, announce, api, apiOptional, fmtTime, fmtClock, fmtDuration, runStateLabel, isLiveRun, downloadText } from "./workbench-core.js";
+import { el, button, toast, announce, api, apiOptional, fmtTime, fmtClock, fmtDuration, fmtSize, runStateLabel, isLiveRun, downloadText, APPROVAL_MODE_LABELS } from "./workbench-core.js";
 import { artifactCard, loadArtifacts, exportRunTranscript } from "./workbench-attach.js";
+import { createComputerView } from "./workbench-computer.js";
 
 const FILTERS = [
   ["all", "全部", () => true],
@@ -18,7 +19,7 @@ const FILTERS = [
 function pendingNote(what, endpoint) {
   const note = el("div", "wb-pending");
   note.append(el("div", "wb-pending-title", `${what}暂不可用`));
-  note.append(el("div", "bt-note", `后端未提供 ${endpoint}（或返回 404）。已按要求不放置假操作，请父代理补齐该接口后再启用。`));
+  note.append(el("div", "bt-note", `本地服务还没有提供 ${endpoint}（或返回 404），所以这里不会放假操作。接口就绪后刷新页面即可。`));
   return note;
 }
 
@@ -32,16 +33,40 @@ function section(title, ...children) {
   return box;
 }
 
+let rowLabelSeq = 0;
+
+/**
+ * 行内表单控件的统一命名：没有自己的 aria-label、也没有外层 <label> 的控件，
+ * 用行标题作可访问名称、提示作说明；按钮与隐藏输入不动。
+ */
+function bindRowLabels(control, labelId, hintId) {
+  const controls = control.matches("input, select, textarea") ? [control] : [...control.querySelectorAll("input, select, textarea")];
+  for (const node of controls) {
+    if (["hidden", "button", "submit", "reset", "image"].includes(node.type)) continue;
+    if (node.closest("label")) continue; // 复选框等已由外层 label 命名，不再重复挂行标题
+    if (!node.hasAttribute("aria-label") && !node.hasAttribute("aria-labelledby")) node.setAttribute("aria-labelledby", labelId);
+    if (hintId && !node.hasAttribute("aria-describedby")) node.setAttribute("aria-describedby", hintId);
+  }
+}
+
 function row(label, hint, control) {
   const node = el("div", "bt-set-row");
   const copy = el("div", "bt-set-copy");
-  copy.append(el("div", null, label));
-  if (hint) copy.append(el("div", "bt-set-hint", hint));
+  const title = el("div", null, label);
+  copy.append(title);
+  const hintNode = hint ? el("div", "bt-set-hint", hint) : null;
+  if (hintNode) copy.append(hintNode);
   node.append(copy);
   if (control) {
     const box = el("div", "bt-set-control");
     box.append(control);
     node.append(box);
+    if (typeof label === "string" && label.trim()) {
+      const seq = ++rowLabelSeq;
+      title.id = `wb-row-label-${seq}`;
+      if (hintNode) hintNode.id = `wb-row-hint-${seq}`;
+      bindRowLabels(control, title.id, hintNode ? hintNode.id : null);
+    }
   }
   return node;
 }
@@ -53,6 +78,49 @@ function kv(key, value) {
 }
 
 const ms = (value) => (typeof value === "number" ? value : Date.parse(value));
+
+const TTL_OPTIONS = [["300000", "5 分钟"], ["3600000", "1 小时"], ["86400000", "1 天"]];
+
+const PERMISSION_LABELS = { read: "读取", run: "运行", approve: "审批" };
+
+/** 服务端错误可能是字符串，也可能是 {code,message}：原样带出来，不吞信息。 */
+function errorText(value) {
+  if (value == null) return "未知错误";
+  if (typeof value === "string") return value;
+  if (typeof value !== "object") return String(value);
+  if (typeof value.message === "string") return value.code ? `${value.message}（${value.code}）` : value.message;
+  if (value.code) return String(value.code);
+  try { return JSON.stringify(value); } catch { return String(value); }
+}
+
+/**
+ * 原生 get_state 的 model 可能是字符串，也可能是 {id|model, provider, name} 对象。
+ * 统一成可读标识（provider/id，name 作补充），绝不把对象原样 String() 成 [object Object]。
+ */
+function modelText(value) {
+  if (value == null || value === "") return null;
+  if (typeof value === "string") return value;
+  if (typeof value !== "object") return String(value);
+  const id = (typeof value.id === "string" && value.id)
+    || (typeof value.model === "string" && value.model)
+    || (typeof value.name === "string" && value.name)
+    || null;
+  if (!id) return null;
+  const provider = typeof value.provider === "string" && value.provider ? value.provider : null;
+  const base = provider && !id.startsWith(`${provider}/`) ? `${provider}/${id}` : id;
+  return typeof value.name === "string" && value.name && value.name !== id ? `${base}（${value.name}）` : base;
+}
+
+function saveBlob(filename, blob) {
+  const url = URL.createObjectURL(blob);
+  const link = el("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
 
 function select(values, current, onChange) {
   const node = el("select", "bt-select");
@@ -83,22 +151,34 @@ export function createPanels({ client, deps }) {
 
   function activityView() {
     const root = el("section", "wb-activity-view");
-    root.id = "activity-view";
     const head = el("div", "wb-view-head");
-    head.append(el("h1", null, "工作台"));
-    const refresh = button("btn ghost", "刷新", () => void draw());
-    const exportAll = button("btn ghost", "导出全部运行", () => {
-      const runs = client.all();
-      if (!runs.length) { toast("还没有运行记录", true); return; }
-      downloadText("runs.json", JSON.stringify(runs, null, 2), "application/json;charset=utf-8");
-    });
-    head.append(refresh, exportAll);
-    head.append(button("btn ghost", "配对与设备", () => deps.openDrawer("配对与设备", () => pairingSection())));
-    head.append(button("btn ghost", "飞书渠道", () => deps.openDrawer("飞书渠道", () => feishuSection())));
+    head.append(el("h1", null, "任务"));
     root.append(head);
+    root.append(el("p", "ui-intro", "助手正在做的事、做完的事和等你决定的事都在这里。"));
+
+    const toolbar = el("div", "ui-toolbar");
+    toolbar.append(button("btn ghost", "刷新", () => void draw()));
+    toolbar.append(button("btn ghost", "连接手机", () => deps.openDrawer("连接手机", () => pairingSection())));
+    toolbar.append(button("btn ghost", "飞书连接", () => deps.openDrawer("飞书连接", () => feishuSection())));
+    root.append(toolbar);
 
     let filter = "all";
     let query = "";
+
+    // 计数直接复用页签的筛选规则，页签和数字不会对不上。
+    const metrics = el("div", "ui-metrics");
+    const metricValues = new Map();
+    for (const id of ["active", "attention", "completed"]) {
+      const [, label] = FILTERS.find(([filterId]) => filterId === id);
+      const metric = el("div", "ui-metric");
+      metric.dataset.metric = id;
+      const value = el("span", "ui-metric-value", "0");
+      metric.append(value, el("span", "ui-metric-label", label));
+      metricValues.set(id, value);
+      metrics.append(metric);
+    }
+    root.append(metrics);
+
     const tabs = el("div", "bt-tabs wb-tabs");
     const tabButtons = new Map();
     for (const [id, label] of FILTERS) {
@@ -112,16 +192,31 @@ export function createPanels({ client, deps }) {
 
     const search = el("input", "bt-input wb-search");
     search.type = "search";
-    search.placeholder = "搜索运行文本、Bot 或状态";
-    search.setAttribute("aria-label", "搜索运行");
-    search.oninput = () => { query = search.value.trim().toLocaleLowerCase(); paint(); };
+    search.placeholder = "搜索任务内容、助手名称或状态";
+    search.setAttribute("aria-label", "搜索任务");
+    search.oninput = () => { query = search.value.trim(); paint(); };
     root.append(search);
 
     const list = el("div", "wb-run-list");
     const approvals = el("div", "wb-approval-list");
-    root.append(approvals, list);
-    const empty = el("div", "bt-empty", "没有匹配的运行。");
-    root.append(empty);
+    const empty = el("div", "bt-empty hidden");
+    const emptyTitle = el("div", null, "还没有任务");
+    const emptyHint = el("div", "bt-note");
+    empty.append(emptyTitle, emptyHint);
+    root.append(approvals, list, empty);
+
+    // 导出是低频动作，收进默认收起的「高级选项」，不占主流程。
+    const exportAll = button("btn ghost", "导出全部任务", () => {
+      const runs = client.all();
+      if (!runs.length) { toast("还没有任务记录", true); return; }
+      downloadText("runs.json", JSON.stringify(runs, null, 2), "application/json;charset=utf-8");
+    });
+    const advanced = el("details", "ui-disclosure");
+    advanced.append(el("summary", null, "高级选项"));
+    const advancedBody = el("div", "ui-disclosure-body");
+    advancedBody.append(row("导出全部任务", "把全部任务记录导出为一个文件，用于备份或排查问题。", exportAll));
+    advanced.append(advancedBody);
+    root.append(advanced);
 
     function paintApprovals() {
       approvals.replaceChildren();
@@ -131,22 +226,50 @@ export function createPanels({ client, deps }) {
         return;
       }
       approvals.classList.remove("hidden");
-      approvals.append(el("div", "wb-dock-label", `需要你处理的原生请求（${pending.length}）`));
+      approvals.append(el("div", "wb-dock-label", `需要你确认（${pending.length}）`));
       for (const record of pending) approvals.append(deps.approvalCard ? deps.approvalCard(record) : el("div", "bt-empty", record.title || record.id));
+    }
+
+    /** 搜索命中范围：任务文本、助手真实名字、用户能读到的状态，以及内部标识。 */
+    function runSearchText(run) {
+      const bot = deps.botFor(run.botId);
+      return [run.text, bot?.name, run.botId, run.id, runStateLabel(run.state), run.state]
+        .filter(Boolean).join(" ").toLocaleLowerCase();
+    }
+
+    function paintEmpty(count) {
+      empty.classList.toggle("hidden", count > 0);
+      if (count > 0) return;
+      if (query) {
+        emptyTitle.textContent = `没有找到和「${query}」有关的任务`;
+        emptyHint.textContent = "换个词试试，或者清空搜索框。";
+      } else if (filter !== "all") {
+        emptyTitle.textContent = "这一类还没有任务";
+        emptyHint.textContent = "切到「全部」可以看到其他任务。";
+      } else {
+        emptyTitle.textContent = "还没有任务";
+        emptyHint.textContent = "在助手里说一句想做什么，任务就会出现在这里。";
+      }
     }
 
     function paint() {
       for (const [id, tab] of tabButtons) tab.setAttribute("aria-selected", String(id === filter));
+      const all = client.all();
+      for (const [id, value] of metricValues) {
+        const predicate = FILTERS.find(([filterId]) => filterId === id)[2];
+        value.textContent = String(all.filter(predicate).length);
+      }
       paintApprovals();
       const predicate = FILTERS.find(([id]) => id === filter)[2];
+      const needle = query.toLocaleLowerCase();
       list.replaceChildren();
-      const runs = client.all()
+      const runs = all
         .filter(predicate)
-        .filter((run) => !query || `${run.text} ${run.botId} ${run.state} ${run.kind}`.toLocaleLowerCase().includes(query))
+        .filter((run) => !needle || runSearchText(run).includes(needle))
         .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-      empty.classList.toggle("hidden", runs.length > 0);
+      paintEmpty(runs.length);
       for (const run of runs) list.append(runTile(run));
-      announce(`${runs.length} 个运行`);
+      announce(`${runs.length} 个任务`);
     }
 
     function runTile(run) {
@@ -155,18 +278,19 @@ export function createPanels({ client, deps }) {
       row.dataset.runId = run.id;
       row.dataset.state = run.state;
       const top = el("div", "wb-run-top");
-      top.append(el("span", "wb-run-bot", bot?.name || run.botId || run.kind));
+      top.append(el("span", "wb-run-bot", bot?.name || run.botId || "任务"));
       top.append(el("span", "bt-state wb-run-state", runStateLabel(run.state)));
-      top.append(el("span", "wb-run-time", fmtTime(run.createdAt)));
       row.append(top);
-      row.append(el("div", "wb-run-text", String(run.text || "").slice(0, 240) || "（无文本）"));
+      row.append(el("div", "wb-run-text", String(run.text || "").slice(0, 240) || "（没有内容）"));
+      // kind、scope、深度这些内部字段只留在任务详情里，主视图不出现。
       const foot = el("div", "wb-run-foot");
-      foot.append(el("span", "bt-note", `${run.kind}${run.scope ? ` · ${run.scope}` : ""}${run.depth ? ` · 深度 ${run.depth}` : ""}`));
-      const open = button("btn ghost", "详情", () => void deps.openDrawer(`运行 ${run.id.slice(0, 12)}`, () => runDetail(run)));
-      foot.append(open);
+      foot.append(el("span", "wb-run-time", fmtTime(run.createdAt)));
+      const actions = el("div", "bt-actions");
+      actions.append(button("btn ghost", "详情", () => void deps.openDrawer(`任务 ${run.id.slice(0, 12)}`, () => runDetail(run))));
       if (isLiveRun(run.state)) {
-        foot.append(button("btn ghost danger", "停止", () => void client.cancel(run.id).then(() => { toast("已接受取消请求"); paint(); }).catch((error) => toast(error.message, true))));
+        actions.append(button("btn ghost danger", "停止", () => void client.cancel(run.id).then(() => { toast("已接受取消请求"); paint(); }).catch((error) => toast(error.message, true))));
       }
+      foot.append(actions);
       row.append(foot);
       return row;
     }
@@ -177,7 +301,7 @@ export function createPanels({ client, deps }) {
         for (const run of runs || []) client.record(run);
         paint();
       } catch (error) {
-        toast(`运行列表加载失败：${error.message}`, true);
+        toast(`任务列表加载失败：${error.message}`, true);
         paint();
       }
     }
@@ -195,10 +319,10 @@ export function createPanels({ client, deps }) {
     root.append(state);
     const facts = el("div", "wb-kv-list");
     facts.append(
-      kv("Run", run.id),
-      kv("Bot", deps.botFor(run.botId)?.name || run.botId || "—"),
-      kv("范围", run.scope),
+      kv("任务号", run.id),
+      kv("助手", deps.botFor(run.botId)?.name || run.botId || "—"),
       kv("类型", run.kind),
+      kv("范围", run.scope),
       kv("创建", fmtTime(run.createdAt)),
       kv("更新", fmtTime(run.updatedAt)),
       kv("会话", run.sessionId),
@@ -206,6 +330,7 @@ export function createPanels({ client, deps }) {
       kv("耗时", run.createdAt && run.updatedAt ? fmtDuration(ms(run.updatedAt) - ms(run.createdAt)) : null),
       kv("预算", run.budget != null ? JSON.stringify(run.budget) : null),
     );
+    if (run.depth != null) facts.append(kv("深度", run.depth));
     root.append(facts);
     if (run.error) {
       const err = el("div", "wb-error");
@@ -213,18 +338,18 @@ export function createPanels({ client, deps }) {
       err.append(el("div", "wb-pending-title", "错误"), el("div", "bt-note", String(run.error)));
       root.append(err);
     }
-    root.append(section("请求", el("div", "wb-pre", String(run.text || ""))));
-    if (run.reply) root.append(section("回复", el("div", "wb-pre", String(run.reply))));
+    root.append(section("任务内容", el("div", "wb-pre", String(run.text || ""))));
+    if (run.reply) root.append(section("助手的回复", el("div", "wb-pre", String(run.reply))));
 
     const actions = el("div", "bt-set-card");
     if (isLiveRun(run.state)) {
-      actions.append(row("停止这次运行", "取消会级联到宿主工具与子 Run；外部动作是否发生另行对账。", button("btn ghost danger", "停止", function () { return busy(this, client.cancel(run.id).then(() => { toast("已接受取消请求"); announce("已接受取消请求"); }), "停止中…"); })));
+      actions.append(row("停止这个任务", "取消会级联到宿主工具与子 Run；外部动作是否发生另行对账。", button("btn ghost danger", "停止", function () { return busy(this, client.cancel(run.id).then(() => { toast("已接受取消请求"); announce("已接受取消请求"); }), "停止中…"); })));
     }
     if (run.botId) {
-      actions.append(row("重试", "以相同文本发起一个新的运行；不会回滚已经发生的外部动作。", button("btn ghost", "重试", () => {
-        if (!confirm("重试会以相同文本发起一个新的运行。已经发生的对外动作不会回滚。继续？")) return;
+      actions.append(row("重试", "以相同内容再发起一个任务；不会回滚已经发生的外部动作。", button("btn ghost", "重试", () => {
+        if (!confirm("重试会以相同内容发起一个新任务。已经发生的对外动作不会回滚。继续？")) return;
         void client.start({ botId: run.botId, text: run.text, source: "retry", parentRunId: run.id })
-          .then(() => toast("已发起重试运行"))
+          .then(() => toast("已发起重试任务"))
           .catch((error) => toast(`重试失败：${error.message}`, true));
       })));
       actions.append(row("新会话", "开启新的原生会话；旧会话与历史都保留，不等于清空显示。", button("btn ghost", "新会话", function () {
@@ -234,7 +359,7 @@ export function createPanels({ client, deps }) {
       actions.append(row("分叉会话", "从当前会话分叉出一个新的原生会话分支。", button("btn ghost", "分叉", function () {
         return busy(this, api(`/api/bots/${encodeURIComponent(run.botId)}/session/fork`, { method: "POST", body: {} }).then(() => toast("已分叉会话")), "分叉中…");
       })));
-      actions.append(row("导出这次运行", "导出为本地 Markdown 文件，包含文本、回复与错误。", button("btn ghost", "导出", () => exportRunTranscript(run))));
+      actions.append(row("导出这个任务", "导出为本地 Markdown 文件，包含内容、回复与错误。", button("btn ghost", "导出", () => exportRunTranscript(run))));
       const exportLink = el("a", "btn ghost", "导出原生会话 HTML");
       exportLink.href = `/api/bots/${encodeURIComponent(run.botId)}/session/export`;
       exportLink.setAttribute("download", "");
@@ -250,8 +375,16 @@ export function createPanels({ client, deps }) {
       root.append(section(`成果（${artifacts.length}）`, box));
     }
 
-    if (run.botId) root.append(await nativeEntriesSection(run.botId));
-    root.append(await nativeStateSection(run.botId));
+    if (run.botId) {
+      // 原生会话条目与状态 JSON 是排查用的技术信息，默认收起，功能保留。
+      const advanced = el("details", "ui-disclosure");
+      advanced.append(el("summary", null, "原生会话（技术信息）"));
+      const body = el("div", "ui-disclosure-body");
+      body.append(await nativeEntriesSection(run.botId));
+      body.append(await nativeStateSection(run.botId));
+      advanced.append(body);
+      root.append(advanced);
+    }
     return root;
   }
 
@@ -307,34 +440,65 @@ export function createPanels({ client, deps }) {
   async function capabilitiesPanel(bot) {
     currentBot = bot;
     const root = el("div", "wb-panel-body");
+    root.append(el("p", "ui-intro", "这里决定这个助手能做什么，以及动手前要不要先问你。改动会立刻保存。"));
     const capabilities = await apiOptional(`/api/bots/${encodeURIComponent(bot.id)}/native/capabilities`);
     const executionInfo = capabilities?.execution || {};
 
-    const execution = el("div", "bt-set-card");
-    execution.append(row("执行模式", "supervised 使用 OMP 原生审批；chat 走 --no-tools 受控读取；full 为本机完全能力，是明确的安全降级，不是沙箱。",
-      select([["supervised", "supervised（原生审批）"], ["chat", "chat（受控读取，无任意工具）"], ["full", "full（本机完全能力）"]], bot.executionMode || executionInfo.mode || "supervised", async (value) => {
-        if (value === "full" && !confirm("本机完全能力不是沙箱：模型可以访问当前用户权限内的一切。确认切换到 full？")) return void deps.rerenderPanel?.();
-        await patchBot(bot, { executionMode: value, confirmExecutionMode: value === "full" });
+    const computer = capabilities && capabilities.computer && capabilities.computer.bound === true ? capabilities.computer : null;
+    // 常用设置放最前：能做什么、问不问、在哪里工作，然后是记忆与登录。
+    const permissionCard = el("div", "bt-set-card");
+    permissionCard.append(row("助手能做什么", computer
+      ? "已绑定独立电脑，这里的选项决定是否使用电脑上的工具。"
+      : "执行任务可以使用本机工具；只聊天不会运行命令。工作目录不限制文件访问范围。",
+      select([["supervised", "执行任务"], ["chat", "只聊天"], ["full", "完整本机能力"]], bot.executionMode || executionInfo.mode || "supervised", async (value) => {
+        if (value === "full" && !confirm("完整本机能力可访问当前账户有权限访问的文件和程序。确认开启？")) return void deps.rerenderPanel?.();
+        // 档位会影响下面的工作目录、操作范围与记忆说明：保存成功后整页重绘，提示不会停留在旧档。
+        if (await patchBot(bot, { executionMode: value, confirmExecutionMode: value === "full" })) deps.rerenderPanel?.();
       })));
-    execution.append(row("沙箱模式", executionInfo.note || "需要经过验证的沙箱环境；本机未检测到可用沙箱，因此不提供该选项，也不把它显示为“安全模式”。", el("span", "bt-note", executionInfo.sandbox ? "可用" : "不可用")));
-    execution.append(row("审批档", "always-ask 每次工具调用都询问；write 仅写操作询问；yolo 不询问（仅在明确确认后可用）。",
-      select([["always-ask", "always-ask"], ["write", "write"], ["yolo", "yolo"]], bot.approvalMode || executionInfo.approvalMode || "write", async (value) => {
-        if (value === "yolo" && !confirm("yolo 会放行写操作而不再逐次询问。确认切换到 yolo？")) return void deps.rerenderPanel?.();
+    permissionCard.append(row("确认频率", "少打扰会自动执行普通操作，需要你补充信息时仍会问。选择会记住，从下一次任务生效。「运行命令前询问」允许普通文件读写，命令和浏览器操作会询问。",
+      select(Object.entries(APPROVAL_MODE_LABELS), bot.approvalMode || executionInfo.approvalMode || "write", async (value) => {
+        if (value === "yolo" && !confirm(`为「${bot.name}」开启少打扰？\n\n之后它可以读写文件、运行命令、操作浏览器，不再逐次向你确认。工具操作不限制在工作目录内。需要你提供的信息仍会询问。\n\n选择会保留，从下一次任务生效，可随时改回。`)) return void deps.rerenderPanel?.();
         await patchBot(bot, { approvalMode: value, confirmApprovalMode: value === "yolo" });
+        deps.rerenderPanel?.();
       })));
-    execution.append(row("工作目录", "用户显式选择的目录；目录名不等于 OS 沙箱。", Object.assign(el("input", "bt-input"), {
+    permissionCard.append(row("工作目录", computer
+      ? "绑定电脑期间本机执行档不生效，这个位置只在该 Bot 切回本机执行后使用。"
+      : "从这里开始找资料和保存成果，仍可访问其他有权限的位置。", Object.assign(el("input", "bt-input"), {
       value: bot.workspace || "",
       placeholder: "如 C:/work/project",
       onchange: (event) => { void patchBot(bot, { workspace: event.target.value.trim() || null }); },
     })));
+    permissionCard.append(row("操作范围", computer
+      ? computer.note || "已绑定电脑：原生本机来源按绑定档收窄。"
+      : "执行任务时，助手可以访问当前账户有权限访问的文件和程序；工作目录不限制访问范围。",
+      el("span", "bt-note", computer ? (computer.hostToolsBlocked ? "电脑档（本机来源已关闭）" : "电脑档（只提供桌面）") : "本机账户权限")));
+    root.append(section("权限与确认", permissionCard));
+
     const memoryReady = capabilities?.memory?.nativePrereq?.ready === true;
     const memoryReason = capabilities?.memory?.nativePrereq?.reason;
     const memoryToggle = checkbox(bot.memoryEnabled === true, (checked) => void patchBot(bot, { memoryEnabled: checked }));
     if (!memoryReady && bot.memoryEnabled !== true) memoryToggle.disabled = true;
-    execution.append(row("记忆开关", memoryReady
-      ? "模型来源已就绪；开启后使用 Bot 私有记忆目录，启动新回合生效。"
+    const memoryCard = el("div", "bt-set-card");
+    memoryCard.append(row("记忆开关", memoryReady
+      ? "开启后使用这个助手的独立记忆，从下次任务生效。"
       : `暂不能开启：${memoryReason || "尚未确认隔离模型来源"}`, memoryToggle));
-    execution.append(row("预算 token", "Bot 的累计 token 额度，留空清除此项；费用、时长和并发限制保留。", Object.assign(el("input", "bt-input"), {
+    root.append(section("记忆", memoryCard));
+
+    const loginCard = el("div", "bt-set-card");
+    loginCard.append(row("登录", "助手提示需要登录时，点这里按原生流程完成。凭据只在原生窗口里输入，不会进入聊天记录。", button("btn ghost", "开始登录", function () {
+      return busy(this, api(`/api/bots/${encodeURIComponent(bot.id)}/native/command`, { method: "POST", body: { command: "login" } })
+        .then(() => { announce("已请求原生登录，请在需要你确认的事项中完成"); toast("已请求原生登录，请在“需要你确认”里完成"); })
+        .catch((error) => toast(`登录请求失败：${error.message}`, true)), "请求中…");
+    })));
+    root.append(section("登录", loginCard));
+
+    // 高级设置默认收起：用量上限、模型目录、原生诊断与浏览器状态都是排查用的，日常不用打开。
+    const advanced = el("details", "ui-disclosure");
+    advanced.append(el("summary", null, "高级设置"));
+    const advancedBody = el("div", "ui-disclosure-body");
+
+    const budgetCard = el("div", "bt-set-card");
+    budgetCard.append(row("预算 token", "这个助手累计可用的 token 上限；留空表示不设上限。费用、时长和并发限制不受影响。", Object.assign(el("input", "bt-input"), {
       value: bot.budget?.maxTokens ?? "",
       inputmode: "numeric",
       onchange: (event) => {
@@ -347,45 +511,52 @@ export function createPanels({ client, deps }) {
         void patchBot(bot, { budget: Object.keys(budget).length ? budget : null });
       },
     })));
-    root.append(section("执行与权限", execution));
+    advancedBody.append(section("用量上限", budgetCard));
 
-    if (!capabilities) root.append(section("原生能力", pendingNote("原生能力", `/api/bots/${bot.id}/native/capabilities`)));
+    if (!capabilities) advancedBody.append(section("原生能力", pendingNote("原生能力", `/api/bots/${bot.id}/native/capabilities`)));
     else {
       const facts = el("div", "bt-set-card");
       const native = capabilities.native;
       if (native) {
-        facts.append(kv("模型", native.model), kv("思考档", native.thinkingLevel), kv("会话", native.sessionId), kv("会话文件", native.sessionFile));
+        facts.append(kv("模型", modelText(native.model) || "未知"), kv("思考档", native.thinkingLevel), kv("会话", native.sessionId));
         facts.append(kv("已落定", String(native.isSettled)), kv("流式中", String(native.isStreaming)), kv("消息数", native.messageCount));
         if (native.contextUsage != null) facts.append(kv("上下文用量", typeof native.contextUsage === "object" ? JSON.stringify(native.contextUsage) : native.contextUsage));
       } else facts.append(kv("原生状态", capabilities.nativeError || "未知"));
       facts.append(kv("工具", capabilities.tools === "unknown" ? "未知" : `${capabilities.tools?.count ?? 0} 个`));
-      if (Array.isArray(capabilities.tools?.names)) {
-        const pre = el("pre", "wb-pre", capabilities.tools.names.join(", "));
-        facts.append(pre);
-      }
       facts.append(kv("命令", capabilities.commands ? `${capabilities.commands.length} 个` : (capabilities.commandsError || "未知")));
       facts.append(kv("MCP", capabilities.mcp?.servers?.length ? `${capabilities.mcp.servers.length} 个服务` : "未配置"));
-      facts.append(kv("技能", capabilities.skills?.effective?.length ? `${capabilities.skills.effective.length} 个生效` : "无过滤/无发现"));
+      // 私有技能列表为空不代表没有技能：原生自己的 skill 命令是另一个来源，两者分开计数。
+      const skillCommands = Array.isArray(capabilities.skills?.commands) ? capabilities.skills.commands : null;
+      const privateSkills = Array.isArray(capabilities.skills?.effective) ? capabilities.skills.effective : [];
+      let skillText;
+      if (skillCommands === null) skillText = capabilities.commandsError ? `未取到（${capabilities.commandsError}）` : "未取到原生技能列表";
+      else skillText = `原生提供 ${skillCommands.length} 个${privateSkills.length ? ` · 私有生效 ${privateSkills.length} 个` : ""}`;
+      facts.append(kv("技能", skillText));
       facts.append(kv("记忆", capabilities.memory?.available ? "可用" : `不可用（${(capabilities.memory?.reasons || []).join("；") || "未知"}）`));
       facts.append(kv("认证", capabilities.auth?.loginProviders || "未知"));
       const details = el("details", "wb-raw");
       details.append(el("summary", null, "完整能力 JSON（探测结果）"));
+      if (Array.isArray(capabilities.tools?.names)) details.append(kv("工具名", capabilities.tools.names.join(", ")));
+      if (native && native.sessionFile) details.append(kv("会话文件", native.sessionFile));
       details.append(el("pre", "wb-pre", JSON.stringify(capabilities, null, 2)));
       facts.append(details);
-      root.append(section("原生能力", facts));
+      advancedBody.append(section("原生能力", facts));
     }
 
-    root.append(modelSection(bot));
-    root.append(browserSection(capabilities?.browser));
-
-    const loginBox = el("div", "bt-set-card");
-    loginBox.append(row("原生登录 / 认证", "通过原生登录流程完成认证；凭据只在原生 UI 请求里输入，不进入聊天记录。", button("btn ghost", "开始登录", function () {
-      return busy(this, api(`/api/bots/${encodeURIComponent(bot.id)}/native/command`, { method: "POST", body: { command: "login" } })
-        .then(() => { announce("已请求原生登录，请在待处理请求中完成"); toast("已请求原生登录，请在“需要你处理”中完成"); })
-        .catch((error) => toast(`登录请求失败：${error.message}`, true)), "请求中…");
-    })));
-    root.append(section("认证", loginBox));
+    advancedBody.append(modelSection(bot));
+    advancedBody.append(browserSection(capabilities?.browser));
+    advanced.append(advancedBody);
+    root.append(advanced);
     return root;
+  }
+
+  /** 电脑面板持有轮询定时器与桌面画面对象 URL，由抽屉生命周期负责释放。 */
+  function computerPanel(bot) {
+    return createComputerView(bot, {
+      ui: { section, row, kv, busy },
+      openModal: deps.openModal,
+      closeModal: deps.closeModal,
+    });
   }
 
   function browserSection(status) {
@@ -476,8 +647,12 @@ export function createPanels({ client, deps }) {
       deps.onBotUpdated?.(updated);
       toast("已保存");
       announce("设置已保存");
+      return true;
     } catch (error) {
       toast(`保存失败：${error.message}`, true);
+      // 保存没成功就不能让控件停留在新选择上：按服务端真实值重绘一遍。
+      deps.rerenderPanel?.();
+      return false;
     }
   }
 
@@ -496,18 +671,23 @@ export function createPanels({ client, deps }) {
   async function pairingSection() {
     const root = el("div", "wb-panel-body");
     const data = await apiOptional("/api/pairing");
-    if (!data) return section("配对与设备", pendingNote("配对与设备", "/api/pairing"));
+    if (!data) return { node: section("配对与设备", pendingNote("配对与设备", "/api/pairing")) };
+    // 与电脑面板同一套视图约定：{node, dispose} 由抽屉生命周期在关闭/替换时立即释放。
+    const mobile = await mobileSection();
+    root.append(mobile.node);
     const box = el("div", "bt-set-card");
     const tickets = data.tickets || [];
     const devices = data.devices || [];
+    const permText = (list) => (Array.isArray(list) ? list : []).map((name) => PERMISSION_LABELS[name] || name).join("、") || "无权限";
     if (!tickets.length && !devices.length) box.append(el("div", "bt-empty", "还没有配对码或设备。"));
     for (const ticket of tickets) {
       const line = el("div", "bt-set-row");
       const copy = el("div", "bt-set-copy");
       const expiry = ticket.expiresAt ? `到期 ${fmtClock(ticket.expiresAt)}` : "";
-      const status = ticket.revokedAt ? "已撤销" : ticket.usedAt ? "已兑换" : "待兑换";
+      // 服务端只在签发新码时回收过期票：列表里的过期票如实标「已过期」，不显示成还能兑换。
+      const status = ticket.revokedAt ? "已撤销" : ticket.usedAt ? "已兑换" : (ticket.expiresAt && ms(ticket.expiresAt) <= Date.now()) ? "已过期" : "待兑换";
       copy.append(el("div", null, `配对码 ${ticket.label || ticket.id}`));
-      copy.append(el("div", "bt-set-hint", `${status} · ${(ticket.permissions || []).join("+") || "无权限"} · ${expiry}`));
+      copy.append(el("div", "bt-set-hint", `${status} · ${permText(ticket.permissions)} · ${expiry}`));
       line.append(copy);
       const control = el("div", "bt-set-control");
       control.append(el("span", "bt-note", ticket.revokedAt ? "已撤销" : status));
@@ -524,7 +704,7 @@ export function createPanels({ client, deps }) {
       const line = el("div", "bt-set-row");
       const copy = el("div", "bt-set-copy");
       copy.append(el("div", null, device.label || device.id));
-      copy.append(el("div", "bt-set-hint", `${device.revokedAt ? "已撤销" : "已配对"} · ${(device.permissions || []).join("+") || "无权限"}${device.lastUsedAt ? ` · 最近 ${fmtClock(device.lastUsedAt)}` : ""}`));
+      copy.append(el("div", "bt-set-hint", `${device.revokedAt ? "已撤销" : "已配对"} · ${permText(device.permissions)}${device.lastUsedAt ? ` · 最近 ${fmtClock(device.lastUsedAt)}` : ""}`));
       line.append(copy);
       const control = el("div", "bt-set-control");
       control.append(el("span", "bt-note", device.revokedAt ? "已撤销" : ""));
@@ -538,16 +718,16 @@ export function createPanels({ client, deps }) {
       box.append(line);
     }
     root.append(section("现有配对", box));
-    root.append(await pairingForm());
-    root.append(el("div", "bt-note", "设备凭证只能读取与运行，不能修改花名册、策略或连接器；因此这里不为设备提供管理入口。配对码一次性、短时效。"));
-    return root;
+    root.append(el("div", "bt-note", "手机只能使用配对时授予的读取、运行与审批权限。配对码与二维码都是一次性、短时效，兑换或到期即失效。"));
+    return { node: root, dispose: mobile.dispose };
   }
 
-  async function pairingForm() {
-    const form = el("div", "wb-form");
-    const chosen = new Set(deps.bots().map((bot) => bot.id));
+  /** 配对面板共用的授权范围控件：可操作的 Bot、权限、备注与有效期。 */
+  function scopeControls() {
+    const bots = deps.bots();
+    const chosen = new Set(bots.map((bot) => bot.id));
     const botsBox = el("div", "bt-set-card");
-    for (const bot of deps.bots()) {
+    for (const bot of bots) {
       const label = el("label", "wb-check");
       const input = el("input");
       input.type = "checkbox";
@@ -556,11 +736,12 @@ export function createPanels({ client, deps }) {
       label.append(input, document.createTextNode(bot.name));
       botsBox.append(label);
     }
+    if (!bots.length) botsBox.append(el("div", "bt-empty", "还没有 Bot，先创建一个。"));
     const perms = new Set(["read", "run"]);
     const permBox = el("div", "bt-set-card");
     for (const [value, text, hint] of [
       ["read", "读取", "查看会话与成果"],
-      ["run", "运行", "发起新的运行"],
+      ["run", "运行", "发起新的任务"],
       ["approve", "审批", "可代替人工批准原生审批请求"],
     ]) {
       const label = el("label", "wb-check");
@@ -568,73 +749,353 @@ export function createPanels({ client, deps }) {
       input.type = "checkbox";
       input.checked = perms.has(value);
       input.onchange = () => { input.checked ? perms.add(value) : perms.delete(value); };
-      const copy = el("span", null, `${text} · ${hint}`);
-      label.append(input, copy);
+      label.append(input, el("span", null, `${text} · ${hint}`));
       permBox.append(label);
     }
     const labelInput = Object.assign(el("input", "bt-input"), { placeholder: "备注，如 我的手机" });
-    const ttl = select([["300000", "5 分钟"], ["3600000", "1 小时"], ["86400000", "1 天"]], "300000");
-    form.append(row("授权 Bot", "配对设备只能对勾选的 Bot 读取与运行。", botsBox));
-    form.append(row("权限", "read/run 默认开启；approve 允许设备代替人工批准原生审批，需单独勾选。", permBox));
-    form.append(row("备注", null, labelInput), row("有效期", null, ttl));
-    const output = el("div", "wb-form");
-    form.append(button("btn primary wide", "生成配对码", function () {
-      if (!chosen.size) { toast("至少选择一个 Bot", true); return; }
-      return busy(this, api("/api/pairing/codes", {
-        method: "POST",
-        body: { botIds: [...chosen], permissions: [...perms], label: labelInput.value.trim() || undefined, ttlMs: Number(ttl.value) },
-      }).then(({ ticket, code }) => {
-        output.replaceChildren(pairingCodeCard(code, ticket));
-        announce("已生成一次性配对码");
-      }), "生成中…");
-    }));
-    form.append(output);
-    return section("新建配对码", form);
+    const ttl = select(TTL_OPTIONS, "300000");
+    return { chosen, botsBox, perms, permBox, labelInput, ttl };
   }
 
-  function pairingCodeCard(code, ticket) {
+
+  /**
+   * 一次性配对码卡片：倒计时、复制控件，可带二维码和手动填入的地址。
+   * 二维码只接受服务端返回的 data:image，过期就撤掉图片并禁用复制，不留下还能用的错觉。
+   */
+  function pairingCodeCard(code, ticket, options = {}) {
+    const { address, lead, qrDataUrl, title = "配对码（只显示这一次）", onCountdown } = options;
     const card = el("div", "wb-code");
-    card.append(el("div", "wb-pending-title", "配对码（只显示这一次）"));
+    card.append(el("div", "wb-pending-title", title));
+    if (lead) card.append(el("div", "bt-note", lead));
+    let qrFrame = null;
+    if (qrDataUrl !== undefined) {
+      if (typeof qrDataUrl === "string" && qrDataUrl.startsWith("data:image/")) {
+        const image = el("img", "wb-qr");
+        image.src = qrDataUrl;
+        image.alt = "手机配对二维码";
+        qrFrame = el("div", "wb-qr-frame");
+        qrFrame.append(image);
+        card.append(qrFrame);
+      } else {
+        card.append(el("div", "bt-note", "服务端没有返回可用的二维码图片，请用下面的地址和配对码手动配对。"));
+      }
+    }
+    const manual = typeof address === "string" && address;
+    if (manual) card.append(el("div", "bt-note", "扫码不方便时，在手机上点「手动输入」，填下面的地址和配对码。"));
+    const copies = [];
     const line = el("div", "wb-code-row");
     const text = el("code", "wb-code-text", code);
-    const copy = button("btn ghost", "复制", async () => {
+    copies.push(button("btn ghost", "复制", async () => {
       try { await navigator.clipboard.writeText(code); toast("已复制配对码"); }
       catch (error) { toast(`复制失败：${error.message}`, true); }
-    });
-    line.append(text, copy);
+    }));
+    line.append(text, copies.at(-1));
     card.append(line);
+    if (manual) {
+      const addressLine = el("div", "wb-code-row");
+      const addressText = el("code", "wb-code-text wb-code-address", address);
+      copies.push(button("btn ghost", "复制地址", async () => {
+        try { await navigator.clipboard.writeText(address); toast("已复制地址"); }
+        catch (error) { toast(`复制失败：${error.message}`, true); }
+      }));
+      addressLine.append(addressText, copies.at(-1));
+      card.append(addressLine);
+    }
     const note = el("div", "bt-note", "一次性、短时效：兑换或到期即失效。");
     if (ticket?.expiresAt) {
       const countdown = el("span", "wb-code-countdown");
+      let timer = null;
+      // 停表函数交给调用方：抽屉关闭/卡片替换时立即释放，不等下一次 tick 自己发现被隐藏。
+      const stopCountdown = () => { if (timer !== null) { clearInterval(timer); timer = null; } };
+      onCountdown?.(stopCountdown);
       const tick = () => {
+        // 兜底：卡片被替换或抽屉已关闭（display:none，节点仍在文档里）时自停，避免对隐藏卡片重绘。
+        if (!card.isConnected || !card.getClientRects().length) { stopCountdown(); return; }
+        // 后台标签不重绘、不播报；回到前台的下一次 tick 立即校正。
+        if (document.hidden) return;
         const left = Math.max(0, Math.round((ticket.expiresAt - Date.now()) / 1000));
-        countdown.textContent = left > 0 ? `剩余 ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}` : "已过期";
-        if (!card.isConnected) { clearInterval(timer); return; }
-        if (left <= 0) clearInterval(timer);
+        countdown.textContent = left > 0 ? `剩余 ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}` : "已过期，请重新生成";
+        if (left <= 0) {
+          card.dataset.expired = "1";
+          if (qrFrame) qrFrame.replaceWith(el("div", "wb-qr-expired", "二维码已过期，请重新生成"));
+          for (const control of copies) control.disabled = true;
+          announce("配对码已过期");
+          stopCountdown();
+        }
       };
-      const timer = setInterval(tick, 1000);
-      tick();
+      timer = setInterval(tick, 1000);
+      queueMicrotask(tick);
       note.append(" ", countdown);
     }
     card.append(note);
     return card;
   }
 
+  /* ----------------------------- phone entry ----------------------------- */
+
+  /**
+   * 手机接入（安卓）：开启/关闭入口、提供安装包、生成一次性配对二维码。
+   * 状态与开关结果只认 /api/mobile 的真实返回，不做乐观显示；没有地址就不发邀请。
+   */
+  async function mobileSection() {
+    const loaded = await apiOptional("/api/mobile");
+    // 本段里创建过、还没被释放的配对码倒计时；抽屉关闭时由 dispose 立即全部停掉。
+    const countdownStops = new Set();
+    const stopCountdowns = () => { for (const stop of countdownStops) stop(); countdownStops.clear(); };
+    if (!loaded) return { node: section("手机接入（安卓）", pendingNote("手机接入", "/api/mobile")), dispose: stopCountdowns };
+    let status = loaded;
+    let selectedAddress = "";
+
+    const statusArea = el("div", "wb-mobile-area");
+    const installArea = el("div", "wb-mobile-area");
+    const formArea = el("div", "wb-mobile-area");
+    const inviteArea = el("div", "wb-mobile-area wb-mobile-invite");
+
+    const addresses = () => (Array.isArray(status.addresses) ? status.addresses : [])
+      .filter((entry) => entry && typeof entry.url === "string" && entry.url.trim());
+
+    async function readStatus() {
+      return apiOptional("/api/mobile").catch(() => null);
+    }
+
+    async function setEnabled(next, control) {
+      const previous = status;
+      try {
+        const result = await busy(control, api("/api/mobile", { method: "POST", body: { enabled: next } }), next ? "处理中…" : "关闭中…");
+        // 返回不完整时重新读一次真实状态，避免把没落地的事显示成已生效。
+        status = result && typeof result === "object" && "running" in result ? result : (await readStatus()) || previous;
+      } catch (error) {
+        status = (await readStatus()) || previous;
+        toast(`手机接入${next ? "开启" : "关闭"}失败：${errorText(error)}`, true);
+        paint();
+        return;
+      }
+      const ok = next ? status.running === true : status.enabled !== true;
+      const message = next
+        ? (ok ? "手机接入已开启" : "手机接入已保存，但没有运行起来")
+        : (ok ? "手机接入已关闭" : "手机接入没有关掉，请再试一次");
+      toast(message, !ok);
+      announce(message);
+      paint();
+    }
+
+    async function refreshStatus(control) {
+      let fresh = null;
+      try {
+        fresh = await busy(control, apiOptional("/api/mobile"), "刷新中…");
+      } catch (error) {
+        toast(`刷新失败：${errorText(error)}`, true);
+      }
+      if (fresh) status = fresh;
+      paint();
+    }
+
+    function paintStatus() {
+      const enabled = status.enabled === true;
+      const running = status.running === true;
+      const found = addresses();
+      statusArea.replaceChildren();
+      const actions = el("div", "wb-mobile-actions");
+      const action = (label, cls, next) => {
+        const node = button(cls, label, () => void setEnabled(next, node));
+        return node;
+      };
+      if (!enabled) actions.append(action("开启手机接入", "btn primary", true));
+      else {
+        if (!running) actions.append(action("重新启动", "btn primary", true));
+        actions.append(action("关闭手机接入", "btn ghost", false));
+      }
+      const refresh = button("btn ghost", "刷新", () => void refreshStatus(refresh));
+      actions.append(refresh);
+      statusArea.append(row(
+        "手机入口",
+        "开启后电脑会在本地网络上开一个入口，只接受已配对的手机：看授权 Bot 的会话、派活、处理审批、取回成果，改不了电脑上的设置。不用时随时关掉。",
+        actions,
+      ));
+      statusArea.append(kv("状态", enabled ? (running ? "已开启，运行中" : "已开启，但没有运行") : "已关闭"));
+      statusArea.append(kv("端口", running ? String(status.port ?? "—") : "未运行"));
+      statusArea.append(kv("可用地址", found.length ? `${found.length} 个` : running ? "没有找到" : "—"));
+      if (status.lastError) {
+        const warn = el("div", "wb-warn");
+        warn.setAttribute("role", "alert");
+        warn.append(
+          el("div", "wb-pending-title", enabled && !running ? "手机入口启动失败" : "最近一次错误"),
+          el("div", "bt-note", errorText(status.lastError)),
+        );
+        statusArea.append(warn);
+      }
+      if (running && !found.length) {
+        statusArea.append(el("div", "bt-note", "入口在运行，但电脑没有找出可用的地址：确认电脑已连上 Wi-Fi 或网线（或已登录 Tailscale），然后点「刷新」。"));
+      }
+    }
+
+    /** 只给真实存在的安装包做下载入口；同源地址按当前登录态取字节，绝对地址直接用链接下载。 */
+    function apkControl(apk) {
+      const url = typeof apk.url === "string" && apk.url.trim() ? apk.url.trim() : "/api/mobile/apk";
+      if (!url.startsWith("/")) {
+        const link = el("a", "btn primary", "下载安装包");
+        link.href = url;
+        link.setAttribute("download", "");
+        link.rel = "noopener noreferrer";
+        return link;
+      }
+      return button("btn primary", "下载安装包", function () {
+        return busy(this, fetch(url, { credentials: "same-origin" }).then(async (response) => {
+          if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+          saveBlob("omp-bot-android.apk", await response.blob());
+          toast("安装包已开始下载");
+        }).catch((error) => {
+          toast(`下载安装包失败：${error.message}`, true);
+        }), "下载中…");
+      });
+    }
+
+    function paintInstall() {
+      const apk = status.apk && typeof status.apk === "object" ? status.apk : {};
+      installArea.replaceChildren();
+      const steps = el("ol", "wb-steps");
+      for (const text of [
+        "在电脑上下载安装包，传到手机上安装；系统会问一次是否允许安装来自这个来源的应用。",
+        "手机和电脑要能互相访问：同一个 Wi-Fi 或局域网，或者两台设备都登录同一个 Tailscale 网络。",
+        "打开手机上的 OMP Bot，扫码或手动填入地址和配对码，即可连上这台电脑。",
+      ]) steps.append(el("li", null, text));
+      installArea.append(steps);
+      if (apk.available !== true) {
+        installArea.append(row("安卓安装包", "电脑上还没有可下载的安装包。", el("span", "bt-note", "暂不可下载")));
+        return;
+      }
+      const version = typeof apk.version === "string" && apk.version ? `当前版本 ${apk.version}。` : "";
+      installArea.append(row("安卓安装包", `${version}下载后传到手机安装即可。`, apkControl(apk)));
+    }
+
+    function paintForm() {
+      formArea.replaceChildren();
+      if (status.running !== true) {
+        formArea.append(el("div", "bt-note", status.enabled === true
+          ? "手机入口已开启，但没有运行；先在上面点「重新启动」，再生成配对二维码。"
+          : "先开启上面的手机入口，然后生成配对二维码。"));
+        return;
+      }
+      const found = addresses();
+      const preferred = found.find((entry) => entry.kind !== "loopback") || found[0];
+      const current = found.some((entry) => entry.url === selectedAddress) ? selectedAddress : preferred?.url || "";
+      selectedAddress = current;
+      const scope = scopeControls();
+      const addressSelect = select(
+        found.map((entry) => [entry.url, `${entry.label || entry.kind || "地址"} · ${entry.url}`]),
+        current,
+        (value) => { selectedAddress = value; },
+      );
+      addressSelect.setAttribute("aria-label", "手机连接地址");
+      const form = el("div", "wb-form");
+      form.append(row(
+        "手机连到",
+        "手机要能访问这个地址：同一个 Wi-Fi 或局域网，或者两台设备都登录同一个 Tailscale 网络。",
+        found.length ? addressSelect : el("div", "bt-note", "没有可用的地址：确认电脑已联网，然后点上面的「刷新」。"),
+      ));
+      form.append(row("授权 Bot", "手机只能对你勾选的 Bot 读取和派活。", scope.botsBox));
+      form.append(row("权限", "读取和运行默认开启；审批让手机能代替你批准原生审批请求，需要单独勾选。", scope.permBox));
+      form.append(row("备注", "给这台手机起个名字，以后在设备列表里好认。", scope.labelInput));
+      form.append(row("有效期", "过期后二维码与配对码都失效，需要重新生成。", scope.ttl));
+      form.append(button("btn primary wide", "生成配对二维码", function () {
+        if (!found.length) { toast("还没有可用地址", true); return; }
+        if (!scope.chosen.size) { toast("至少选择一个 Bot", true); return; }
+        const address = addressSelect.value || current;
+        return busy(this, api("/api/mobile/invitation", {
+          method: "POST",
+          body: {
+            botIds: [...scope.chosen],
+            permissions: [...scope.perms],
+            label: scope.labelInput.value.trim() || undefined,
+            ttlMs: Number(scope.ttl.value),
+            address,
+          },
+        }).then((invitation) => {
+          stopCountdowns(); // 上一张码随卡片替换立即停表
+          inviteArea.replaceChildren(mobileInviteCard(invitation, address, (stop) => countdownStops.add(stop)));
+          announce("已生成手机配对二维码");
+        }).catch((error) => {
+          stopCountdowns();
+          inviteArea.replaceChildren(el("div", "wb-error", `生成失败：${errorText(error)}`));
+          toast(`生成配对二维码失败：${errorText(error)}`, true);
+        }), "生成中…");
+      }));
+      formArea.append(form);
+    }
+
+    function mobileInviteCard(invitation, address, onCountdown) {
+      const data = invitation && typeof invitation === "object" ? invitation : {};
+      if (!data.code) {
+        const warn = el("div", "wb-warn");
+        warn.setAttribute("role", "alert");
+        warn.append(el("div", "wb-pending-title", "没有拿到配对码"), el("div", "bt-note", "服务端没有返回配对码，请重新生成。"));
+        return warn;
+      }
+      return pairingCodeCard(data.code, data.ticket, {
+        title: "手机配对二维码（只显示这一次）",
+        lead: "手机在同一个网络里打开 OMP Bot，点「扫码配对」对准下面的二维码。",
+        qrDataUrl: typeof data.qrDataUrl === "string" ? data.qrDataUrl : "",
+        address,
+        onCountdown,
+      });
+    }
+
+    function paint() {
+      paintStatus();
+      paintInstall();
+      paintForm();
+    }
+
+    paint();
+    return { node: section("手机接入（安卓）", statusArea, installArea, formArea, inviteArea), dispose: stopCountdowns };
+  }
+
+  const FEISHU_TRANSPORTS = [
+    ["websocket", "官方长连接（不需要公网域名）"],
+    ["http", "本地回调 HTTP（需要 HTTPS 入口）"],
+  ];
+
+  /** 存储的 transport（后端口径：没存过是 null）优先；缺省时按 HTTP 证据判断：旧配置保留 HTTP，全新配置默认长连接。 */
+  function feishuTransport(data) {
+    const config = data.configuration || {};
+    if (config.transport) return config.transport === "http" ? "http" : "websocket";
+    const inbound = data.inbound || {};
+    const httpConfigured = Number(config.port) > 0 || inbound.verificationTokenConfigured || inbound.encryptKeyConfigured
+      || config.verificationTokenEnv || config.encryptKeyEnv;
+    return httpConfigured ? "http" : "websocket";
+  }
+
+  function socketStateLabel(receiver) {
+    const label = { idle: "未启动", connecting: "连接中", connected: "已连接", reconnecting: "重连中", failed: "连接失败" }[receiver.state]
+      || (receiver.running ? "已连接" : "未连接");
+    if (receiver.running) return `${label}（官方长连接运行中）`;
+    return receiver.reconnectAttempts ? `${label} · 已重连 ${receiver.reconnectAttempts} 次` : label;
+  }
+
   async function feishuSection() {
     const root = el("div", "wb-panel-body");
     const data = await apiOptional("/api/channels/feishu");
     if (!data) { root.append(pendingNote("飞书渠道", "/api/channels/feishu")); return root; }
+    const receiver = data.receiver || {};
+    const inbound = data.inbound || {};
+    const outbound = data.outbound || {};
+    const config = data.configuration || {};
+    const socket = (receiver.transport || feishuTransport(data)) === "websocket";
+    const connected = !!receiver.running;
+
     const facts = el("div", "bt-set-card");
     facts.append(kv("启用", data.enabled ? "已启用" : "未启用"));
-    const receiver = data.receiver || {};
-    facts.append(kv("接收器", receiver.running ? `运行中 · ${receiver.path || ""}（:${receiver.port || "?"}）` : "未运行"));
-    facts.append(kv("仅回环", receiver.loopbackOnly ? "是（不提供公网入口）" : "否"));
-    const inbound = data.inbound || {};
-    facts.append(kv("事件校验", inbound.signatureMode ? `${inbound.signatureMode}${inbound.signatureRequired ? "（需要签名）" : ""}` : inbound.signatureRequired ? "需要签名" : "按配置"));
-    facts.append(kv("验证 token", inbound.verificationTokenConfigured ? "已配置" : "未配置"));
-    facts.append(kv("加密密钥", inbound.encryptKeyConfigured ? "已配置" : "未配置"));
+    facts.append(kv("接入方式", socket ? "官方长连接（websocket）" : "本地回调 HTTP"));
+    facts.append(kv("连接状态", socket
+      ? socketStateLabel(receiver)
+      : connected ? `运行中 · ${receiver.path || ""}（:${receiver.port || "?"}）` : "未运行"));
+    if (!socket) {
+      facts.append(kv("仅回环", receiver.loopbackOnly ? "是（不提供公网入口）" : "否"));
+      facts.append(kv("事件校验", inbound.signatureMode ? `${inbound.signatureMode}${inbound.signatureRequired ? "（需要签名）" : ""}` : inbound.signatureRequired ? "需要签名" : "按配置"));
+      facts.append(kv("验证 token", inbound.verificationTokenConfigured ? "已配置" : "未配置"));
+      facts.append(kv("加密密钥", inbound.encryptKeyConfigured ? "已配置" : "未配置"));
+    }
     facts.append(kv("身份映射", inbound.identities ? `${Array.isArray(inbound.identities) ? inbound.identities.length : inbound.identities} 项` : "未配置"));
-    const outbound = data.outbound || {};
     facts.append(kv("出站", outbound.configured ? `已配置 · ${outbound.appId || ""}` : "未配置"));
     facts.append(kv("凭据来源", outbound.secretSource));
     facts.append(kv("API", outbound.apiBase));
@@ -642,10 +1103,11 @@ export function createPanels({ client, deps }) {
     if (data.startError) facts.append(kv("接收器启动失败", data.startError.message || data.startError.code));
     root.append(section("飞书状态", facts));
 
-    if (inbound.signatureWarning) {
+    for (const [title, text] of [["签名校验警告", inbound.signatureWarning], ["身份白名单警告", inbound.identityWarning]]) {
+      if (!text) continue;
       const warn = el("div", "wb-warn");
       warn.setAttribute("role", "alert");
-      warn.append(el("div", "wb-pending-title", "签名校验警告"), el("div", "bt-note", String(inbound.signatureWarning)));
+      warn.append(el("div", "wb-pending-title", title), el("div", "bt-note", String(text)));
       root.append(warn);
     }
 
@@ -657,7 +1119,9 @@ export function createPanels({ client, deps }) {
       root.append(section("入站事件统计", box));
     }
     if (Number(inbound.interruptedOnStartup) > 0) {
-      root.append(section("启动提示", el("div", "bt-set-card", el("div", "bt-set-row", `本次启动把 ${inbound.interruptedOnStartup} 条未完成事件标记为 interrupted（不自动重放）。`))));
+      const startupNotice = el("div", "bt-set-card");
+      startupNotice.append(el("div", "bt-set-row", `本次启动把 ${inbound.interruptedOnStartup} 条未完成事件标记为 interrupted（不自动重放）。`));
+      root.append(section("启动提示", startupNotice));
     }
     if (inbound.delivery) root.append(el("div", "bt-note", String(inbound.delivery)));
 
@@ -668,8 +1132,10 @@ export function createPanels({ client, deps }) {
       root.append(section("待办清单（缺少的配置）", list));
     }
 
-    const config = data.configuration || {};
-    const form = el("div", "bt-set-card");
+    const form = el("div", "bt-set-card wb-feishu-form");
+    const mode = select(FEISHU_TRANSPORTS, feishuTransport(data));
+    mode.setAttribute("aria-label", "飞书接入方式");
+    form.append(row("接入方式", "长连接由本机主动连出：不需要公网域名、回调 URL、Verification Token 或 Encrypt Key。开放平台仍需订阅事件，并让应用处于可用范围（已发布版本或测试可用名单），否则收不到事件。本地回调 HTTP 需要自备 HTTPS 入口把事件路径转发到本机端口。", mode));
     const fields = {};
     for (const [key, label, secret] of [
       ["appId", "App ID", false],
@@ -690,16 +1156,29 @@ export function createPanels({ client, deps }) {
     form.append(row("回调端口", "选择固定本机端口；只把飞书事件路径交给 HTTPS 反向代理。", port));
     const identities = Object.assign(el("textarea", "bt-textarea"), { rows: 6, value: JSON.stringify(config.identities || [], null, 2) });
     identities.setAttribute("aria-label", "飞书身份映射");
-    form.append(row("身份映射", "每项填 openId、chatId、botIds 和 permissions。审批需显式加入 approve；仅授权指定身份。", identities));
+    form.append(row("身份映射", "每项填 openId、chatId、botIds 和 permissions。审批需显式加入 approve；仅授权指定身份，名单之外的用户发来的消息一律拒绝，未配置时可以先保存。", identities));
     const botIds = deps.bots().map(bot => `${bot.name} = ${bot.id}`).join("\n");
     if (botIds) form.append(el("pre", "wb-pre", botIds));
+    const rowOf = (node) => node.closest(".bt-set-row");
+    const sync = () => {
+      const http = mode.value === "http";
+      rowOf(port).hidden = !http;
+      rowOf(fields.verificationToken).hidden = !http;
+      rowOf(fields.encryptKey).hidden = !http;
+    };
+    mode.onchange = sync;
+    sync();
     form.append(button("btn primary", "保存飞书配置", function () {
       let mapping;
       try { mapping = JSON.parse(identities.value); } catch { toast("身份映射必须是有效 JSON 数组", true); return; }
       if (!Array.isArray(mapping)) { toast("身份映射必须是数组", true); return; }
-      const callbackPort = Number(port.value);
-      if (!Number.isInteger(callbackPort) || callbackPort < 1 || callbackPort > 65535) { toast("回调端口需为 1 到 65535 的整数", true); return; }
-      const body = { appId: fields.appId.value.trim(), port: callbackPort, identities: mapping };
+      const transport = mode.value === "http" ? "http" : "websocket";
+      const body = { transport, appId: fields.appId.value.trim(), identities: mapping };
+      if (transport === "http") {
+        const callbackPort = Number(port.value);
+        if (!Number.isInteger(callbackPort) || callbackPort < 1 || callbackPort > 65535) { toast("回调端口需为 1 到 65535 的整数", true); return; }
+        body.port = callbackPort;
+      }
       for (const key of ["appSecret", "verificationToken", "encryptKey"]) if (fields[key].value) {
         body[key] = fields[key].value;
         body[`${key}Env`] = null;
@@ -713,7 +1192,9 @@ export function createPanels({ client, deps }) {
     root.append(section("飞书接入配置", form));
 
     const actions = el("div", "bt-set-card");
-    actions.append(row("启用渠道", data.enabled ? "关闭会真的停止接收端口。" : "启用需要配置齐全；未配置时后端返回的错误会原样显示。",
+    actions.append(row("启用渠道", data.enabled
+        ? "关闭会真的停止接收：HTTP 释放端口，长连接断开。"
+        : socket ? "启用后由本机建立官方长连接；缺少 App ID/App Secret 时后端返回的错误会原样显示。" : "启用需要配置齐全；未配置时后端返回的错误会原样显示。",
       button(data.enabled ? "btn ghost danger" : "btn primary", data.enabled ? "停用" : "启用", function () {
         const enabled = !data.enabled;
         if (enabled) announce("正在请求启用飞书渠道");
@@ -723,28 +1204,53 @@ export function createPanels({ client, deps }) {
       })));
     const live = checkbox(false, () => { });
     const checks = el("div", "bt-set-card");
-    actions.append(row("自检", "默认静态自检；勾选 live 才会请求鉴权端点（可能连不上真实飞书）。", el("div", "bt-actions", live, button("btn ghost", "运行自检", function () {
+    const checkActions = el("div", "bt-actions");
+    checkActions.append(live, button("btn ghost", "运行自检", function () {
       return busy(this, api("/api/channels/feishu/test", { method: "POST", body: { live: live.checked } }).then((result) => {
         checks.replaceChildren();
         checks.append(kv("结果", result.ok ? "通过" : "未通过"));
         for (const check of result.checks || []) checks.append(kv(check.name, `${check.ok ? "✓" : "✗"} ${check.detail || ""}`));
       }).catch((error) => toast(`自检失败：${error.message}`, true)), "检测中…");
-    }))));
+    }));
+    actions.append(row("自检", "默认静态自检；勾选 live 才会请求鉴权端点（可能连不上真实飞书）。", checkActions));
     root.append(section("渠道操作", actions), checks);
-    if (receiver.loopbackOnly && !receiver.remoteHint) root.append(el("div", "bt-note", "接收器仅监听回环地址，本页面不提供公网或隧道按钮。"));
-    if (receiver.remoteHint) root.append(el("div", "bt-note", `远端接入：${receiver.remoteHint}`));
+    if (socket) {
+      root.append(el("div", "bt-note", "官方长连接不需要公网域名、回调 URL 或反向代理，本服务也不建隧道；状态里的「已连接」取自真实长连接会话。"));
+    } else {
+      if (receiver.loopbackOnly && !receiver.remoteHint) root.append(el("div", "bt-note", "接收器仅监听回环地址，本页面不提供公网或隧道按钮。"));
+      if (receiver.remoteHint) root.append(el("div", "bt-note", `远端接入：${receiver.remoteHint}`));
+    }
     return root;
   }
 
   async function skillsPanel(bot) {
     const root = el("div", "wb-panel-body");
     const data = await apiOptional(`/api/bots/${encodeURIComponent(bot.id)}/skills`);
-    if (!data) { root.append(pendingNote("技能", `/api/bots/${bot.id}/skills`)); return root; }
+    if (!data) { root.append(pendingNote("技能", `/api/bots/${encodeURIComponent(bot.id)}/skills`)); return root; }
+    // GET /skills 不带原生命令列表；用同一套能力接口拿真实工作目录与原生 skill 命令，不新增后端字段。
+    // 探测失败只降级这一节，主内容仍然渲染，并把真实错误带出来。
+    let caps = null;
+    let probeError = null;
+    try {
+      caps = await apiOptional(`/api/bots/${encodeURIComponent(bot.id)}/native/capabilities`);
+    } catch (error) {
+      probeError = error.message;
+    }
+    const isolation = caps && caps.memory && typeof caps.memory.isolation === "object" ? caps.memory.isolation : null;
+    const workDir = isolation && typeof isolation.workDir === "string" && isolation.workDir ? isolation.workDir : null;
+    const sep = workDir && workDir.includes("\\") ? "\\" : "/";
+    const skillsDir = workDir ? `${workDir.replace(/[\\/]+$/, "")}${sep}.omp${sep}skills` : null;
+    const nativeCommands = caps && caps.skills && Array.isArray(caps.skills.commands) ? caps.skills.commands : null;
+    const commandsError = caps && typeof caps.commandsError === "string" && caps.commandsError ? caps.commandsError : null;
+    const probeNote = commandsError || probeError;
+    const hostSkillsOff = !!bot.computer && bot.executionMode !== "chat";
+
     const discovered = data.discovered || [];
     const selected = new Set(discovered.filter((s) => s.selected).map((s) => s.name));
     const box = el("div", "bt-set-card");
-    box.append(el("div", "bt-set-hint", `原生来源：${data.nativeSource || "get_available_commands + Bot 私有 skill 目录"}。勾选写入 Bot.skills 作为原生过滤，不复制 skill registry。`));
-    if (!discovered.length) box.append(el("div", "bt-empty", "Bot 私有项目目录（<work>/.omp/skills）里还没有发现技能。"));
+    if (hostSkillsOff) box.append(el("div", "bt-note", "这台 Bot 绑定了电脑：原生本机技能来源整体关闭，下面的名单与勾选都不生效。"));
+    box.append(el("div", "bt-set-hint", "勾选决定原生加载哪些技能；取消勾选的技能留在目录里，只是不被加载。"));
+    if (!discovered.length) box.append(el("div", "bt-empty", "Bot 私有技能目录里还没有技能（未配置）；安装方法见下一节。"));
     for (const skill of discovered) {
       const label = el("label", "wb-check");
       const input = el("input");
@@ -756,7 +1262,7 @@ export function createPanels({ client, deps }) {
         input.disabled = true;
         try {
           await api(`/api/bots/${encodeURIComponent(bot.id)}/skills`, { method: "PUT", body: { skills: next } });
-          toast("技能过滤已更新；runtime 需要重建后生效");
+          toast("已保存；该 Bot 的原生进程重建后生效");
         } catch (error) {
           toast(`保存失败：${error.message}`, true);
           input.checked = !input.checked;
@@ -765,19 +1271,43 @@ export function createPanels({ client, deps }) {
       };
       const text = el("span");
       text.append(document.createTextNode(`${skill.name}${skill.description ? ` · ${skill.description}` : ""}`));
-      text.append(el("span", "bt-note", ` [${skill.source || "?"}${skill.enabled === false ? " · 目录内已禁用" : ""}]`));
+      if (skill.enabled === false) text.append(el("span", "bt-note", " [目录内已禁用]"));
       label.append(input, text);
       box.append(label);
     }
-    if (data.filter?.length) box.append(el("div", "bt-note", `当前原生过滤：${data.filter.join(", ")}`));
-    else box.append(el("div", "bt-note", "当前没有过滤（等同全部生效）。"));
-    root.append(section("技能过滤", box));
-    if (data.commands) {
-      const commands = el("div", "bt-set-card");
-      commands.append(el("pre", "wb-pre", data.commands.join("\n")));
-      root.append(section(`原生命令（${data.commands.length}）`, commands));
+    if (data.filter?.length) box.append(el("div", "bt-note", `当前加载名单：${data.filter.join(", ")}；名单外的技能原生不加载。`));
+    else box.append(el("div", "bt-note", "当前加载名单：全部。"));
+    root.append(section(`Bot 私有技能（${discovered.length}）`, box));
+
+    const how = el("div", "bt-set-card");
+    const steps = el("ol", "wb-steps");
+    steps.append(el("li", null, skillsDir
+      ? `技能装在 Bot 私有工作目录里：${skillsDir}`
+      : "技能装在 Bot 私有工作目录的 .omp/skills 里；打开「能力」页可以看到该 Bot 的工作目录绝对路径。"));
+    steps.append(el("li", null, "每个技能一个子目录，子目录里放 SKILL.md，开头用 frontmatter 写 name 与 description；enabled: false 可以先在目录里停用它。"));
+    steps.append(el("li", null, "新技能要等该 Bot 的原生进程重建后才被发现：在这里改动勾选、或改一次该 Bot 的设置都会触发重建。"));
+    how.append(steps);
+    root.append(section("安装方法", how));
+
+    const nativeBox = el("div", "bt-set-card");
+    if (nativeCommands === null) nativeBox.append(el("div", "bt-empty", probeNote
+      ? `还没有探测到原生技能来源：${probeNote}。修好后刷新页面重试。`
+      : "还没有探测到原生技能来源：刷新页面重试；Bot 未启动时先让它跑一次会话。"));
+    else if (!nativeCommands.length) nativeBox.append(el("div", "bt-empty", "原生环境没有提供技能命令。"));
+    else {
+      nativeBox.append(el("div", "bt-note", "OMP 原生在当前环境里提供的技能；上面的勾选只作用于 Bot 私有目录里的技能。"));
+      const list = el("details", "wb-raw");
+      list.append(el("summary", null, "技能名称"));
+      list.append(el("pre", "wb-pre", nativeCommands.join("\n")));
+      nativeBox.append(list);
     }
-    root.append(el("div", "bt-note", data.note || "真实装载仍由 OMP 原生流程完成。"));
+    root.append(section(`原生提供的技能（${nativeCommands === null ? "未探测" : `${nativeCommands.length} 个`}）`, nativeBox));
+
+    const detail = el("details", "wb-raw");
+    detail.append(el("summary", null, "原生发现细节"));
+    detail.append(kv("原生来源", data.nativeSource || "get_available_commands + Bot 私有 skill 目录"));
+    detail.append(el("div", "bt-note", data.note || "真实装载仍由 OMP 原生流程完成。"));
+    root.append(detail);
     return root;
   }
 
@@ -786,10 +1316,23 @@ export function createPanels({ client, deps }) {
     const data = await apiOptional(`/api/bots/${encodeURIComponent(bot.id)}/mcp`);
     if (!data) { root.append(pendingNote("MCP 配置", `/api/bots/${encodeURIComponent(bot.id)}/mcp`)); return root; }
     const status = el("div", "bt-set-card");
-    status.append(kv("作用域", data.scope), kv("文件", data.path), kv("存在", String(!!data.exists)), kv("回显密钥", String(!!data.secretsReturned)));
+    status.append(kv("作用域", data.scope));
+    status.append(kv("状态", data.error ? "配置无法解析" : data.exists ? "已有配置文件" : "还没有配置文件"));
     if (data.error) status.append(kv("解析错误", data.error));
-    if (data.note) status.append(el("div", "bt-note", data.note));
+    const fileDetails = el("details", "wb-raw");
+    fileDetails.append(el("summary", null, "原生文件细节"));
+    fileDetails.append(kv("文件", data.path), kv("存在", String(!!data.exists)), kv("回显密钥", String(!!data.secretsReturned)));
+    if (data.enabledServers?.length || data.disabledServers?.length) {
+      fileDetails.append(kv("enabledServers", (data.enabledServers || []).join(", ") || "—"));
+      fileDetails.append(kv("disabledServers", (data.disabledServers || []).join(", ") || "—"));
+    }
+    if (data.note) fileDetails.append(el("div", "bt-note", data.note));
+    status.append(fileDetails);
     root.append(section("原生 mcp.json", status));
+    // 只聊天档与绑定电脑都会关掉项目级 MCP 来源，保存成功也不代表会生效。
+    if (bot.computer || bot.executionMode === "chat") {
+      root.append(el("div", "bt-note", "这台 Bot 当前不加载项目级 MCP 配置（只聊天档或已绑定电脑时如此）：保存的服务要等切回普通执行档后才可能生效。"));
+    }
 
     const servers = el("div", "bt-set-card");
     if (!data.servers?.length) servers.append(el("div", "bt-empty", "还没有配置 MCP 服务。"));
@@ -806,9 +1349,6 @@ export function createPanels({ client, deps }) {
       line.append(copy);
       servers.append(line);
     }
-    if (data.enabledServers?.length || data.disabledServers?.length) {
-      servers.append(el("div", "bt-note", `enabledServers: ${(data.enabledServers || []).join(", ") || "—"} / disabledServers: ${(data.disabledServers || []).join(", ") || "—"}`));
-    }
     root.append(section(`服务（${data.servers?.length || 0}）`, servers));
 
     const name = Object.assign(el("input", "bt-input"), { placeholder: "服务名，如 filesystem" });
@@ -824,11 +1364,12 @@ export function createPanels({ client, deps }) {
       rowOf(args).hidden = !stdio;
       rowOf(url).hidden = stdio;
     };
-    type.onchange = sync;
-    sync();
     const form = el("div", "wb-form");
     form.append(row("类型", null, type), row("名称", null, name), row("命令", "stdio 必填", command), row("参数", null, args), row("URL", "http/sse 必填", url), row("环境/请求头", null, secrets));
-    form.append(el("div", "bt-note", "写入 Bot 私有 .omp/mcp.json，不改全局配置；保存后该 Bot 的原生进程会重启以生效。本接口不会回显任何已存密钥。"));
+    // 行建好后再同步可见性：隐藏行的查找依赖控件已经挂进对应的行。
+    type.onchange = sync;
+    sync();
+    form.append(el("div", "bt-note", "保存会写入 Bot 私有 .omp/mcp.json（不改全局配置），只覆盖同名的服务；保存后该 Bot 的原生进程会重启以生效。"));
     form.append(button("btn primary wide", "保存服务", function () {
       const entry = type.value === "stdio" ? { type: "stdio", command: command.value.trim() } : { type: type.value, url: url.value.trim() };
       if (type.value === "stdio" && !command.value.trim()) { toast("stdio 需要命令", true); return; }
@@ -861,17 +1402,20 @@ export function createPanels({ client, deps }) {
     }
     const status = unavailable || data;
     const facts = el("div", "bt-set-card");
-    facts.append(kv("后端", status.backend || "native-local"));
     facts.append(kv("可用", status.available ? "是" : "否"));
     facts.append(kv("开关", status.enabled ? "已开启" : "未开启"));
-    facts.append(kv("记忆根", status.rootSource ? `${status.root}（${status.rootSource}）` : status.root));
-    facts.append(kv("隔离", status.isolation ? JSON.stringify(status.isolation) : "未知"));
     for (const file of Object.keys(status.files || {})) {
       const info = status.files[file];
       facts.append(kv(file, `${info.exists ? "存在" : "不存在"} · ${fmtSize(info.bytes)}`));
     }
-    facts.append(kv("原生 clear", status.nativeClear || "disabled"));
-    if (status.nativeClearReason) facts.append(el("div", "bt-note", status.nativeClearReason));
+    const memoryDetails = el("details", "wb-raw");
+    memoryDetails.append(el("summary", null, "记忆目录与原生细节"));
+    memoryDetails.append(kv("后端", status.backend || "native-local"));
+    memoryDetails.append(kv("记忆根", status.rootSource ? `${status.root}（${status.rootSource}）` : status.root));
+    memoryDetails.append(kv("隔离", status.isolation ? JSON.stringify(status.isolation) : "未知"));
+    memoryDetails.append(kv("原生 clear", status.nativeClear || "disabled"));
+    if (status.nativeClearReason) memoryDetails.append(el("div", "bt-note", status.nativeClearReason));
+    facts.append(memoryDetails);
     root.append(section("状态", facts));
 
     if (unavailable) {
@@ -879,8 +1423,11 @@ export function createPanels({ client, deps }) {
       for (const reason of unavailable.reasons || []) reasons.append(el("div", "bt-set-row", reason));
       root.append(section("缺少的前置项", reasons));
       const how = el("div", "bt-set-card");
-      for (const line of unavailable.howTo || []) how.append(el("div", "bt-set-row", line));
-      how.append(el("div", "bt-note", "本页面不会替你修改全局认证，也不会用共享 agentDir 跑本地记忆整理。"));
+      how.append(el("div", "bt-set-row", "到「能力」页打开「记忆开关」。开启后，Bot 会使用自己的记忆目录，新回合生效。"));
+      const setupDetails = el("details", "wb-raw");
+      setupDetails.append(el("summary", null, "模型与目录配置说明"));
+      for (const line of unavailable.howTo || []) setupDetails.append(el("div", "bt-note", line));
+      how.append(setupDetails);
       root.append(section("如何启用", how));
       const probe = el("div", "bt-set-card");
       probe.append(row("路径自检", "用原生 reader 验证记忆目录与 OMP 解析一致（会临时写读一个标记文件）。", button("btn ghost", "运行自检", function () {
@@ -898,11 +1445,13 @@ export function createPanels({ client, deps }) {
     const fileSelect = select(files.map((file) => [file, file]), files[0] || "MEMORY.md");
     const area = el("textarea", "bt-textarea wb-memory-edit");
     area.rows = 12;
+    area.setAttribute("aria-label", "记忆文件内容");
     const paint = () => { area.value = data.content?.[fileSelect.value] ?? ""; };
     fileSelect.onchange = paint;
     paint();
     editor.append(row("文件", "只管理 Bot 私有目录里的 MEMORY.md 与 learned.md。", fileSelect), area);
-    editor.append(el("div", "bt-actions",
+    const memoryActions = el("div", "bt-actions");
+    memoryActions.append(
       button("btn primary", "保存", function () {
         return busy(this, api(`/api/bots/${encodeURIComponent(bot.id)}/memory`, { method: "PUT", body: { file: fileSelect.value, content: area.value } })
           .then((next) => { data = { ...data, ...next }; toast("记忆已保存"); }), "保存中…");
@@ -911,7 +1460,8 @@ export function createPanels({ client, deps }) {
         if (!confirm("清空该 Bot 的原生作用域记忆文件？（会先备份到 checkpoints/memory-backups，原始资料不受影响）")) return;
         return busy(this, api(`/api/bots/${encodeURIComponent(bot.id)}/memory/clear`, { method: "POST", body: {} })
           .then((next) => { data = { ...data, content: { "MEMORY.md": "", "learned.md": "" } }; paint(); toast(`已清空 ${(next.cleared || []).length} 个文件`); }), "清空中…");
-      })));
+      }));
+    editor.append(memoryActions);
     root.append(section("内容", editor));
     return root;
   }
@@ -968,8 +1518,6 @@ export function createPanels({ client, deps }) {
       rowOf(interval).hidden = kind.value !== "interval";
       rowOf(at).hidden = kind.value !== "once";
     };
-    kind.onchange = sync;
-    sync();
     const form = el("div", "wb-form");
     form.append(
       row("Bot", null, target),
@@ -982,6 +1530,9 @@ export function createPanels({ client, deps }) {
       row("执行时刻", "once 使用，必须晚于现在", at),
       row("创建后立即启用", "默认创建为暂停；启用是显式动作。", enable),
     );
+    // 行建好后再同步可见性：隐藏行的查找依赖控件已经挂进对应的行。
+    kind.onchange = sync;
+    sync();
     form.append(button("btn primary wide", "创建计划", function () {
       let schedule;
       if (kind.value === "daily") {
@@ -1030,6 +1581,7 @@ export function createPanels({ client, deps }) {
     activityView,
     runDetail,
     capabilitiesPanel,
+    computerPanel,
     skillsPanel,
     mcpPanel,
     memoryPanel,

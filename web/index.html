@@ -18,43 +18,43 @@
   License and attribution are in vendor/ds-bot/LICENSE and NOTICE.
 -->
 <div id="app">
-  <aside id="sidebar" class="bt-side" aria-label="Bot 团队">
+  <aside id="sidebar" class="bt-side" aria-label="我的助手">
     <div id="sidebar-head" class="bt-side-top">
       <span id="logo" class="bt-brand">
         <img class="brand-icon" src="assets/app-icon.svg" alt="" width="24" height="24">
-        <span>omp-bot</span>
+        <span>omp-bot<small class="brand-caption">你的 AI 助手</small></span>
       </span>
-      <button id="btn-search" class="bt-round" type="button" aria-label="搜索 Bot 和群聊" title="搜索" aria-controls="search-wrap" aria-expanded="false">
+      <button id="btn-search" class="bt-round" type="button" aria-label="搜索助手和群聊" title="搜索" aria-controls="search-wrap" aria-expanded="false">
         <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg>
       </button>
-      <button id="btn-new" class="bt-round" type="button" aria-label="新建 Bot 或群聊" title="新建" aria-controls="new-menu" aria-expanded="false">
+      <button id="btn-new" class="bt-round" type="button" aria-label="添加助手或群聊" title="添加" aria-controls="new-menu" aria-expanded="false">
         <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
       </button>
     </div>
     <div id="search-wrap" class="hidden">
-      <label for="search" class="bt-sr">搜索 Bot 名称或角色、群聊名称</label>
+      <label for="search" class="bt-sr">搜索助手或群聊</label>
       <input id="search" class="bt-input" type="search" placeholder="搜索名称或角色" autocomplete="off">
     </div>
     <div id="new-menu" class="bt-menu hidden" role="group" aria-label="新建">
       <button id="new-bot" type="button">
         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="6" width="14" height="13" rx="4"/><path d="M12 3v3M8 11h1M15 11h1M9 15h6"/></svg>
-        <span>新建 Bot</span>
+        <span>创建助手</span>
       </button>
       <button id="new-room" type="button">
         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6M17 14a5 5 0 0 1 4 4v2"/></svg>
         <span>新建群聊</span>
       </button>
     </div>
-    <nav id="side-list" class="bt-list" aria-label="Bot 和群聊"></nav>
+    <nav id="side-list" class="bt-list" aria-label="助手和群聊"></nav>
     <div id="sidebar-foot" class="bt-side-foot">
       <div class="connection-status" role="status" aria-live="polite">
         <span id="conn" aria-hidden="true">●</span>
         <span id="conn-label">正在连接</span>
       </div>
       <div class="sidebar-foot-actions">
-        <button id="btn-activity" class="bt-connect" type="button" title="工作台：运行、审批与计划" aria-label="工作台">
+        <button id="btn-activity" class="bt-connect" type="button" title="查看任务进度和待确认事项" aria-label="任务">
           <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h9M4 12h9M4 18h6"/><circle cx="18" cy="6" r="2"/><circle cx="18" cy="18" r="2"/></svg>
-          <span>工作台</span>
+          <span>任务</span>
           <span id="activity-count" class="wb-count hidden" aria-hidden="true">0</span>
         </button>
         <button id="btn-theme" class="bt-round" type="button" aria-label="切换深色主题" title="切换主题" aria-pressed="false">
@@ -62,7 +62,7 @@
         </button>
         <button id="btn-usage" class="bt-connect" type="button" title="查看用量">
           <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 18a9 9 0 1 1 16 0M12 13l4-5"/><circle cx="12" cy="13" r="1.5"/></svg>
-          <span>用量</span>
+          <span>使用情况</span>
         </button>
       </div>
     </div>
@@ -71,19 +71,27 @@
 
   <main id="main">
     <div id="mobile-head">
-      <button id="btn-sidebar" class="bt-round" type="button" aria-label="打开 Bot 团队侧栏" title="打开侧栏" aria-controls="sidebar" aria-expanded="false">
+      <button id="btn-sidebar" class="bt-round" type="button" aria-label="打开助手列表" title="助手列表" aria-controls="sidebar" aria-expanded="false">
         <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
       </button>
       <span>omp-bot</span>
     </div>
     <section id="empty-state" class="bt-newchat" aria-label="开始会话">
       <div class="welcome-copy">
-        <h1>开始会话</h1>
-        <p>在左侧选择一个 Bot 或群聊，也可以新建。</p>
+        <div class="welcome-symbol" aria-hidden="true"><img src="assets/app-icon.svg" alt="" width="56" height="56"></div>
+        <span class="welcome-eyebrow">给日常多一份从容</span>
+        <h1>想做的事，<br>交给你的助手。</h1>
+        <p>整理资料、完成任务，或一起想个好点子。<br>从一次对话开始。</p>
         <div class="bt-actions">
-          <button id="btn-welcome-new" class="bt-send" type="button">新建 Bot</button>
-          <button id="btn-welcome-room" class="bt-soft" type="button">新建群聊</button>
+          <button id="btn-welcome-new" class="bt-send" type="button">创建我的助手<svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button>
+          <button id="btn-welcome-room" class="bt-soft" type="button">让助手一起协作</button>
         </div>
+        <div class="welcome-features" aria-label="助手可以帮你">
+          <div><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6zM14 3v5h4M9 12h6M9 16h4"/></svg><strong>整理与创作</strong><span>把资料变成清晰的成果</span></div>
+          <div><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4m-4-10 3 3 5-6"/></svg><strong>帮你做事</strong><span>处理任务，随时查看进度</span></div>
+          <div><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6M17 14a5 5 0 0 1 4 4v2"/></svg><strong>一起协作</strong><span>让不同助手各展所长</span></div>
+        </div>
+        <p class="welcome-footnote">已有助手？从列表选择，继续聊。</p>
       </div>
     </section>
     <header id="main-head" class="bt-head hidden">
@@ -93,12 +101,17 @@
         <span class="bt-pill-go" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m9 5 7 7-7 7"/></svg></span>
       </button>
       <span id="head-sub"></span>
+      <button id="btn-computer" class="bt-soft hidden" type="button" aria-label="打开助手电脑" title="查看桌面或接管操作" aria-controls="drawer" aria-haspopup="dialog" aria-expanded="false">
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M9 20h6M12 16v4"/></svg>
+        <span>电脑</span>
+      </button>
+      <button id="btn-permissions" class="bt-soft hidden" type="button" aria-label="调整确认频率" title="调整确认频率" aria-controls="drawer" aria-haspopup="dialog"></button>
       <button id="btn-settings" class="bt-round" type="button" aria-label="编辑会话设置" title="设置" aria-controls="drawer" aria-haspopup="dialog">
         <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m9 3-.5 3-2 1.2-2.8-1-2.4 4.1 2.3 2-.1 2.3-2.2 1.9 2.4 4.1 2.8-1 2 1.1.5 3h4l.5-3 2-1.1 2.8 1 2.4-4.1-2.2-1.9-.1-2.3 2.3-2-2.4-4.1-2.8 1L14.5 6 14 3Z"/><circle cx="12" cy="13" r="3"/></svg>
       </button>
     </header>
     <div id="chat-log" class="bt-dialog-log hidden" role="log" aria-label="会话消息" aria-live="polite" aria-relevant="additions text" tabindex="0"></div>
-    <section id="approval-dock" class="wb-dock hidden" aria-label="需要你处理的原生请求"></section>
+    <section id="approval-dock" class="wb-dock hidden" aria-label="需要你确认的事项"></section>
     <div id="composer-wrap" class="bt-nc-compose hidden">
       <div id="attach-tray" class="wb-attach-tray hidden" aria-label="待发送附件"></div>
       <div id="composer-actions" class="wb-composer-actions">
@@ -107,22 +120,22 @@
         </button>
         <label for="steer-mode" class="bt-sr">忙时发送方式</label>
         <select id="steer-mode" class="bt-select wb-steer-mode hidden" title="忙时发送方式">
-          <option value="steer">补充当前回合</option>
-          <option value="follow_up">排队追发</option>
+          <option value="steer">补充当前任务</option>
+          <option value="follow_up">留到下一步</option>
         </select>
         <button id="btn-stop" class="btn danger hidden" type="button" aria-label="停止当前运行">停止</button>
       </div>
       <div id="composer" class="bt-nc-card" data-composer-card>
         <label for="input" class="bt-sr">消息</label>
-        <textarea id="input" rows="1" placeholder="输入消息" aria-describedby="composer-hint"></textarea>
+        <textarea id="input" rows="1" placeholder="说说你想做什么…" aria-describedby="composer-hint"></textarea>
         <button id="btn-send" class="bt-nc-send" type="button" aria-label="发送消息" title="发送消息">
           <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>
         </button>
       </div>
-      <span id="composer-hint" class="bt-sr">Enter 发送，Shift+Enter 换行。运行中 Enter 会补充当前回合。</span>
+      <span id="composer-hint" class="composer-help">Enter 发送 · Shift + Enter 换行</span>
     </div>
-    <section id="activity-view" class="hidden" aria-label="工作台运行与任务" tabindex="-1"></section>
-    <section id="usage-view" class="hidden" aria-label="用量统计" tabindex="-1"></section>
+    <section id="activity-view" class="hidden" aria-label="任务进度" tabindex="-1"></section>
+    <section id="usage-view" class="hidden" aria-label="使用情况" tabindex="-1"></section>
   </main>
 
   <aside id="drawer" class="bt-panel hidden" role="dialog" aria-labelledby="drawer-title" tabindex="-1">

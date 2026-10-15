@@ -1,0 +1,22 @@
+{
+  "observedAt": "2026-10-13T03:02:36.873Z",
+  "evidence": [
+    {
+      "check": "everyday-speech",
+      "reply": "累就先别做了，别硬撑。几个省事的选项：\n\n- **点外卖**：最省力的，选个常吃的店，别在菜单上纠结太久。\n- **速食凑一顿**：煮个面/饺子，或者冰箱里有啥热一下，十几分钟搞定。\n- **今晚糊弄，明天补上**：一顿吃简单点不影响啥，别给自己加负担。\n- **叫上家人/室友**：有人搭把手就让他来，或者直接说今天不想动。\n\n真要说优先级：先吃饱，别饿着睡，其他的明天再说。\n\n要不要我帮你出个主意——比如你冰箱里大概有啥、或者想吃哪类（面、饭、轻食），我帮你挑个 5 分钟内能解决的？"
+    },
+    {
+      "check": "explicit-technical-detail",
+      "reply": "**一句话结论**：两者不是对立的同一层东西。RPC 是「调用模式」（客户端调一个方法、拿一个返回值），SSE 是「传输方式」（服务器单向往客户端推事件流）。聊天应用里常见做法是**两者叠加**：发消息走 RPC，收消息走 SSE。\n\n## 区别（按维度）\n\n| 维度 | RPC | SSE |\n|---|---|---|\n| 本质 | 调用语义：`SendMessage(args) -> result` | 传输语义：一条长连接，服务器持续推文本事件 |\n| 方向 | 请求-响应（gRPC 另有 client/server/bidi streaming） | **严格单向** server → client，客户端不能用这条流发数据 |\n| 协议 | 抽象层，可跑在 HTTP/2 + protobuf（gRPC）、HTTP+JSON、TCP 上 | 具体就是 HTTP，`Content-Type: text/event-stream` |\n| 帧格式 | 结构化消息：方法名、参数、状态码、错误 | 纯文本帧：`event:` / `data:` / `id:` / `retry:` |\n| 断线重连/续传 | 自己实现（重试、幂等键） | 浏览器 `EventSource` 内置重连 + `Last-Event-ID` 续传 |\n| 浏览器直连 | gRPC 需 grpc-web + 代理；JSON-RPC 用 fetch 即可 | 原生 `EventSource`，零依赖 |\n| 开销/适用 | 强类型、高频双向、内部服务 | 轻量推流、低频事件、广播 |\n\n关键点：**RPC 能双向（尤其 gRPC bidi），SSE 天生单向**。如果你需要真正的双向实时且低延迟，通常选 WebSocket；SSE 是「只需服务器推」时的简化替代。\n\n## 聊天应用具体例子\n\n**发送消息 —— 用 RPC（unary）**\n\n```proto\nrpc SendMessage(SendMessageRequest) returns (SendMessageResponse);\n// SendMessageRequest { string room_id = 1; string text = 2; string client_msg_id = 3; }\n// SendMessageResponse { string msg_id = 1; int64 ts = 2; }\n```\n\n客户端调一次、拿回 `msg_id` 和服务器时间戳，用来做「发送中 → 已发送」的状态翻转。这里天然是请求-响应，SSE 做不了（单向）。\n\n**接收消息 —— 用 SSE**\n\n```\nGET /rooms/42/events            (Accept: text/event-stream)\n\nevent: message\nid: 1037\ndata: {\"msg_id\":\"1037\",\"room_id\":\"42\",\"from\":\"u9\",\"text\":\"在吗\",\"ts\":1730000000}\n\nevent: typing\ndata: {\"room_id\":\"42\",\"user\":\"u9\"}\n\nevent: presence\ndata: {\"user\":\"u9\",\"status\":\"online\"}\n```\n\n客户端 `new EventSource(\"/rooms/42/events\")` 挂上，服务器有新人说话就 push 一条。断线后浏览器自动重连并带 `Last-Event-ID: 1037`，服务器从 1037 之后补发，天然不丢消息。\n\n**为什么这样分工**\n\n- 收消息若用 RPC，要么客户端轮询 `GetMessages`（浪费、有延迟），要么用 gRPC server-streaming RPC —— 可行，但要 HTTP/2 + grpc-web 代理，浏览器还得加一层；SSE 一条普通 HTTP 就够。\n- 发消息若用 SSE，做不到：这条流客户端只能读不能写，最终还得另开一个 POST/RPC。\n\n**补充**：已读回执 `MarkRead(roomId, msgId)`、拉历史 `ListMessages`、建群，都是 RPC；typing、presence、新消息推送，都是 SSE。若以后要端到端加密下的超低延迟双向（如 WebRTC 信令、协同编辑），再换 WebSocket。"
+    },
+    {
+      "check": "denied-action-plain-speech",
+      "reply": "命令被你拒绝了，那这条 `node --version` 没执行，我也拿不到结果。需要的话你再放行，我就跑。"
+    },
+    {
+      "check": "restart-retains-automatic-native-execution",
+      "approvalCount": 0,
+      "reply": "结果是 **v24.19.0**（Node.js 24.19.0）。"
+    }
+  ]
+}

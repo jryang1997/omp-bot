@@ -8,6 +8,11 @@ import { parseNativeFrame, mergeChildStats, childStatBits, childStatusRank } fro
 
 const ATTENTION = new Set(["waiting_input", "waiting_approval"]);
 const TERMINAL = new Set(["completed", "failed", "cancelled", "interrupted", "reconciliation_required"]);
+const CONVERSATION_EVENTS = new Set([
+  "room_bot_post", "room_bot_pass", "room_turn_error", "room_round_start", "room_round_end", "room_user_post",
+  "bot_added", "bot_updated", "bot_removed", "room_created", "room_updated", "room_removed",
+  "exchange_request", "bot_to_user",
+]);
 
 class LiveRun {
   constructor(run, deps) {
@@ -31,7 +36,7 @@ class LiveRun {
     row.dataset.botId = run.botId || "";
     const name = el("span", "bt-group-name");
     const bot = this.deps.botFor(run.botId);
-    name.append(document.createTextNode(`${bot?.name || "Bot"} · `));
+    name.append(document.createTextNode(`${bot?.name || "助手"} · `));
     this.statusNode = el("span", "wb-run-state", runStateLabel(run.state));
     name.append(this.statusNode);
     row.append(name);
@@ -47,8 +52,8 @@ class LiveRun {
     this.artifacts = el("div", "wb-artifacts");
     const tools = el("div", "bt-tools");
     this.stopButton = button("bt-tool", null, () => this.requestStop());
-    this.stopButton.setAttribute("aria-label", "停止这次运行");
-    this.stopButton.title = "停止这次运行";
+    this.stopButton.setAttribute("aria-label", "停止这次任务");
+    this.stopButton.title = "停止这次任务";
     this.stopButton.append(svgIcon(["M7 7h10v10H7z"], "0 0 24 24", { width: "16", height: "16", fill: "none", stroke: "currentColor", "stroke-width": "1.5", "stroke-linecap": "round" }));
     tools.append(this.stopButton);
     stack.append(this.stream, this.artifacts, tools);
@@ -114,7 +119,7 @@ class LiveRun {
     if (kind === "thinking") {
       if (!this.think) {
         this.think = el("details", "bt-think");
-        this.think.open = true;
+        this.think.open = false;
         this.thinkText = el("div", "bt-think-text");
         this.think.append(el("summary", null, "思考过程"), this.thinkText);
         this.textHost.append(this.think);
@@ -188,7 +193,6 @@ class LiveRun {
     node.root.dataset.state = frame.isError ? "error" : frame.phase;
     const detail = frame.error ?? frame.result ?? frame.args;
     if (detail !== undefined) {
-      node.body.hidden = false;
       node.body.textContent = typeof detail === "string" ? detail : JSON.stringify(detail, null, 2);
     }
     this.keepPinned();
@@ -359,19 +363,22 @@ class LiveRun {
 
 export function createRunClient(deps) {
   const runs = new Map();
+  const runSequences = new Map();
   const live = new Map();
   const approvals = new Map();
   let lastSeq = 0;
   let seqCursor = 0;
   const listeners = new Set();
+  const request = deps.request ?? api;
 
   const notify = (what) => { for (const fn of listeners) { try { fn(what); } catch { /* listener errors stay local */ } } };
   const on = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
 
-  const record = (run) => {
+  const record = (run, sequence = seqCursor) => {
     if (!run || !run.id) return null;
     const existing = runs.get(run.id);
     runs.set(run.id, { ...existing, ...run });
+    runSequences.set(run.id, sequence);
     return runs.get(run.id);
   };
 
@@ -379,6 +386,7 @@ export function createRunClient(deps) {
     let node = live.get(run.id);
     if (!node) {
       node = new LiveRun(record(run), deps);
+      node.ensureNode();
       live.set(run.id, node);
     }
     return node;
@@ -422,7 +430,13 @@ export function createRunClient(deps) {
     if (TERMINAL.has(run.state) && node) {
       node.collapseThinking();
       node.stopButton?.remove();
-      if (wasTerminal !== run.state) deps.onRunFinished?.(runs.get(run.id));
+      if (wasTerminal !== run.state) {
+        const finished = runs.get(run.id);
+        const botChat = !!finished.botId && !finished.roomId && finished.kind !== "delegation";
+        const streamed = botChat ? node.text() : "";
+        if (botChat) live.delete(run.id);
+        deps.onRunFinished?.(finished, { text: streamed, botChat });
+      }
     }
     notify("run");
   }
@@ -469,7 +483,7 @@ export function createRunClient(deps) {
   const pending = () => [...approvals.values()].filter((a) => a.status === "pending");
 
   async function start(input) {
-    const { run } = await api("/api/runs", { method: "POST", body: input });
+    const { run } = await request("/api/runs", { method: "POST", body: input });
     record(run);
     deps.onRunStarted?.(run);
     notify("run");
@@ -477,7 +491,7 @@ export function createRunClient(deps) {
   }
 
   async function cancel(id) {
-    const result = await api(`/api/runs/${encodeURIComponent(id)}/cancel`, { method: "POST", body: {} });
+    const result = await request(`/api/runs/${encodeURIComponent(id)}/cancel`, { method: "POST", body: {} });
     if (result.run) applyRun(result.run);
     else {
       const run = runs.get(id);
@@ -487,13 +501,13 @@ export function createRunClient(deps) {
   }
 
   async function steer(id, text, behavior = "steer") {
-    const result = await api(`/api/runs/${encodeURIComponent(id)}/steer`, { method: "POST", body: { text, behavior } });
+    const result = await request(`/api/runs/${encodeURIComponent(id)}/steer`, { method: "POST", body: { text, behavior } });
     if (result.run) applyRun(result.run);
     return result;
   }
 
   async function respond(id, response) {
-    const result = await api(`/api/approvals/${encodeURIComponent(id)}/respond`, { method: "POST", body: response });
+    const result = await request(`/api/approvals/${encodeURIComponent(id)}/respond`, { method: "POST", body: response });
     if (result.approval) {
       approvals.set(id, result.approval);
       deps.onApprovalsChanged?.(pending());
@@ -508,7 +522,7 @@ export function createRunClient(deps) {
   async function historyPage(since, runId) {
     const query = new URLSearchParams({ since: String(since), limit: String(HISTORY_LIMIT) });
     if (runId) query.set("runId", runId);
-    return api(`/api/events/history?${query}`);
+    return request(`/api/events/history?${query}`);
   }
 
   /** Walk the retained ledger window from `since` in capped pages; reports any remaining gap. */
@@ -541,11 +555,25 @@ export function createRunClient(deps) {
   }
 
   function restore(snapshot) {
-    for (const run of snapshot.activeRuns || []) record(run);
+    const snapshotSeq = Number.isInteger(snapshot.lastSeq) ? snapshot.lastSeq : seqCursor;
+    if (Array.isArray(snapshot.activeRuns)) {
+      const activeIds = new Set(snapshot.activeRuns.map((run) => run.id));
+      for (const [id, run] of runs) {
+        if (isLiveRun(run.state) && !activeIds.has(id) && (runSequences.get(id) ?? 0) <= snapshotSeq) {
+          live.get(id)?.dispose();
+          live.delete(id);
+          runs.delete(id);
+          runSequences.delete(id);
+        }
+      }
+    }
+    for (const run of snapshot.activeRuns || []) {
+      if ((runSequences.get(run.id) ?? 0) <= snapshotSeq) record(run, snapshotSeq);
+    }
     for (const approval of snapshot.pendingApprovals || []) upsertApproval(approval);
     if (Number.isInteger(snapshot.lastSeq)) {
-      seqCursor = snapshot.lastSeq;
-      lastSeq = snapshot.lastSeq;
+      seqCursor = Math.max(seqCursor, snapshot.lastSeq);
+      lastSeq = Math.max(lastSeq, snapshot.lastSeq);
     }
     notify("run");
   }
@@ -599,13 +627,49 @@ export function createRunClient(deps) {
     if (node) node.note(text);
   }
 
+  function connect({
+    synchronize, refreshConversation, onConnected, onDisconnected, onInitialReplay,
+    onSynchronized, onSyncError, onConversationEvent,
+    openStream = () => new EventSource("/api/events"),
+  }) {
+    let conversationSeq = 0;
+    let ready = false;
+    let synchronizedOnce = false;
+    const events = openStream();
+    events.onopen = () => {
+      onConnected?.();
+      return (async () => {
+        const snapshot = await synchronize();
+        if (Number.isInteger(snapshot?.lastSeq)) conversationSeq = Math.max(conversationSeq, snapshot.lastSeq);
+        ready = true;
+        await refreshConversation?.();
+        if (synchronizedOnce) await replenish();
+        else {
+          await rehydrate();
+          onInitialReplay?.();
+        }
+        synchronizedOnce = true;
+        onSynchronized?.();
+      })().catch(error => onSyncError?.(error));
+    };
+    events.onerror = () => onDisconnected?.();
+    events.onmessage = event => {
+      let data;
+      try { data = JSON.parse(event.data); } catch { return; }
+      handleEvent(data);
+      if (!CONVERSATION_EVENTS.has(data.type) || !ready) return;
+      if (typeof data.seq === "number" && data.seq <= conversationSeq) return;
+      onConversationEvent?.(data);
+      if (typeof data.seq === "number") conversationSeq = data.seq;
+    };
+    return () => events.close();
+  }
+
   return {
-    on, handleEvent, restore, replenish, rehydrate, start, cancel, steer, respond, note,
+    on, connect, handleEvent, restore, start, cancel, steer, respond, note,
     record, applyRun, upsertApproval, pending, runsFor, activeFor, transcriptRuns, appendLive, statusText,
     all: () => [...runs.values()],
     get: (id) => runs.get(id) || null,
-    liveNode: (id) => live.get(id) || null,
-    dropLive: (id) => { live.delete(id); },
     get lastSeq() { return lastSeq; },
   };
 }
@@ -635,11 +699,18 @@ export function createApprovalDock(deps) {
     root.setAttribute("role", "group");
     const head = el("div", "bt-q-head");
     const text = el("div", "bt-q-text");
-    text.append(el("div", "bt-q-title", record.title || "原生请求"));
-    const meta = [record.method, record.botId ? `Bot ${record.botId}` : null, record.scope, record.expiresAt ? `到期 ${fmtClock(record.expiresAt)}` : null].filter(Boolean).join(" · ");
+    const toolApproval = record.method === "select" && /^Allow tool:/.test(record.title || "") &&
+      Array.isArray(record.options) && record.options.length === 2 && record.options[0] === "Approve" && record.options[1] === "Deny";
+    text.append(el("div", "bt-q-title", toolApproval ? "这一步需要你允许" : record.title || "需要你回答"));
+    const meta = [record.expiresAt ? `有效期至 ${fmtClock(record.expiresAt)}` : null].filter(Boolean).join(" · ");
     if (meta) text.append(el("div", "bt-q-detail", meta));
     head.append(text);
     root.append(head);
+    if (toolApproval) {
+      const details = el("div", "bt-q-body wb-approval-message");
+      details.append(el("div", "wb-pre", record.title.replace(/^Allow tool:/, "工具：").replace(/\nCommand:/g, "\n命令：").replace(/\nReason:/g, "\n原因：")));
+      root.append(details);
+    }
     if (record.message) {
       const body = el("div", "bt-q-body wb-approval-message");
       renderMarkdown(body, record.message);
@@ -651,7 +722,10 @@ export function createApprovalDock(deps) {
       return root;
     }
 
+    let submitting = false;
     const submit = async (response) => {
+      if (submitting) return;
+      submitting = true;
       root.setAttribute("aria-busy", "true");
       for (const control of root.querySelectorAll("button, input, textarea, select")) control.disabled = true;
       try {
@@ -664,13 +738,19 @@ export function createApprovalDock(deps) {
           toast("该请求已过期或运行已结束", true);
         } else {
           for (const control of root.querySelectorAll("button, input, textarea, select")) control.disabled = false;
+          submitting = false;
           root.setAttribute("aria-busy", "false");
           toast(`提交失败：${error.message}`, true);
         }
       }
     };
 
-    if (record.method === "select") {
+    if (toolApproval) {
+      const foot = el("div", "bt-q-foot");
+      foot.append(button("bt-q-btn", "拒绝", () => void submit({ value: "Deny" })));
+      foot.append(button("bt-q-submit", "允许这一次", () => void submit({ value: "Approve" })));
+      root.append(foot);
+    } else if (record.method === "select") {
       const options = Array.isArray(record.options) ? record.options : [];
       const list = el("div", "bt-q-list");
       let chosen = null;

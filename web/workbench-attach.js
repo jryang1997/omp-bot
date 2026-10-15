@@ -8,10 +8,20 @@ import { el, button, toast, api, apiOptional, fmtSize, fmtTime, downloadText } f
 const MAX_BYTES = 12 * 1024 * 1024;
 
 export function createAttachmentTray() {
-  const items = new Map(); // id -> attachment record
+  const drafts = new Map(); // botId -> attachment records
   let botId = null;
   let imageCheck = null;
   let picker = null;
+
+  function attachments(id = botId) {
+    if (!drafts.has(id)) drafts.set(id, new Map());
+    return drafts.get(id);
+  }
+
+  function setBot(id) {
+    botId = id;
+    render();
+  }
 
   async function readBase64(file) {
     const buffer = await file.arrayBuffer();
@@ -23,6 +33,7 @@ export function createAttachmentTray() {
   }
 
   async function upload(file) {
+    const owner = botId;
     if (!botId) { toast("先选择一个 Bot 再添加附件", true); return null; }
     if (file.size > MAX_BYTES) { toast(`附件超过 ${fmtSize(MAX_BYTES)} 上限`, true); return null; }
     if (String(file.type || "").startsWith("image/") && imageCheck) {
@@ -33,10 +44,10 @@ export function createAttachmentTray() {
       const dataBase64 = await readBase64(file);
       const created = await api("/api/attachments", {
         method: "POST",
-        body: { botId, filename: file.name || "clipboard", mime: file.type || "application/octet-stream", dataBase64 },
+        body: { botId: owner, filename: file.name || "clipboard", mime: file.type || "application/octet-stream", dataBase64 },
       });
       const attachment = created.attachment || created;
-      items.set(attachment.id, attachment);
+      attachments(owner).set(attachment.id, attachment);
       render();
       return attachment;
     } catch (error) {
@@ -51,26 +62,29 @@ export function createAttachmentTray() {
   }
 
   function chips() {
-    return [...items.values()];
+    return [...attachments().values()];
   }
 
   function ids() {
-    return [...items.keys()];
+    return [...attachments().keys()];
   }
 
-  function clear() {
-    items.clear();
+  function clear(owner = botId, sentIds = null) {
+    const items = attachments(owner);
+    if (sentIds) for (const id of sentIds) items.delete(id);
+    else items.clear();
     render();
   }
 
   function remove(id) {
-    items.delete(id);
+    attachments().delete(id);
     render();
   }
 
   let host = null;
   function render() {
     if (!host) return;
+    const items = attachments();
     host.replaceChildren();
     host.classList.toggle("hidden", items.size === 0);
     for (const item of items.values()) {
@@ -135,10 +149,10 @@ export function createAttachmentTray() {
         addFiles(event.dataTransfer?.files);
       });
     }
-    return { picker, open: () => picker.click(), addFiles, ids, items: chips, clear, remove, render, setBot: (id) => { botId = id; }, upload };
+    return { picker, open: () => picker.click(), addFiles, ids, items: chips, clear, remove, render, setBot, upload };
   }
 
-  return { mount, setBot: (id) => { botId = id; }, ids, items: chips, clear, upload, open: () => picker?.click() };
+  return { mount, setBot, ids, items: chips, clear, upload, open: () => picker?.click() };
 }
 
 /** Read-only artifact index for one bot or run. */

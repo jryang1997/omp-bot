@@ -9,7 +9,7 @@
 import { MAIN_LOOK, lookOf, shapeOf, MASK_ID, nextMarkSerial, characterMarkup } from "./vendor/ds-bot/characters.js";
 import { inkText } from "./vendor/ds-bot/inks.js";
 import {
-  $, el, button, toast, announce, api, bootstrapAuth, markdownFragment, runStateLabel, trapTab,
+  $, el, button, toast, announce, api, bootstrapAuth, markdownFragment, runStateLabel, trapTab, svgIcon, APPROVAL_MODE_LABELS,
 } from "./workbench-core.js";
 import { createRunClient, createApprovalDock } from "./workbench-runs.js";
 import { createPanels } from "./workbench-panels.js";
@@ -35,12 +35,13 @@ const state = {
   usageRequest: 0,
   serial: 0,
   modalReturn: null,
+  modalCleanup: null,
   drawerReturn: null,
   drawerPanel: null,
-  legacySince: 0,
-  legacyReady: false,
-  streamOpened: false,
   panelTab: "detail",
+  panelRequest: 0,
+  advancedOpen: false,
+  upkeepOpen: false,
   announcedAttention: 0,
   activity: null,
   runs: null,
@@ -172,35 +173,26 @@ function renderSidebar() {
   const query = state.search.trim().toLocaleLowerCase();
   const matches = (item) => `${item.name} ${item.role || ""}`.toLocaleLowerCase().includes(query);
   const main = state.bots.find((bot) => bot.isMain);
-  const appendBot = (bot, tile = false) => {
+  const botRow = (bot) => {
     const target = { kind: "bot", id: bot.id };
-    const row = button(tile ? "bt-tile" : "bt-row", null, () => select("bot", bot.id));
+    const row = button("bt-row", null, () => select("bot", bot.id));
     row.dataset.botId = bot.id;
-    row.setAttribute("aria-label", `${bot.name}${bot.isMain ? "，主 Bot" : ""}${conversationBusy(target) ? "，处理中" : ""}`);
+    row.setAttribute("aria-label", `${bot.name}${bot.isMain ? "，主助手" : ""}${conversationBusy(target) ? "，处理中" : ""}`);
     if (isSelected(target)) row.setAttribute("aria-current", "page");
-    row.append(avatar(target, tile ? 60 : 36));
-    if (tile) {
-      row.append(el("span", "bt-tile-name", bot.name));
-      if (bot.role) row.append(el("span", "bt-chip", bot.role));
-      const wrap = el("div", "bt-tile-wrap");
-      wrap.append(row);
-      list.append(wrap);
-    } else {
-      const body = el("span", "bt-row-body");
-      const name = el("span", "bt-row-name");
-      name.append(el("span", "bt-row-title", bot.name));
-      body.append(name);
-      const messages = state.chats[bot.id];
-      const status = state.runs?.statusText(target);
-      const preview = status || messages?.at(-1)?.text || bot.role || bot.model || "默认模型";
-      body.append(el("span", "bt-row-preview", String(preview).replace(/\s+/g, " ")));
-      if (status) body.append(el("span", "bt-tag wb-tag-live", status));
-      row.append(body);
-      list.append(row);
-    }
+    row.append(avatar(target, 36));
+    const body = el("span", "bt-row-body");
+    const name = el("span", "bt-row-name");
+    name.append(el("span", "bt-row-title", bot.name));
+    body.append(name);
+    const messages = state.chats[bot.id];
+    const status = state.runs?.statusText(target);
+    const preview = status || messages?.at(-1)?.text || bot.role || "还没有消息";
+    body.append(el("span", "bt-row-preview", String(preview).replace(/\s+/g, " ")));
+    if (status) body.append(el("span", "bt-tag wb-tag-live", status));
+    row.append(body);
+    return row;
   };
-  if (main && matches(main)) appendBot(main, true);
-  for (const room of state.rooms.filter(matches)) {
+  const roomRow = (room) => {
     const target = { kind: "room", id: room.id };
     const row = button("bt-row", null, () => select("room", room.id));
     row.dataset.roomId = room.id;
@@ -211,13 +203,22 @@ function renderSidebar() {
     const name = el("span", "bt-row-name");
     name.append(el("span", "bt-row-title", room.name));
     body.append(name);
-    const preview = state.runs?.statusText(target) || (conversationBusy(target) ? "群聊回合进行中…" : room.log?.at(-1)?.text || `${room.members.length} 位 Bot · ${room.mode === "everyone" ? "全员轮流" : "管理员代答"}`);
+    const preview = state.runs?.statusText(target)
+      || (conversationBusy(target) ? "群聊回合进行中…" : room.log?.at(-1)?.text || `${room.members.length} 位助手 · ${room.mode === "everyone" ? "轮流发言" : "协调助手代答"}`);
     body.append(el("span", "bt-row-preview", String(preview).replace(/\s+/g, " ")));
     row.append(body);
-    list.append(row);
-  }
-  for (const bot of state.bots) if (bot !== main && matches(bot)) appendBot(bot);
-  if (!list.children.length) list.append(el("div", "empty-hint", query ? "没有匹配的名称或角色" : "创建一个 Bot，开始组建团队"));
+    return row;
+  };
+  const section = (label, rows) => {
+    if (!rows.length) return;
+    list.append(el("div", "ui-side-label", label));
+    list.append(...rows);
+  };
+  const assistants = state.bots.filter((bot) => bot !== main);
+  section("主助手", main && matches(main) ? [botRow(main)] : []);
+  section("群聊", state.rooms.filter(matches).map(roomRow));
+  section(main ? "其他助手" : "助手", assistants.filter(matches).map(botRow));
+  if (!list.children.length) list.append(el("div", "empty-hint", query ? "没有匹配的名称或角色" : "创建一个助手，开始组建团队"));
   $("btn-usage").toggleAttribute("aria-current", state.view === "usage");
   if (state.view === "usage") $("btn-usage").setAttribute("aria-current", "page");
   $("btn-activity").toggleAttribute("aria-current", state.view === "activity");
@@ -283,12 +284,16 @@ function renderSelected(scroll = false) {
   $("head-name").textContent = item.name;
   $("head-avatar").replaceChildren(avatar(target, 24));
   if (target.kind === "bot") {
-    $("head-sub").textContent = [item.role, item.model || "默认模型", item.executionMode ? `模式 ${item.executionMode}` : "", item.approvalMode ? `审批 ${item.approvalMode}` : ""].filter(Boolean).join(" · ");
+    const status = state.runs?.statusText(target);
+    $("head-sub").textContent = [item.isMain ? "主助手" : "", item.role, status].filter(Boolean).join(" · ") || "助手";
+    $("btn-permissions").textContent = item.executionMode === "chat" ? "只聊天" : APPROVAL_MODE_LABELS[item.approvalMode] || APPROVAL_MODE_LABELS.write;
   } else {
     const admin = botById(item.adminId)?.name || "未设置";
-    $("head-sub").textContent = `${item.members.length} 位 Bot · ${item.mode === "everyone" ? "全员轮流" : "管理员代答"} · 管理员 ${admin}`;
+    $("head-sub").textContent = `${item.members.length} 位助手 · ${item.mode === "everyone" ? "轮流发言" : "协调助手代答"} · 协调助手 ${admin}`;
   }
-  $("head-title").setAttribute("aria-label", `查看 ${item.name} 的详情`);
+  hidden("btn-permissions", target.kind !== "bot");
+  hidden("btn-computer", target.kind !== "bot");
+  $("head-title").setAttribute("aria-label", `打开 ${item.name} 的设置`);
   renderChat(scroll);
   syncBusy();
   renderDock();
@@ -307,7 +312,7 @@ function messageNode(message, bot, room) {
       const strip = el("div", "bt-uimages");
       for (const item of message.attachments) {
         if (String(item.mime || "").startsWith("image/")) {
-          const img = el("img", "bt-thumb");
+          const img = el("img", "bt-uattach");
           img.src = `/api/attachments/${encodeURIComponent(item.id)}/preview`;
           img.alt = item.filename || "附件图片";
           img.loading = "lazy";
@@ -325,9 +330,9 @@ function messageNode(message, bot, room) {
   if (message.kind === "pass") return el("div", "bt-event", `${message.fromName} 跳过（PASS）`);
   const error = message.role === "error" || message.kind === "error";
   const row = el("div", "bt-group-msg" + (error ? " error" : ""));
-  const name = el("span", "bt-group-name", error ? `${message.fromName ? `${message.fromName} · ` : ""}错误` : message.fromName || bot?.name || "Bot");
+  const name = el("span", "bt-group-name", error ? `${message.fromName ? `${message.fromName} · ` : ""}错误` : message.fromName || bot?.name || "助手");
   if (!error) name.style.color = inkText(bot?.isMain ? MAIN_LOOK.color : lookOf(bot).color);
-  if (room?.adminId && room.adminId === bot?.id) name.append(el("span", "bt-group-role", " 管理员"));
+  if (room?.adminId && room.adminId === bot?.id) name.append(el("span", "bt-group-role", " 协调助手"));
   row.append(name);
   const stack = el("div", "bt-astack");
   stack.dataset.lead = "";
@@ -372,6 +377,28 @@ function messageNode(message, bot, room) {
   return row;
 }
 
+/** 空聊天：一句自我介绍加三个能直接用的开场白。点了只填输入框，不自动发送。 */
+const CHAT_STARTERS = ["帮我整理一份资料", "一起想个好点子", "制定一个行动计划"];
+
+function chatWelcome(target, item) {
+  const box = el("div", "ui-chat-welcome");
+  box.append(avatar(target, 48));
+  box.append(el("h2", null, `你好，我是${item.name}`));
+  box.append(el("p", null, item.role || "我随时可以帮你做事，先说说你想做什么。"));
+  const prompts = el("div", "ui-prompts");
+  for (const text of CHAT_STARTERS) {
+    prompts.append(button("ui-prompt", text, () => {
+      const input = $("input");
+      input.value = text;
+      state.drafts[keyOf(target)] = text;
+      resizeInput();
+      input.focus();
+    }));
+  }
+  box.append(prompts);
+  return box;
+}
+
 function renderChat(scroll = false) {
   const target = state.sel;
   const item = itemOf(target);
@@ -396,7 +423,9 @@ function renderChat(scroll = false) {
   }
   const loading = target.kind === "bot" && state.history.get(target.id)?.loading;
   state.runs?.appendLive(log, target);
-  if (!messages.length && !loading && !liveRuns(target).length) log.append(el("div", "empty-hint", target.kind === "bot" ? `和 ${item.name} 说点什么吧` : "发一条消息，开始群聊回合"));
+  if (!messages.length && !loading && !liveRuns(target).length) {
+    log.append(target.kind === "bot" ? chatWelcome(target, item) : el("div", "empty-hint", "发一条消息，开始群聊回合"));
+  }
   const pending = conversationBusy(target);
   const showTyping = loading || (pending && !liveRuns(target).length);
   log.setAttribute("aria-busy", String(!!loading || pending));
@@ -443,7 +472,7 @@ function syncBusy() {
   const busy = ready && conversationBusy(target);
   const saving = ready && state.saving.has(keyOf(target));
   const cancelling = busy && liveRuns(target).some((run) => run.state === "cancelling");
-  $("btn-send").disabled = !ready || loading || saving;
+  $("btn-send").disabled = !ready || loading || saving || (target && state.pending.has(keyOf(target)));
   $("input").disabled = !ready || loading || saving;
   $("composer").setAttribute("aria-busy", String(busy));
   $("btn-stop").hidden = !busy;
@@ -453,8 +482,8 @@ function syncBusy() {
   $("btn-attach").disabled = !ready || target.kind !== "bot" || saving || loading;
   if (ready) {
     $("input").placeholder = busy
-      ? "输入以补充当前回合，Enter 提交（不新建并发运行）"
-      : target.kind === "bot" ? `给 ${item.name} 发消息，Enter 发送` : `在「${item.name}」发言，可 @点名 Bot`;
+      ? "还想补充什么？直接告诉助手…"
+      : target.kind === "bot" ? `交给 ${item.name} 做点什么…` : `在「${item.name}」发言，可以 @助手点名`;
   }
   for (const control of document.querySelectorAll("[data-conversation-key]")) {
     const key = control.dataset.conversationKey;
@@ -471,6 +500,7 @@ async function send() {
   const attachmentIds = target.kind === "bot" ? (state.tray?.ids() || []) : [];
   if (!text && !attachmentIds.length) return;
   const key = keyOf(target);
+  if (state.pending.has(key)) return;
   const active = liveRuns(target)[0];
 
   // Busy target: the only path is an explicit steer / follow-up on the running chain.
@@ -485,9 +515,11 @@ async function send() {
       toast(behavior === "follow_up" ? "已排队追发" : "已补充当前回合");
       announce(behavior === "follow_up" ? "已排队追发" : "已补充当前回合");
     } catch (error) {
-      state.drafts[key] = text;
-      $("input").value = text;
-      resizeInput();
+      if (!state.drafts[key]) state.drafts[key] = text;
+      if (isSelected(target) && !$("input").value) {
+        $("input").value = state.drafts[key];
+        resizeInput();
+      }
       toast(`补充失败：${error.message}`, true);
     }
     return;
@@ -506,12 +538,12 @@ async function send() {
     (roomById(target.id).log ||= []).push({ kind: "user", from: "user", fromName: "你", text, at: Date.now() });
     state.revision += 1;
   }
-  state.tray?.clear();
   renderSidebar();
   renderSelected(true);
   try {
     if (target.kind === "bot") {
       await state.runs.start({ botId: target.id, text, attachmentIds, source: "user" });
+      state.tray?.clear(target.id, attachmentIds);
     } else {
       const { spoken } = await api(`/api/rooms/${encodeURIComponent(target.id)}/say`, { method: "POST", body: { text, userName: "你" } });
       if (!spoken.length) {
@@ -520,14 +552,14 @@ async function send() {
           $("input").value = text;
           resizeInput();
         }
-        toast("群里没有可用的 Bot，请在群设置中添加成员。消息已保留。", true);
+        toast("群里没有可用的助手，请在群设置里添加成员。消息已保留。", true);
       }
     }
   } catch (error) {
     if (target.kind === "bot" && text && botById(target.id)) (state.chats[target.id] ||= []).push({ role: "error", text: error.message, at: Date.now() });
-    state.drafts[key] = text;
-    if (isSelected(target)) {
-      $("input").value = text;
+    if (!state.drafts[key]) state.drafts[key] = text;
+    if (isSelected(target) && !$("input").value) {
+      $("input").value = state.drafts[key];
       resizeInput();
     }
     toast(`${itemOf(target)?.name || "会话"}：${error.message}`, true);
@@ -545,55 +577,32 @@ async function send() {
   }
 }
 
-const LEGACY_TYPES = new Set([
-  "room_bot_post", "room_bot_pass", "room_turn_error", "room_round_start", "room_round_end", "room_user_post",
-  "bot_added", "bot_updated", "bot_removed", "room_created", "room_updated", "room_removed",
-  "exchange_request", "bot_to_user",
-]);
-
 function connectSSE() {
-  const events = new EventSource("/api/events");
-  events.onopen = () => {
-    $("conn").classList.add("live");
-    $("conn-label").textContent = "已连接";
-    state.roomActivity.clear();
-    void (async () => {
-      const snapshot = await loadAll();
-      if (Number.isInteger(snapshot?.lastSeq)) state.legacySince = Math.max(state.legacySince, snapshot.lastSeq);
-      state.legacyReady = true;
+  state.runs.connect({
+    synchronize: loadAll,
+    refreshConversation: async () => {
       if (state.sel?.kind === "bot") await loadChat(state.sel.id);
-      if (state.streamOpened) {
-        // Reconnect: fill any gap through the ledger cursor; the client dedups by seq.
-        await state.runs.replenish();
-      } else {
-        // First load with runs already in flight: rebuild their streamed projection.
-        await state.runs.rehydrate();
-        if (state.view === "team") renderSelected(true);
-      }
-      state.streamOpened = true;
-      announce("已连接事件流");
-    })().catch((error) => {
+    },
+    onConnected: () => {
+      $("conn").classList.add("live");
+      $("conn-label").textContent = "已连接";
+      state.roomActivity.clear();
+    },
+    onDisconnected: () => {
+      $("conn").classList.remove("live");
+      $("conn-label").textContent = "连接中…";
+      announce("事件流已断开，正在重连");
+    },
+    onInitialReplay: () => {
+      if (state.view === "team") renderSelected(true);
+    },
+    onSynchronized: () => announce("已连接事件流"),
+    onSyncError: error => {
       toast(`重新同步失败：${error.message}`, true);
       announce("事件流重新同步失败");
-    });
-  };
-  events.onerror = () => {
-    $("conn").classList.remove("live");
-    $("conn-label").textContent = "连接中…";
-    announce("事件流已断开，正在重连");
-  };
-  events.onmessage = (event) => {
-    let data;
-    try { data = JSON.parse(event.data); } catch { return; }
-    state.runs?.handleEvent(data);
-    if (!LEGACY_TYPES.has(data.type)) return;
-    // Legacy state is re-derived from the /api/state snapshot until it lands; later events
-    // are applied only past the ledger cursor so a replayed stream cannot double-append.
-    if (!state.legacyReady) return;
-    if (typeof data.seq === "number" && data.seq <= state.legacySince) return;
-    handleEvent(data);
-    if (typeof data.seq === "number") state.legacySince = data.seq;
-  };
+    },
+    onConversationEvent: handleEvent,
+  });
 }
 
 function handleEvent(event) {
@@ -667,6 +676,20 @@ function option(select, value, text) {
   select.append(node);
 }
 
+/** 高级选项统一折叠：details.ui-disclosure > summary + div.ui-disclosure-body。 */
+function disclosure(summaryText, hint, stateKey) {
+  const node = el("details", "ui-disclosure");
+  node.append(el("summary", null, summaryText));
+  const body = el("div", "ui-disclosure-body");
+  if (hint) body.append(el("p", "hint", hint));
+  node.append(body);
+  if (stateKey) {
+    node.open = !!state[stateKey];
+    node.addEventListener("toggle", () => { state[stateKey] = node.open; });
+  }
+  return { node, body };
+}
+
 function targetControl(control, target) {
   control.dataset.conversationKey = keyOf(target);
   control.dataset.conversationKind = target.kind;
@@ -707,27 +730,30 @@ function saveForm(form, target, label, read, onSave) {
 function botForm(bot, onSave) {
   const form = el("form");
   form.id = `omp-form-${++state.serial}`;
-  const name = field(form, "名字", Object.assign(el("input"), { value: bot?.name || "", placeholder: "如 Ada", required: true }));
-  const role = field(form, "角色", Object.assign(el("input"), { value: bot?.role || "", placeholder: "如 协调者" }));
+  if (!bot) form.append(el("p", "ui-intro", "给助手起个名字，再告诉它擅长什么。"));
+  const name = field(form, "助手名称", Object.assign(el("input"), { value: bot?.name || "", placeholder: "如 Ada", required: true }));
+  const role = field(form, "擅长什么", Object.assign(el("input"), { value: bot?.role || "", placeholder: "如 查资料、写周报" }), "一句话概括，会显示在名单和聊天标题上。");
+  const instructions = field(form, "工作偏好与专属指令", Object.assign(el("textarea"), { value: bot?.instructions || "", rows: 5 }));
+  const advanced = disclosure("高级设置", "换模型、调思考程度，或者把它设为主助手。");
   const model = el("select");
   option(model, "", "（默认模型）");
   for (const item of state.models) option(model, item.selector || `${item.provider}/${item.id}`, item.name || item.id);
   if (bot?.model && ![...model.options].some((item) => item.value === bot.model)) option(model, bot.model, bot.model);
   model.value = bot?.model || "";
-  field(form, "模型", model, "选一个 omp models 里已认证的模型");
+  field(advanced.body, "模型", model, "使用已连接的模型，留空沿用默认配置。");
   const thinking = el("select");
-  for (const value of ["", "off", "low", "medium", "high", "xhigh", "max"]) option(thinking, value, value || "（默认 low）");
+  for (const [value, label] of [["", "默认"], ["off", "关闭"], ["low", "轻量"], ["medium", "均衡"], ["high", "深入"], ["xhigh", "更深入"], ["max", "最深入"]]) option(thinking, value, label);
   thinking.value = bot?.thinking || "";
-  field(form, "思考档", thinking);
-  const instructions = field(form, "专属指令", Object.assign(el("textarea"), { value: bot?.instructions || "", rows: 5 }));
-  const main = Object.assign(el("input"), { type: "checkbox", checked: !!bot?.isMain });
+  field(advanced.body, "思考程度", thinking, "想得越久通常越准，也更慢。");
+  const main = Object.assign(el("input"), { type: "checkbox", checked: bot ? !!bot.isMain : state.bots.length === 0 });
   main.id = `omp-field-${++state.serial}`;
   const label = el("label", "checkline");
   label.htmlFor = main.id;
-  label.append(main, document.createTextNode("主 Bot（群里默认当管理员）"));
-  form.append(label);
+  label.append(main, document.createTextNode("设为主助手（群聊里默认主持发言）"));
+  advanced.body.append(label);
+  form.append(advanced.node);
   saveForm(form, bot ? { kind: "bot", id: bot.id } : null, bot ? "保存" : "创建", () => {
-    if (!name.value.trim()) { name.focus(); toast("名字必填", true); return null; }
+    if (!name.value.trim()) { name.focus(); toast("助手名称必填", true); return null; }
     return { name: name.value.trim(), role: role.value.trim(), model: model.value, thinking: thinking.value, instructions: instructions.value, isMain: main.checked };
   }, onSave);
   return form;
@@ -736,9 +762,10 @@ function botForm(bot, onSave) {
 function roomForm(room, onSave) {
   const form = el("form");
   form.id = `omp-form-${++state.serial}`;
-  const name = field(form, "群名", Object.assign(el("input"), { value: room?.name || "", placeholder: "如 工作组", required: true }));
+  if (!room) form.append(el("p", "ui-intro", "给群聊起个名字，再勾上要参加的助手。"));
+  const name = field(form, "群聊名称", Object.assign(el("input"), { value: room?.name || "", placeholder: "如 工作组", required: true }));
   const group = el("fieldset", "field");
-  group.append(el("legend", null, "成员（至少选一个）"));
+  group.append(el("legend", null, "参加的助手（至少选一个）"));
   const members = new Set(room?.members || []);
   const picks = state.bots.map((bot) => {
     const pick = Object.assign(el("input"), { type: "checkbox", checked: members.has(bot.id) });
@@ -751,13 +778,13 @@ function roomForm(room, onSave) {
     return pick;
   });
   form.append(group);
+  const advanced = disclosure("高级设置", "改发言方式，或指定由哪位助手代表群聊回答。");
   const mode = el("select");
-  option(mode, "admin", "管理员代答 + @点名");
-  option(mode, "everyone", "全员轮流");
+  option(mode, "admin", "协调助手代答 + @点名");
+  option(mode, "everyone", "所有助手轮流发言");
   mode.value = room?.mode || "admin";
-  field(form, "模式", mode);
+  field(advanced.body, "发言方式", mode);
   const admin = el("select");
-  field(form, "管理员", admin);
   function refreshAdmins(value = admin.value) {
     admin.replaceChildren();
     option(admin, "", "（默认第一个成员）");
@@ -766,10 +793,12 @@ function roomForm(room, onSave) {
   }
   picks.forEach((pick) => { pick.onchange = () => refreshAdmins(); });
   refreshAdmins(room?.adminId || "");
+  field(advanced.body, "协调助手", admin, "群聊里由它代表大家回答，默认是第一个成员。");
+  form.append(advanced.node);
   saveForm(form, room ? { kind: "room", id: room.id } : null, room ? "保存" : "创建", () => {
-    if (!name.value.trim()) { name.focus(); toast("群名必填", true); return null; }
+    if (!name.value.trim()) { name.focus(); toast("群聊名称必填", true); return null; }
     const ids = picks.filter((pick) => pick.checked).map((pick) => pick.value);
-    if (!ids.length) { picks[0]?.focus(); toast("至少选一个成员", true); return null; }
+    if (!ids.length) { picks[0]?.focus(); toast("至少选一个参加者", true); return null; }
     return { name: name.value.trim(), members: ids, adminId: admin.value || null, mode: mode.value };
   }, onSave);
   return form;
@@ -785,29 +814,42 @@ function openNewBot() {
     select("bot", bot.id);
     toast(`已创建 ${bot.name}`);
   });
-  openModal("新建 Bot", form);
+  openModal("新建助手", form);
 }
 
 function openNewRoom() {
   closeNewMenu();
-  if (!state.bots.length) { toast("先建至少一个 Bot", true); return; }
+  if (!state.bots.length) { toast("先建至少一个助手", true); return; }
   const form = roomForm(null, async (data) => {
     const { room } = await api("/api/rooms", { method: "POST", body: data });
     if ($("modal-body").contains(form)) closeModal();
     state.revision += 1;
     await loadAll();
     select("room", room.id);
-    toast(`已创建群 ${room.name}`);
+    toast(`已创建群聊 ${room.name}`);
   });
-  openModal("新建群", form);
+  openModal("新建群聊", form);
 }
 
 function detailProfile(target) {
   const item = itemOf(target);
   const profile = el("div", "detail-profile bt-drawer-id");
   profile.append(avatar(target, 80), el("div", "detail-name bt-drawer-name", item.name));
-  profile.append(el("div", "detail-role", target.kind === "bot" ? item.role || "Bot" : `${item.members.length} 位 Bot · ${item.mode === "everyone" ? "全员轮流" : "管理员代答"}`));
+  profile.append(el("div", "detail-role", target.kind === "bot" ? item.role || "助手" : `${item.members.length} 位助手 · ${item.mode === "everyone" ? "轮流发言" : "协调助手代答"}`));
   return profile;
+}
+
+/** 电脑入口：页签容易看漏，详情页给一个明确的跳转。 */
+function computerShortcut(target) {
+  const card = el("div", "bt-set-card wb-shortcut");
+  const row = button("bt-set-row", null, () => { state.panelTab = "computer"; void renderSettingsTab(target, "computer"); });
+  const title = el("div", "wb-shortcut-title", "电脑");
+  title.append(svgIcon(["m9 5 7 7-7 7"], "0 0 24 24", { width: "16", height: "16", fill: "none", stroke: "currentColor", "stroke-width": "1.7", "stroke-linecap": "round", "stroke-linejoin": "round" }));
+  const copy = el("div", "bt-set-copy");
+  copy.append(title, el("div", "bt-set-hint", "看这位助手的桌面画面，接管鼠标键盘，也可以给它发文字和按键"));
+  row.append(copy);
+  card.append(row);
+  return card;
 }
 
 async function runAction(control, target, action) {
@@ -820,6 +862,20 @@ async function runAction(control, target, action) {
   finally { state.saving.delete(key); syncBusy(); }
 }
 
+/** 抽屉里的面板可能持有定时器、监听或对象 URL（例如电脑面板）：替换内容前必须释放。 */
+let panelCleanup = null;
+function releasePanelCleanup() {
+  const cleanup = panelCleanup;
+  panelCleanup = null;
+  if (cleanup) {
+    try { cleanup(); } catch { /* 释放失败不能挡住新面板渲染 */ }
+  }
+}
+function setPanelCleanup(cleanup) {
+  releasePanelCleanup();
+  panelCleanup = typeof cleanup === "function" ? cleanup : null;
+}
+
 function openSettings() {
   const target = state.sel && { ...state.sel };
   const item = itemOf(target);
@@ -829,32 +885,91 @@ function openSettings() {
   hidden("drawer", false);
   $("head-title").setAttribute("aria-expanded", "true");
   $("btn-settings").setAttribute("aria-expanded", "true");
-  $("drawer-title").textContent = target.kind === "bot" ? "Bot 详情" : "群详情";
+  $("drawer-title").textContent = target.kind === "bot" ? "助手设置" : "群聊设置";
   void renderSettingsTab(target, state.panelTab);
   syncBusy();
   $("drawer-close").focus();
 }
 
-const BOT_TABS = [["detail", "详情"], ["capabilities", "能力"], ["skills", "技能"], ["mcp", "MCP"], ["memory", "记忆"], ["routines", "计划"]];
+const BOT_TABS = [["detail", "设置"], ["capabilities", "使用权限"], ["computer", "电脑"], ["routines", "计划"]];
+/** 技能、MCP、记忆是设置的子页：从「更多设置」里进，不占顶层页签。 */
+const BOT_ADVANCED_TABS = [["skills", "技能"], ["mcp", "MCP"], ["memory", "记忆"]];
+const ADVANCED_HINTS = {
+  skills: "装专门的技能包，用的时候自己带上",
+  mcp: "接上外部工具服务，让它能用别的软件",
+  memory: "看它记住了什么，也可以手动改",
+};
+const PANEL_LOADERS = { capabilities: "capabilitiesPanel", skills: "skillsPanel", mcp: "mcpPanel", memory: "memoryPanel" };
 
 async function renderSettingsTab(target, tab) {
   const item = itemOf(target);
   if (!item || !isSelected(target)) return;
-  const tabs = target.kind === "bot" ? BOT_TABS : [["detail", "详情"]];
-  if (!tabs.some(([id]) => id === tab)) tab = "detail";
+  releasePanelCleanup();
+  const top = target.kind === "bot" ? BOT_TABS : [["detail", "设置"]];
+  const advanced = target.kind === "bot" ? BOT_ADVANCED_TABS : [];
+  const sub = advanced.some(([id]) => id === tab);
+  if (!sub && !top.some(([id]) => id === tab)) tab = "detail";
   state.panelTab = tab;
-  const body = $("drawer-body");
-  const tabBar = el("div", "bt-tabs wb-tabs");
-  for (const [id, label] of tabs) {
-    const node = button("bt-tab", label, () => { state.panelTab = id; void renderSettingsTab(target, id); });
-    node.setAttribute("role", "tab");
-    node.setAttribute("aria-selected", String(id === tab));
-    tabBar.append(node);
-  }
+  // 每次渲染领一个序号：晚到的旧请求不许覆盖新面板。
+  const request = ++state.panelRequest;
+  $("btn-computer").setAttribute("aria-expanded", String(tab === "computer"));
+  const active = document.activeElement;
+  const refocusTab = !!(active instanceof Element && (active.classList.contains("bt-tab") || active.dataset.panelBack !== undefined));
+  const fromDisclosure = !!(active instanceof Element && active.closest("details.ui-disclosure"));
   const content = el("div", "wb-panel-body");
-  body.replaceChildren(tabBar, content);
+  let tabBar = null;
+  if (top.length > 1) {
+    tabBar = el("div", "bt-tabs wb-tabs");
+    tabBar.setAttribute("role", "tablist");
+    tabBar.setAttribute("aria-label", "助手设置页签");
+    for (const [id, label] of top) {
+      const node = button("bt-tab", label, () => { state.panelTab = id; void renderSettingsTab(target, id); });
+      node.setAttribute("role", "tab");
+      // 子页没有自己的页签：选中它所属的顶层页，返回路径才清楚。
+      node.setAttribute("aria-selected", String(id === (sub ? "detail" : tab)));
+      tabBar.append(node);
+    }
+    tabBar.addEventListener("keydown", (event) => {
+      const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+      if (!step) return;
+      event.preventDefault();
+      const nodes = [...tabBar.children];
+      const next = nodes[(nodes.indexOf(document.activeElement) + step + nodes.length) % nodes.length];
+      if (!next) return;
+      next.focus();
+      next.click();
+    });
+  }
+  // 技能、MCP、记忆放不下四个常用页签，收进「更多设置」，默认关闭。
+  const more = target.kind === "bot" ? disclosure("更多设置", "技能、MCP 和记忆平时用不到，需要时再进来。", "advancedOpen") : null;
+  if (more) {
+    for (const [id, label] of advanced) {
+      const row = button("bt-set-row", null, () => { state.panelTab = id; void renderSettingsTab(target, id); });
+      if (id === tab) row.setAttribute("aria-current", "page");
+      const copy = el("div", "bt-set-copy");
+      copy.append(el("div", null, label), el("div", "bt-set-hint", ADVANCED_HINTS[id]));
+      row.append(copy);
+      more.body.append(row);
+    }
+  }
+  const back = sub
+    ? button("btn ghost", null, () => { state.panelTab = "detail"; void renderSettingsTab(target, "detail"); })
+    : null;
+  if (back) {
+    back.dataset.panelBack = "";
+    back.append(
+      svgIcon(["m15 18-6-6 6-6"], "0 0 24 24", { width: "16", height: "16", fill: "none", stroke: "currentColor", "stroke-width": "1.7", "stroke-linecap": "round", "stroke-linejoin": "round" }),
+      document.createTextNode("返回设置"),
+    );
+  }
+  const body = $("drawer-body");
+  body.replaceChildren(...[tabBar, more?.node, content].filter(Boolean));
+  if (back) content.append(back);
+  if (refocusTab) tabBar?.querySelector('[aria-selected="true"]')?.focus();
+  if (fromDisclosure && back) back.focus();
   if (tab === "detail") {
     content.append(detailProfile(target));
+    if (target.kind === "bot") content.append(computerShortcut(target));
     const save = async (data) => {
       await api(`/api/${target.kind === "bot" ? "bots" : "rooms"}/${encodeURIComponent(target.id)}`, { method: "PATCH", body: data });
       state.revision += 1;
@@ -864,14 +979,25 @@ async function renderSettingsTab(target, tab) {
       toast(target.kind === "bot" ? "已保存，人格和模型改动会在下一条消息生效" : "已保存群设置");
     };
     content.append(target.kind === "bot" ? botForm(item, save) : roomForm(item, save));
-    const actions = el("div", "field");
+    // 记录维护：低频，改错代价高，默认折叠。
+    const upkeep = disclosure("记录维护", target.kind === "bot"
+      ? "重新读取聊天显示，或者清空显示、另起一个新会话。"
+      : "重新从服务读取群聊记录。", "upkeepOpen");
     if (target.kind === "bot") {
       const reload = targetControl(button("btn ghost wide", "重新加载聊天记录", () => runAction(reload, target, async () => {
         await loadChat(target.id);
         toast("已重新加载聊天记录");
       })), target);
-      const clear = targetControl(button("btn ghost wide", "清空显示（保留原生会话）", () => {
-        if (!confirm(`清空 ${item.name} 的聊天显示？（不删除原生 omp 会话，需要新会话请用“能力 → 新会话”）`)) return;
+      const newSession = targetControl(button("btn ghost wide", "开始新会话", () => {
+        if (!confirm("开启一个新会话？旧会话和聊天记录都保留，下一条消息进入新会话。")) return;
+        return runAction(newSession, target, async () => {
+          await api(`/api/bots/${encodeURIComponent(target.id)}/session/new`, { method: "POST", body: {} });
+          toast("已开启新会话");
+          announce("已开启新的原生会话");
+        });
+      }), target);
+      const clear = targetControl(button("btn ghost wide", "清空聊天显示", () => {
+        if (!confirm(`清空 ${item.name} 的聊天显示？不会删除原生 omp 会话，想开新会话请用「开始新会话」。`)) return;
         return runAction(clear, target, async () => {
           await api(`/api/chat/${encodeURIComponent(target.id)}`, { method: "DELETE" });
           state.history.delete(target.id);
@@ -881,24 +1007,20 @@ async function renderSettingsTab(target, tab) {
           toast("已清空显示");
         });
       }), target);
-      const newSession = targetControl(button("btn ghost wide", "新会话（原生 new_session）", () => {
-        if (!confirm("开启一个新的原生会话：旧会话与历史都保留，下一条消息进入新会话。继续？")) return;
-        return runAction(newSession, target, async () => {
-          await api(`/api/bots/${encodeURIComponent(target.id)}/session/new`, { method: "POST", body: {} });
-          toast("已开启新会话");
-          announce("已开启新的原生会话");
-        });
-      }), target);
-      actions.append(reload, newSession, clear);
+      upkeep.body.append(reload, newSession, clear);
     } else {
       const reload = targetControl(button("btn ghost wide", "重新加载群聊记录", () => runAction(reload, target, async () => {
         await loadAll();
         toast("已重新加载群聊记录");
       })), target);
-      actions.append(reload);
+      upkeep.body.append(reload);
     }
-    const remove = targetControl(button("btn danger wide", target.kind === "bot" ? "删除此 Bot" : "删除此群", () => {
-      const prompt = target.kind === "bot" ? `删除 ${item.name}？其会话文件保留在磁盘。` : `删除群「${item.name}」？`;
+    content.append(upkeep.node);
+    const actions = el("div", "field");
+    const remove = targetControl(button("btn danger wide", target.kind === "bot" ? "删除此助手" : "删除此群聊", () => {
+      const prompt = target.kind === "bot"
+        ? `删除「${item.name}」？它会从名单和所有群聊里消失，原生会话文件保留在磁盘。`
+        : `删除群聊「${item.name}」？群里的助手不会被删除。`;
       if (!confirm(prompt)) return;
       return runAction(remove, target, async () => {
         await api(`/api/${target.kind === "bot" ? "bots" : "rooms"}/${encodeURIComponent(target.id)}`, { method: "DELETE" });
@@ -918,28 +1040,92 @@ async function renderSettingsTab(target, tab) {
     return;
   }
 
-  content.append(el("div", "bt-empty", "加载中…"));
-  const loader = { capabilities: "capabilitiesPanel", skills: "skillsPanel", mcp: "mcpPanel", memory: "memoryPanel", routines: "routinesPanel" }[tab];
+  if (tab === "computer") {
+    const view = state.panels.computerPanel(item);
+    if (isSelected(target) && state.panelTab === tab && request === state.panelRequest) {
+      content.replaceChildren(view.node);
+      setPanelCleanup(view.dispose);
+    } else view.dispose();
+    return;
+  }
+
+  const loading = el("div", "bt-empty", "加载中…");
+  content.append(loading);
   try {
-    if (tab === "routines") {
-      const node = await state.panels.routinesPanel(item.id);
-      if (isSelected(target) && state.panelTab === tab) content.replaceChildren(node);
-      return;
-    }
-    const node = await state.panels[loader](item);
-    if (isSelected(target) && state.panelTab === tab) content.replaceChildren(node);
+    const view = tab === "routines" ? await state.panels.routinesPanel(item.id) : await state.panels[PANEL_LOADERS[tab]](item);
+    if (isSelected(target) && state.panelTab === tab && request === state.panelRequest) {
+      setPanelCleanup(view?.dispose);
+      loading.replaceWith(view?.node ?? view);
+    } else view?.dispose?.();
   } catch (error) {
-    if (isSelected(target) && state.panelTab === tab) content.replaceChildren(el("div", "bt-empty", `加载失败：${error.message}`));
+    if (isSelected(target) && state.panelTab === tab && request === state.panelRequest) {
+      loading.replaceWith(el("div", "bt-empty", `加载失败：${error.message}`));
+    }
   }
 }
 
 function closeDrawer(restore = true) {
+  state.panelRequest += 1;
+  releasePanelCleanup();
   hidden("drawer", true);
   state.drawerPanel = null;
   $("head-title").setAttribute("aria-expanded", "false");
   $("btn-settings").setAttribute("aria-expanded", "false");
+  $("btn-computer").setAttribute("aria-expanded", "false");
   if (restore && state.drawerReturn?.isConnected) state.drawerReturn.focus();
   state.drawerReturn = null;
+}
+
+const fmtCount = (value) => Number(value || 0).toLocaleString("zh-CN");
+
+function usageMetric(label, value) {
+  const node = el("div", "ui-metric");
+  node.append(el("strong", "ui-metric-value", value), el("span", "ui-metric-label", label));
+  return node;
+}
+
+/** 明细表在窄屏里自己横滚，不把整页撑宽。 */
+function tableScroll(table) {
+  const box = el("div", "ui-table-scroll");
+  box.style.overflowX = "auto";
+  box.append(table);
+  return box;
+}
+
+function usageTable(caption, columns, rows, foot) {
+  const table = el("table", "usage");
+  table.append(el("caption", null, caption));
+  const head = el("thead");
+  const heading = el("tr");
+  columns.forEach((label, index) => {
+    const cell = el("th", index >= 3 ? "num" : null, label);
+    cell.scope = "col";
+    heading.append(cell);
+  });
+  head.append(heading);
+  table.append(head);
+  const body = el("tbody");
+  for (const cells of rows) {
+    const row = el("tr");
+    cells.forEach((text, index) => row.append(el("td", index >= 3 ? "num" : null, text)));
+    body.append(row);
+  }
+  table.append(body);
+  if (foot) {
+    const tfoot = el("tfoot");
+    const total = el("tr", "total");
+    foot.forEach((text, index) => total.append(el("td", index >= 3 ? "num" : null, text)));
+    tfoot.append(total);
+    table.append(tfoot);
+  }
+  return table;
+}
+
+/** 本进程 runtime 累计；账本不可用时用它兜底，口径写明是当前进程。 */
+function runtimeTotals(perRuntime) {
+  const totals = { requests: 0, tokensIn: 0, tokensOut: 0, totalTokens: 0, cost: 0 };
+  for (const entry of perRuntime) for (const key of Object.keys(totals)) totals[key] += Number(entry[key] || 0);
+  return totals;
 }
 
 async function showUsage() {
@@ -952,66 +1138,69 @@ async function showUsage() {
   renderSelected();
   const request = ++state.usageRequest;
   const view = $("usage-view");
-  const title = el("h1", null, "用量");
+  const title = el("h1", null, "使用情况");
   const refresh = button("btn ghost", "刷新", () => { void showUsage(); });
   refresh.disabled = true;
-  view.replaceChildren(title, el("p", "hint", "当前常驻进程内 runtime 的 token 和请求统计"), refresh, el("div", "empty-hint", "加载中…"));
+  view.replaceChildren(
+    title,
+    el("p", "ui-intro", "查看累计使用量与费用。token 是模型处理文字时使用的计量单位。"),
+    refresh,
+    el("div", "empty-hint", "加载中…"),
+  );
   try {
     const { perRuntime = [], perRun = [], totals = {}, ledgerAvailable = false } = await api("/api/usage");
     if (request !== state.usageRequest || state.view !== "usage") return;
-    view.lastChild.remove();
+    const loading = view.lastChild;
+    const counts = ledgerAvailable ? totals : runtimeTotals(perRuntime);
+    const metrics = el("div", "ui-metrics");
+    metrics.append(
+      usageMetric("请求次数", fmtCount(counts.requests)),
+      usageMetric("输入 token", fmtCount(counts.tokensIn)),
+      usageMetric("输出 token", fmtCount(counts.tokensOut)),
+      usageMetric("总 token", fmtCount(counts.totalTokens)),
+    );
+    const costShown = counts.costKnown !== false && typeof counts.cost === "number";
+    if (costShown) metrics.append(usageMetric("费用", Number(counts.cost).toFixed(4)));
+    const nodes = [metrics];
+    if (!ledgerAvailable) nodes.push(el("p", "hint", "暂时读不到历史账本：上面的数字只统计当前运行中的助手。"));
+    if (costShown) nodes.push(el("p", "hint", "费用由模型提供的计价信息估算，实际账单请以服务商为准。"));
+    const detail = disclosure("明细表", "两张表统计口径不同，不要相加。");
     if (ledgerAvailable && perRun.length) {
-      const runs = el("table", "usage");
-      runs.append(el("caption", null, "按 Run 的持久用量（来自账本，含实际模型标识）"));
-      const columns = ["Run", "Bot", "模型", "输入 token", "输出 token", "总 token", "费用"];
-      const head = el("thead");
-      const heading = el("tr");
-      columns.forEach((label, index) => { const cell = el("th", index > 2 ? "num" : null, label); cell.scope = "col"; heading.append(cell); });
-      head.append(heading);
-      runs.append(head);
-      const body = el("tbody");
-      for (const entry of perRun) {
-        const row = el("tr");
-        row.append(el("td", null, String(entry.runId || entry.id || "").slice(0, 12)));
-        row.append(el("td", null, entry.botId || entry.botName || "—"));
-        row.append(el("td", null, entry.model || "未知"));
-        row.append(el("td", "num", String(entry.tokensIn ?? entry.inputTokens ?? 0)));
-        row.append(el("td", "num", String(entry.tokensOut ?? entry.outputTokens ?? 0)));
-        row.append(el("td", "num", String(entry.totalTokens ?? 0)));
-        row.append(el("td", "num", entry.cost == null ? "未知" : Number(entry.cost).toFixed(4)));
-        body.append(row);
-      }
-      runs.append(body);
-      view.append(runs);
-    } else if (!ledgerAvailable) {
-      view.append(el("p", "hint", "账本用量不可用：只显示本进程 runtime 统计，持久 per-Run 记账暂缺。"));
+      const rows = perRun.map((entry) => {
+        const runBotId = entry.botId || state.runs?.get(entry.runId)?.botId;
+        const cost = entry.costKnown === false || entry.cost == null ? "未知" : Number(entry.cost).toFixed(4);
+        return [
+          String(entry.runId || entry.id || "").slice(0, 12),
+          entry.botName || (runBotId ? botById(runBotId)?.name : null) || "—",
+          entry.model || "未知",
+          fmtCount(entry.tokensIn ?? entry.inputTokens),
+          fmtCount(entry.tokensOut ?? entry.outputTokens),
+          fmtCount(entry.totalTokens),
+          cost,
+        ];
+      });
+      detail.body.append(tableScroll(usageTable(
+        "每次运行（来自本机账本）",
+        ["运行编号", "助手", "模型", "输入 token", "输出 token", "总 token", "费用"],
+        rows,
+      )));
     }
-    const table = el("table", "usage");
-    table.append(el("caption", null, "Bot 运行用量"));
-    const columns = [["Bot", "botName"], ["范围", "scope"], ["模型", "model"], ["请求", "requests"], ["输入 token", "tokensIn"], ["输出 token", "tokensOut"], ["总 token", "totalTokens"], ["费用", "cost"]];
-    const head = el("thead");
-    const heading = el("tr");
-    columns.forEach(([label], index) => {
-      const cell = el("th", index > 2 ? "num" : null, label);
-      cell.scope = "col";
-      heading.append(cell);
-    });
-    head.append(heading);
-    table.append(head);
-    const body = el("tbody");
-    for (const entry of perRuntime) {
-      const row = el("tr");
-      columns.forEach(([, key], index) => row.append(el("td", index > 2 ? "num" : null, key === "cost" ? Number(entry[key] || 0).toFixed(4) : String(entry[key] ?? ""))));
-      body.append(row);
+    const runtimeRows = perRuntime.map((entry) => [
+      entry.botName, entry.scope, entry.model,
+      fmtCount(entry.requests), fmtCount(entry.tokensIn), fmtCount(entry.tokensOut), fmtCount(entry.totalTokens),
+      Number(entry.cost || 0).toFixed(4),
+    ]);
+    if (!perRuntime.length) {
+      detail.body.append(el("div", "empty-hint", "还没有正在运行的助手。和助手聊一句，用量就会出现在这里。"));
     }
-    table.append(body);
-    const foot = el("tfoot");
-    const total = el("tr", "total");
-    columns.forEach(([, key], index) => total.append(el("td", index > 2 ? "num" : null, index === 0 ? "合计" : index < 3 ? "" : key === "cost" ? Number(totals[key] || 0).toFixed(4) : String(totals[key] || 0))));
-    foot.append(total);
-    table.append(foot);
-    if (!perRuntime.length) view.append(el("div", "empty-hint", "还没有活跃的 Bot 进程。和 Bot 聊一句，用量就会出现在这里。"));
-    view.append(table);
+    const currentTotals = runtimeTotals(perRuntime);
+    detail.body.append(tableScroll(usageTable(
+      "当前运行中的助手（进程内累计）",
+      ["助手", "范围", "模型", "请求", "输入 token", "输出 token", "总 token", "费用"],
+      runtimeRows,
+      ["合计", "", "", fmtCount(currentTotals.requests), fmtCount(currentTotals.tokensIn), fmtCount(currentTotals.tokensOut), fmtCount(currentTotals.totalTokens), Number(currentTotals.cost || 0).toFixed(4)],
+    )));
+    loading.replaceWith(...nodes, detail.node);
   } catch (error) {
     if (request !== state.usageRequest || state.view !== "usage") return;
     view.lastChild.textContent = `加载失败：${error.message}`;
@@ -1058,17 +1247,19 @@ function updateApprovalBadge() {
   const badge = $("activity-count");
   badge.textContent = total > 99 ? "99+" : String(total);
   badge.classList.toggle("hidden", total === 0);
-  $("btn-activity").setAttribute("aria-label", total ? `工作台，${total} 项需要处理` : "工作台");
+  $("btn-activity").setAttribute("aria-label", total ? `任务，${total} 项需要处理` : "任务");
   if (total && total !== state.announcedAttention) announce(`${total} 项需要处理`);
   state.announcedAttention = total;
 }
 
 function openDrawerNode(title, loader) {
+  releasePanelCleanup();
   state.drawerReturn = document.activeElement;
   state.drawerPanel = { title, loader: typeof loader === "function" ? loader : () => loader };
   hidden("drawer", false);
   $("head-title").setAttribute("aria-expanded", "true");
   $("btn-settings").setAttribute("aria-expanded", "true");
+  $("btn-computer").setAttribute("aria-expanded", "false");
   renderDrawerPanel();
   $("drawer-close").focus();
 }
@@ -1077,28 +1268,32 @@ function openDrawerNode(title, loader) {
 function renderDrawerPanel() {
   const panel = state.drawerPanel;
   if (!panel) return;
+  releasePanelCleanup();
+  const request = ++state.panelRequest;
   $("drawer-title").textContent = panel.title;
   const body = $("drawer-body");
   body.replaceChildren(el("div", "bt-empty", "加载中…"));
   Promise.resolve()
     .then(() => panel.loader())
-    .then((node) => { if (state.drawerPanel === panel) body.replaceChildren(node); })
-    .catch((error) => { if (state.drawerPanel === panel) body.replaceChildren(el("div", "bt-empty", `加载失败：${error.message}`)); });
+    .then((view) => {
+      if (state.drawerPanel !== panel || request !== state.panelRequest) { view?.dispose?.(); return; }
+      setPanelCleanup(view?.dispose);
+      body.replaceChildren(view?.node ?? view);
+    })
+    .catch((error) => {
+      if (state.drawerPanel === panel && request === state.panelRequest) body.replaceChildren(el("div", "bt-empty", `加载失败：${error.message}`));
+    });
 }
 
-function finishRun(run) {
+function finishRun(run, { text: streamed, botChat }) {
   if (!run) return;
   state.revision += 1;
-  const botChat = !!run.botId && !run.roomId && run.kind !== "delegation";
   const selectedBot = state.sel?.kind === "bot" && state.sel.id === run.botId;
   if (botChat) {
-    const node = state.runs.liveNode(run.id);
-    const streamed = node?.text() || "";
     const history = state.chats[run.botId] || [];
     const tail = history.at(-1);
     const alreadyShown = tail?.role === "assistant" && String(tail.text || "").trim() === streamed;
     if (!run.reply && streamed && !alreadyShown) (state.chats[run.botId] ||= []).push({ role: "assistant", text: streamed, at: Date.now() });
-    state.runs.dropLive(run.id);
     if (run.reply && selectedBot) void loadChat(run.botId).catch((error) => toast(`历史加载失败：${error.message}`, true));
     else {
       renderSidebar();
@@ -1143,6 +1338,9 @@ function createWorkbench() {
       announce("事件历史存在缺口，部分过程可能缺失");
     },
   });
+  state.runs.on((change) => {
+    if (change === "run" && state.view === "activity") state.activity?.repaint?.();
+  });
   state.dock = createApprovalDock({ client: state.runs });
   state.panels = createPanels({
     client: state.runs,
@@ -1150,6 +1348,8 @@ function createWorkbench() {
       bots: () => state.bots,
       botFor: (id) => botById(id),
       openDrawer: (title, content) => openDrawerNode(title, content),
+      openModal: (title, content, onClose) => openModal(title, content, onClose),
+      closeModal: () => closeModal(),
       announce,
       approvalCard: (record) => state.dock.card(record),
       rerenderPanel: () => {
@@ -1168,10 +1368,12 @@ function createWorkbench() {
   state.tray = createAttachmentTray();
 }
 
-function openModal(title, form) {
+function openModal(title, form, onClose) {
   state.modalReturn = document.activeElement;
+  state.modalCleanup = typeof onClose === "function" ? onClose : null;
   $("modal-title").textContent = title;
   $("modal-body").replaceChildren(form);
+  $("modal").classList.toggle("wb-modal-wide", !!form?.classList?.contains("wb-screen-zoomed"));
   hidden("modal-back", false);
   for (const id of ["sidebar", "main", "drawer", "mobile-head"]) $(id).inert = true;
   const modal = $("modal");
@@ -1183,9 +1385,15 @@ function openModal(title, form) {
 }
 
 function closeModal() {
+  const cleanup = state.modalCleanup;
+  state.modalCleanup = null;
   hidden("modal-back", true);
   $("modal-body").replaceChildren();
+  $("modal").classList.remove("wb-modal-wide");
   for (const id of ["sidebar", "main", "drawer", "mobile-head"]) $(id).inert = false;
+  if (cleanup) {
+    try { cleanup(); } catch { /* 释放失败不影响关闭窗口 */ }
+  }
   const visibleReturn = state.modalReturn?.isConnected && state.modalReturn.getClientRects().length;
   const target = visibleReturn ? state.modalReturn : $("btn-new").getClientRects().length ? $("btn-new") : $("btn-sidebar");
   state.modalReturn = null;
@@ -1216,6 +1424,16 @@ function applyTheme(dark) {
   $("btn-theme").setAttribute("aria-label", dark ? "切换浅色主题" : "切换深色主题");
   $("btn-theme").title = dark ? "切换浅色主题" : "切换深色主题";
 }
+
+/** 用户明确选过的主题；没选过返回 null，由系统深浅色决定。 */
+function storedTheme() {
+  try {
+    const value = localStorage.getItem("omp-bot-theme");
+    return value === "dark" || value === "light" ? value : null;
+  } catch { return null; }
+}
+
+const systemPrefersDark = () => window.matchMedia("(prefers-color-scheme: dark)").matches;
 
 function bind() {
   $("btn-new").onclick = () => {
@@ -1266,6 +1484,8 @@ function bind() {
   };
   $("sidebar-backdrop").onclick = () => closeSidebar(true);
   $("btn-settings").onclick = openSettings;
+  $("btn-computer").onclick = () => { state.panelTab = "computer"; openSettings(); };
+  $("btn-permissions").onclick = () => { state.panelTab = "capabilities"; openSettings(); };
   $("head-title").onclick = openSettings;
   $("drawer-close").onclick = () => closeDrawer();
   $("modal-close").onclick = closeModal;
@@ -1288,6 +1508,7 @@ function bind() {
       return;
     }
     if (!$("drawer").classList.contains("hidden") && $("drawer").contains(document.activeElement)) {
+      if (event.key === "Escape") { event.preventDefault(); closeDrawer(); return; }
       trapTab(event, $("drawer"));
       return;
     }
@@ -1305,6 +1526,9 @@ function bind() {
     }
   });
   window.matchMedia("(min-width: 761px)").addEventListener("change", (event) => { if (event.matches) closeSidebar(); });
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (event) => {
+    if (!storedTheme()) applyTheme(event.matches);
+  });
   // Desktop notification click → open the target bot in this window (same-page CustomEvent).
   const openBot = (event) => {
     const botId = event?.detail?.botId;
@@ -1316,8 +1540,8 @@ function bind() {
       return;
     }
     void loadAll()
-      .then(() => { if (botById(botId)) select("bot", botId); else toast(`通知指向的 Bot 不在花名册：${botId}`, true); })
-      .catch((error) => toast(`打开 Bot 失败：${error.message}`, true));
+      .then(() => { if (botById(botId)) select("bot", botId); else toast(`通知指向的助手不在名单里：${botId}`, true); })
+      .catch((error) => toast(`打开助手失败：${error.message}`, true));
   };
   document.addEventListener("ompbot:open-bot", openBot);
   window.addEventListener("ompbot:open-bot", openBot);
@@ -1325,9 +1549,8 @@ function bind() {
 
 (async function init() {
   bind();
-  let dark = false;
-  try { dark = localStorage.getItem("omp-bot-theme") === "dark"; } catch { }
-  applyTheme(dark);
+  const stored = storedTheme();
+  applyTheme(stored ? stored === "dark" : systemPrefersDark());
   try {
     await bootstrapAuth();
   } catch (error) {

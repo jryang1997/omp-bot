@@ -147,6 +147,12 @@ export const runStateLabel = (state) => RUN_STATES[state] || state || "未知";
 const TERMINAL_STATES = new Set(["completed", "failed", "cancelled", "interrupted", "reconciliation_required"]);
 export const isLiveRun = (state) => !!state && !TERMINAL_STATES.has(state);
 
+export const APPROVAL_MODE_LABELS = {
+  "always-ask": "修改和执行前询问",
+  write: "运行命令前询问",
+  yolo: "少打扰",
+};
+
 export function fmtTime(at) {
   const date = new Date(at);
   return Number.isFinite(date.getTime()) ? date.toLocaleString() : "";

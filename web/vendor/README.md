@@ -14,7 +14,7 @@
 - `ds-bot/inks.js` 原样复制上游 `ds-bot/src/client/inks.js`。
 - `ds-bot/ui.css` 来自上游 `ds-bot/src/client/styles.js` 的完整 `SHELL_CSS` 和 `CONVERSATION_CSS`。模板中的颜色、遮罩和缓动值已求值，原始 CSS 规则保留。文件末尾把上游表单、按钮和资料样式映射到本项目的类名。
 - `../index.html` 与 `../app.js` 把 `sidebar.js` 的 BotRow、RoomRow，`mark.js` 的头像和群头像结构，以及 `cells.js` 的消息结构改为原生 DOM，并绑定 omp-bot 的 HTTP API 和 SSE。
-- `../style.css` 负责本地容器、表单间距、窄屏侧栏与详情面板，以及 Markdown 内容的布局。
+- `../style.css` 负责面向普通用户的产品布局、配色、字体、控件和反馈，以及深色主题、窄屏侧栏、全屏设置、减少动态效果和透明度等适配。
 
 `ui.css` 的生成只执行样式模板和 `motion.js` 的纯缓动声明，不导入 React。更新时使用上表固定提交的样式源码、`text.js` 的 `MENTION_ORIGIN` 和 `motion.js` 的 `springEasing`、`SPRING_*`、`spring` 声明。不要改上游打包产物 `ds-bot/client.js`。
 
