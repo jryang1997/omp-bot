@@ -13,6 +13,7 @@ import {
   DEFAULT_APPROVAL_MODE,
   DEFAULT_MEMORY_ENABLED,
   EXECUTION_MODE_RANK,
+  PERMISSION_LEVELS,
   RUN_STATES,
   TERMINAL_RUN_STATES,
 } from "./constants.mjs";
@@ -50,6 +51,29 @@ export function computerIdFor(botId) {
 }
 
 /**
+ * 旧的执行档乘审批档归到三档。chat 归只聊天，审批档 yolo 归全部放手，其余归先问我。
+ * @param {{executionMode?:string, approvalMode?:string}} modes
+ * @returns {"chat"|"ask"|"full"}
+ */
+export function permissionOf({ executionMode, approvalMode } = {}) {
+  if ((executionMode ?? DEFAULT_EXECUTION_MODE) === "chat") return "chat";
+  if ((approvalMode ?? DEFAULT_APPROVAL_MODE) === "yolo") return "full";
+  return "ask";
+}
+
+/** 一档对应的内部组合；未知档位抛 permission_invalid。 */
+export function permissionModes(level) {
+  const modes = Object.hasOwn(PERMISSION_LEVELS, level) ? PERMISSION_LEVELS[level] : null;
+  if (!modes) {
+    const e = new Error(`未知权限档: ${level}`);
+    e.status = 400;
+    e.code = "permission_invalid";
+    throw e;
+  }
+  return { ...modes };
+}
+
+/**
  * bot 的花名册记录（持久化）。
  * executionMode / approvalMode / workspace / memoryEnabled / skills / budget 共同决定
  * 这个 bot 的 runtime 能复用什么进程：policySignature 一变就必须重建进程。
@@ -75,6 +99,7 @@ export function makeBot({
   if (!name) throw new Error("bot 需要 name");
   if (!EXECUTION_MODES.includes(executionMode)) throw new Error(`未知执行模式: ${executionMode}`);
   if (!APPROVAL_MODES.includes(approvalMode)) throw new Error(`未知审批档: ${approvalMode}`);
+  ({ executionMode, approvalMode } = permissionModes(permissionOf({ executionMode, approvalMode })));
   if (skills !== null && !Array.isArray(skills)) throw new Error("skills 必须是数组或 null");
   const normalizedBudget = normalizeBudget(budget, "bot.budget");
   return {

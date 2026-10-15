@@ -82,6 +82,7 @@ const BOT_FIELDS = [
   "model",
   "thinking",
   "isMain",
+  "permission",
   "executionMode",
   "approvalMode",
   "workspace",
@@ -485,8 +486,8 @@ export async function startServer({ port = 3099, host = "127.0.0.1", home, bin =
     } else if (out.name !== undefined && (typeof out.name !== "string" || !out.name.trim())) {
       throw httpError(400, "name 不能为空");
     }
-    // 执行档/审批档的合法性与显式确认由 Orchestrator 唯一的策略校验裁决；这里只透传确认位。
-    for (const k of ["confirmExecutionMode", "confirmApprovalMode"]) {
+    // 权限档的合法性与显式确认由 Orchestrator 唯一的策略校验裁决；这里只透传确认位。
+    for (const k of ["confirmPermission", "confirmExecutionMode", "confirmApprovalMode"]) {
       if (body?.[k] !== undefined) out[k] = body[k];
     }
     return out;

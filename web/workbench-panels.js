@@ -4,7 +4,7 @@
  * Every panel is driven by a real endpoint; a missing endpoint renders an honest
  * pending note instead of a fake control.
  */
-import { el, button, toast, announce, api, apiOptional, fmtTime, fmtClock, fmtDuration, fmtSize, runStateLabel, isLiveRun, downloadText, APPROVAL_MODE_LABELS } from "./workbench-core.js";
+import { el, button, toast, announce, api, apiOptional, fmtTime, fmtClock, fmtDuration, fmtSize, runStateLabel, isLiveRun, downloadText, BOT_PERMISSION_LABELS, permissionOf } from "./workbench-core.js";
 import { artifactCard, loadArtifacts, exportRunTranscript } from "./workbench-attach.js";
 import { createComputerView } from "./workbench-computer.js";
 
@@ -442,24 +442,20 @@ export function createPanels({ client, deps }) {
     const root = el("div", "wb-panel-body");
     root.append(el("p", "ui-intro", "这里决定这个助手能做什么，以及动手前要不要先问你。改动会立刻保存。"));
     const capabilities = await apiOptional(`/api/bots/${encodeURIComponent(bot.id)}/native/capabilities`);
-    const executionInfo = capabilities?.execution || {};
-
     const computer = capabilities && capabilities.computer && capabilities.computer.bound === true ? capabilities.computer : null;
     // 常用设置放最前：能做什么、问不问、在哪里工作，然后是记忆与登录。
     const permissionCard = el("div", "bt-set-card");
-    permissionCard.append(row("助手能做什么", computer
-      ? "已绑定独立电脑，这里的选项决定是否使用电脑上的工具。"
-      : "执行任务可以使用本机工具；只聊天不会运行命令。工作目录不限制文件访问范围。",
-      select([["supervised", "执行任务"], ["chat", "只聊天"], ["full", "完整本机能力"]], bot.executionMode || executionInfo.mode || "supervised", async (value) => {
-        if (value === "full" && !confirm("完整本机能力可访问当前账户有权限访问的文件和程序。确认开启？")) return void deps.rerenderPanel?.();
+    const PERMISSION_HINTS = {
+      chat: "只聊天：不运行命令，不改文件，也不用电脑。",
+      ask: "本机改东西先问我：读写文件照常，运行命令和操作浏览器前先问你。共享电脑里除装系统包都不问。",
+      full: "全部放手：本机和共享电脑都不再逐次问你，装系统包仍会问。可访问当前账户有权限的文件和程序。",
+    };
+    const level = permissionOf(bot);
+    permissionCard.append(row("权限", `${PERMISSION_HINTS[level]}选择从下一次任务生效。工作目录不限制文件访问范围。`,
+      select(Object.entries(BOT_PERMISSION_LABELS), level, async (value) => {
+        if (value === "full" && !confirm(`让「${bot.name}」全部放手？\n\n之后它可以读写文件、运行命令、操作浏览器，不再逐次向你确认，可访问当前账户有权限的文件和程序。需要你提供的信息和装系统包仍会问。\n\n选择会保留，从下一次任务生效，可随时改回。`)) return void deps.rerenderPanel?.();
         // 档位会影响下面的工作目录、操作范围与记忆说明：保存成功后整页重绘，提示不会停留在旧档。
-        if (await patchBot(bot, { executionMode: value, confirmExecutionMode: value === "full" })) deps.rerenderPanel?.();
-      })));
-    permissionCard.append(row("确认频率", "少打扰会自动执行普通操作，需要你补充信息时仍会问。选择会记住，从下一次任务生效。「运行命令前询问」允许普通文件读写，命令和浏览器操作会询问。",
-      select(Object.entries(APPROVAL_MODE_LABELS), bot.approvalMode || executionInfo.approvalMode || "write", async (value) => {
-        if (value === "yolo" && !confirm(`为「${bot.name}」开启少打扰？\n\n之后它可以读写文件、运行命令、操作浏览器，不再逐次向你确认。工具操作不限制在工作目录内。需要你提供的信息仍会询问。\n\n选择会保留，从下一次任务生效，可随时改回。`)) return void deps.rerenderPanel?.();
-        await patchBot(bot, { approvalMode: value, confirmApprovalMode: value === "yolo" });
-        deps.rerenderPanel?.();
+        if (await patchBot(bot, { permission: value, confirmPermission: value === "full" })) deps.rerenderPanel?.();
       })));
     permissionCard.append(row("工作目录", computer
       ? "绑定电脑期间本机执行档不生效，这个位置只在该 Bot 切回本机执行后使用。"

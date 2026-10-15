@@ -1459,20 +1459,18 @@ await test("人工接管暂停闸门：isPaused 时 startRun/runtimeFor 均 409 
   }
 });
 
-await test("策略与记忆前置校验：sandbox 被拒、full/yolo 需显式确认、记忆需原生 profile", async () => {
+await test("策略与记忆前置校验：sandbox 被拒、全部放手需显式确认、记忆需原生 profile", async () => {
   const t = newTeam();
   try {
     assert.throws(
       () => t.orch.addBot({ name: "Sandboxer", executionMode: "sandbox" }),
       (e) => e.status === 400 && e.code === "sandbox_unverified",
     );
-    assert.throws(
-      () => t.orch.addBot({ name: "Fuller", executionMode: "full" }),
-      (e) => e.status === 400 && e.code === "confirm_execution_required",
-    );
+    // full 加 write 归到先问我，不是安全降级，不用确认
+    assert.equal(t.orch.addBot({ name: "Fuller", executionMode: "full" }).executionMode, "supervised");
     assert.throws(
       () => t.orch.addBot({ name: "Yoloer", approvalMode: "yolo" }),
-      (e) => e.status === 400 && e.code === "confirm_approval_required",
+      (e) => e.status === 400 && e.code === "confirm_permission_required",
     );
     // 记忆开关按真实前置判定：显式选定 keyless 模型（auth:none + loopback）才放行，
     // 其余一律拒绝（失败关闭），绝不用「有 broker URL」这种假缝当授权。
@@ -1532,17 +1530,19 @@ await test("策略与记忆前置校验：sandbox 被拒、full/yolo 需显式�
     assert.equal(legit.executionMode, "full");
     assert.equal(legit.approvalMode, "yolo");
     assert.deepEqual(legit.skills, ["git-*"]);
+    // 全部放手只对应 full 加 yolo：退回 write 就整体落到先问我
     assert.equal(t.orch.updateBot(legit.id, { approvalMode: "write" }).approvalMode, "write");
-    assert.equal(t.orch.getBot(legit.id).executionMode, "full");
+    assert.equal(t.orch.getBot(legit.id).executionMode, "supervised");
     assert.throws(
       () => t.orch.updateBot(legit.id, { approvalMode: "yolo" }),
-      (e) => e.code === "confirm_approval_required",
+      (e) => e.code === "confirm_permission_required",
     );
-    assert.equal(t.orch.updateBot(legit.id, { approvalMode: "yolo", confirmApprovalMode: true }).approvalMode, "yolo");
-    assert.equal(t.orch.updateBot(legit.id, { executionMode: "supervised" }).executionMode, "supervised");
+    assert.equal(t.orch.updateBot(legit.id, { approvalMode: "yolo", confirmApprovalMode: true }).executionMode, "full");
+    assert.equal(t.orch.updateBot(legit.id, { executionMode: "supervised" }).executionMode, "full", "supervised 加 yolo 仍是全部放手");
+    assert.equal(t.orch.updateBot(legit.id, { permission: "ask" }).executionMode, "supervised");
     assert.throws(
-      () => t.orch.updateBot(legit.id, { executionMode: "full" }),
-      (e) => e.code === "confirm_execution_required",
+      () => t.orch.updateBot(legit.id, { permission: "full" }),
+      (e) => e.code === "confirm_permission_required",
     );
 
     assert.throws(

@@ -9,7 +9,7 @@
 import { MAIN_LOOK, lookOf, shapeOf, MASK_ID, nextMarkSerial, characterMarkup } from "./vendor/ds-bot/characters.js";
 import { inkText } from "./vendor/ds-bot/inks.js";
 import {
-  $, el, button, toast, announce, api, bootstrapAuth, markdownFragment, runStateLabel, trapTab, svgIcon, APPROVAL_MODE_LABELS,
+  $, el, button, toast, announce, api, bootstrapAuth, markdownFragment, runStateLabel, trapTab, svgIcon, BOT_PERMISSION_LABELS, permissionOf,
 } from "./workbench-core.js";
 import { createRunClient, createApprovalDock } from "./workbench-runs.js";
 import { createPanels } from "./workbench-panels.js";
@@ -286,7 +286,7 @@ function renderSelected(scroll = false) {
   if (target.kind === "bot") {
     const status = state.runs?.statusText(target);
     $("head-sub").textContent = [item.isMain ? "主助手" : "", item.role, status].filter(Boolean).join(" · ") || "助手";
-    $("btn-permissions").textContent = item.executionMode === "chat" ? "只聊天" : APPROVAL_MODE_LABELS[item.approvalMode] || APPROVAL_MODE_LABELS.write;
+    $("btn-permissions").textContent = BOT_PERMISSION_LABELS[permissionOf(item)];
   } else {
     const admin = botById(item.adminId)?.name || "未设置";
     $("head-sub").textContent = `${item.members.length} 位助手 · ${item.mode === "everyone" ? "轮流发言" : "协调助手代答"} · 协调助手 ${admin}`;

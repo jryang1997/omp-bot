@@ -33,6 +33,8 @@ import {
   intersectBudget,
   intersectExecutionMode,
   isTerminalRunState,
+  permissionOf,
+  permissionModes,
 } from "./domain.mjs";
 import {
   MAX_HOPS,
@@ -52,6 +54,9 @@ import {
   UI_UNANSWERABLE_METHODS,
   EXECUTION_MODES,
   APPROVAL_MODES,
+  DEFAULT_EXECUTION_MODE,
+  DEFAULT_APPROVAL_MODE,
+  PERMISSION_LEVELS,
 } from "./constants.mjs";
 
 /** message_bot 工具的 JSON schema。 */
@@ -269,9 +274,7 @@ export class Orchestrator {
    * full/yolo 是明确的安全降级，必须由用户专用设置入口显式确认；模板导入绝不带授权。
    */
   addBot(input = {}) {
-    const executionMode = input.executionMode ?? "supervised";
-    const approvalMode = input.approvalMode ?? "write";
-    validateModeAuthority({ executionMode, approvalMode, confirm: input });
+    const { executionMode, approvalMode } = resolvePermission(input, null);
     const id = genId("bot");
     const model = input.model ?? "";
     // 记忆前置用真实私有目录判定：同一处 helper 供 add/update/运行时启动与状态面使用。
@@ -327,19 +330,8 @@ export class Orchestrator {
   updateBot(id, patch = {}) {
     const bot = this.getBot(id);
     if (!bot) return null;
-    const executionMode = patch.executionMode ?? bot.executionMode;
-    const approvalMode = patch.approvalMode ?? bot.approvalMode;
-    if (patch.executionMode !== undefined || patch.approvalMode !== undefined) {
-      validateModeAuthority({
-        executionMode,
-        approvalMode,
-        confirm: {
-          ...patch,
-          confirmExecutionMode: executionMode === bot.executionMode || patch.confirmExecutionMode === true,
-          confirmApprovalMode: approvalMode === bot.approvalMode || patch.confirmApprovalMode === true,
-        },
-      });
-    }
+    // 档位只经 resolvePermission 写入：旧字段和三档都归一成一种组合，升到全部放手要确认。
+    patch = { ...patch, ...resolvePermission(patch, bot) };
     // 记忆开启的 bot 改模型同样要过前置关：否则会存下一个私有目录里没有定义的模型，
     // 之后每次启动都失败（私有 models.yml 只有原选定 provider/模型）。
     const nextMemoryEnabled = patch.memoryEnabled === undefined ? bot.memoryEnabled === true : patch.memoryEnabled === true;
@@ -2312,12 +2304,49 @@ export class Orchestrator {
   }
 }
 
-/** full/yolo（以及不存在的 sandbox）需要用户显式确认，模板导入绝不带授权。 */
-function validateModeAuthority({ executionMode, approvalMode, confirm }) {
+/**
+ * 接口参数解析成三档之一，再展开成内部的执行档加审批档。
+ * permission 优先；没给就用旧字段（缺的取现值或默认）按 permissionOf 归一。
+ * 升到全部放手是安全降级，必须显式确认：confirmPermission，或旧接口的
+ * confirmExecutionMode / confirmApprovalMode。已经是全部放手的 bot 改别的字段不用再确认。
+ * 模板导入绝不带授权。
+ * @param {object} input 接口参数
+ * @param {object|null} current 现有 bot；新建时为 null
+ * @returns {{executionMode:string, approvalMode:string}}
+ */
+function resolvePermission(input, current) {
+  const touched = input.permission !== undefined || input.executionMode !== undefined || input.approvalMode !== undefined;
+  if (current && !touched) return { executionMode: current.executionMode, approvalMode: current.approvalMode };
+  let level;
+  if (input.permission !== undefined) {
+    if (typeof input.permission !== "string" || !Object.hasOwn(PERMISSION_LEVELS, input.permission)) {
+      throw httpErr(400, `未知权限档: ${input.permission}（可选 ${Object.keys(PERMISSION_LEVELS).join(" / ")}）`, "permission_invalid");
+    }
+    level = input.permission;
+  } else {
+    const executionMode = input.executionMode ?? current?.executionMode ?? DEFAULT_EXECUTION_MODE;
+    const approvalMode = input.approvalMode ?? current?.approvalMode ?? DEFAULT_APPROVAL_MODE;
+    validateModeAuthority({ executionMode, approvalMode });
+    level = permissionOf({ executionMode, approvalMode });
+  }
+  const before = current ? permissionOf(current) : null;
+  const confirmed = input.confirmPermission === true || input.confirmExecutionMode === true || input.confirmApprovalMode === true;
+  if (level === "full" && before !== "full" && !confirmed) {
+    throw httpErr(
+      400,
+      "全部放手（本机完全能力，跳过审批）是安全降级：必须由用户在专用设置入口显式确认（confirmPermission=true）",
+      "confirm_permission_required",
+    );
+  }
+  return permissionModes(level);
+}
+
+/** 旧字段的形状校验。不存在的 sandbox 明确拒绝，本机没有经过验证的 OS 沙箱。 */
+function validateModeAuthority({ executionMode, approvalMode }) {
   if (executionMode === "sandbox") {
     throw httpErr(
       400,
-      "本机没有经过验证的 OS 沙箱，拒绝 sandbox 模式；请选择 chat（受控读取）或 supervised/full（本机能力）",
+      "本机没有经过验证的 OS 沙箱，拒绝 sandbox 模式；请选择只聊天、本机改东西先问我或全部放手",
       "sandbox_unverified",
     );
   }
@@ -2326,20 +2355,6 @@ function validateModeAuthority({ executionMode, approvalMode, confirm }) {
   }
   if (!APPROVAL_MODES.includes(approvalMode)) {
     throw httpErr(400, `未知审批档: ${approvalMode}`, "approval_invalid");
-  }
-  if (executionMode === "full" && confirm?.confirmExecutionMode !== true) {
-    throw httpErr(
-      400,
-      "full（本机完全能力）是安全降级：必须由用户在专用设置入口显式确认（confirmExecutionMode=true）",
-      "confirm_execution_required",
-    );
-  }
-  if (approvalMode === "yolo" && confirm?.confirmApprovalMode !== true) {
-    throw httpErr(
-      400,
-      "yolo（跳过审批）必须由用户显式确认（confirmApprovalMode=true）",
-      "confirm_approval_required",
-    );
   }
   return true;
 }

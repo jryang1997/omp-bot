@@ -418,12 +418,24 @@ try {
   // ---- 放宽权限必须显式确认，sandbox 不伪装 ----
   const sandbox = await api(`/api/bots/${bot.id}`, { method: "PATCH", body: { executionMode: "sandbox" } });
   check("executionMode=sandbox 被拒 400（本机无已验证沙箱）", sandbox.status === 400, `status=${sandbox.status}`);
-  const fullNoConfirm = await api(`/api/bots/${bot.id}`, { method: "PATCH", body: { executionMode: "full" } });
-  check("executionMode=full 无确认 400", fullNoConfirm.status === 400);
+  const fullNoConfirm = await api(`/api/bots/${bot.id}`, { method: "PATCH", body: { permission: "full" } });
+  check("permission=full 无确认 400", fullNoConfirm.status === 400 && fullNoConfirm.data?.code === "confirm_permission_required", JSON.stringify(fullNoConfirm.data));
   const yolo = await api(`/api/bots/${bot.id}`, { method: "PATCH", body: { approvalMode: "yolo" } });
-  check("approvalMode=yolo 无确认 400", yolo.status === 400);
-  const fullConfirmed = await api(`/api/bots/${bot.id}`, { method: "PATCH", body: { executionMode: "full", confirmExecutionMode: true } });
-  check("显式确认后 full 生效", fullConfirmed.status === 200 && fullConfirmed.data.bot.executionMode === "full");
+  check("旧字段 approvalMode=yolo 无确认 400", yolo.status === 400);
+  const badLevel = await api(`/api/bots/${bot.id}`, { method: "PATCH", body: { permission: "root" } });
+  check("未知权限档 400", badLevel.status === 400 && badLevel.data?.code === "permission_invalid");
+  const fullWrite = await api(`/api/bots/${bot.id}`, { method: "PATCH", body: { executionMode: "full", approvalMode: "write" } });
+  check(
+    "旧组合 full+write 经接口归到先问我",
+    fullWrite.status === 200 && fullWrite.data.bot.executionMode === "supervised" && fullWrite.data.bot.approvalMode === "write",
+  );
+  const fullConfirmed = await api(`/api/bots/${bot.id}`, { method: "PATCH", body: { permission: "full", confirmPermission: true } });
+  check(
+    "显式确认后全部放手生效",
+    fullConfirmed.status === 200 && fullConfirmed.data.bot.executionMode === "full" && fullConfirmed.data.bot.approvalMode === "yolo",
+  );
+  const backToChat = await api(`/api/bots/${bot.id}`, { method: "PATCH", body: { permission: "chat" } });
+  check("permission=chat 生效", backToChat.status === 200 && backToChat.data.bot.executionMode === "chat");
 
   // ---- 原生导出/会话入口：未知 bot 不触发原生调用 ----
   check("session/export 未知 bot 404", (await api("/api/bots/nope/session/export")).status === 404);

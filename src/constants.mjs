@@ -81,6 +81,18 @@ export const DEFAULT_EXECUTION_MODE = "supervised";
 export const APPROVAL_MODES = ["always-ask", "write", "yolo"];
 export const DEFAULT_APPROVAL_MODE = "write";
 
+/**
+ * 用户可见的三档权限。内部仍存执行档和审批档，每档只对应一种组合：
+ * chat 只聊天；ask 本机运行命令和操作浏览器前先问（原生 write 审批）；full 全部放手。
+ * 共享电脑工具在 ask 和 full 下都不问，装系统包例外（见 persona overlay）。
+ */
+export const PERMISSION_LEVELS = Object.freeze({
+  chat: Object.freeze({ executionMode: "chat", approvalMode: "write" }),
+  ask: Object.freeze({ executionMode: "supervised", approvalMode: "write" }),
+  full: Object.freeze({ executionMode: "full", approvalMode: "yolo" }),
+});
+export const DEFAULT_PERMISSION = "ask";
+
 export const DEFAULT_MEMORY_ENABLED = false;
 
 // ---- 超时 / 上限 ----

@@ -12,7 +12,7 @@ import { clone, ferr, humanBytes, isInsideRoot } from "./util.mjs";
 import { memoryPrereqStatus } from "../memory-config.mjs";
 import { buildRuntimeEnv } from "../bot.mjs";
 import { COMPUTER_TOOL_NAMES } from "./computers.mjs";
-import { computerIdFor } from "../domain.mjs";
+import { computerIdFor, permissionOf } from "../domain.mjs";
 
 /**
  * 记忆路径必须在 Bot 私有目录内，且链路上不能有符号链接/junction。
@@ -296,10 +296,11 @@ export class NativeFeatures {
       commandsError,
       tools: tools ? { count: tools.length, names: tools } : "unknown",
       execution: {
+        permission: permissionOf(bot),
         mode: bot.executionMode,
         approvalMode: bot.approvalMode,
         sandbox: false,
-        note: "supervised 是 OMP 原生审批档，不是 OS 沙箱；本机没有已核实的 Windows 沙箱实现。",
+        note: "三档都不是 OS 沙箱：先问我走 OMP 原生审批，全部放手跳过审批；本机没有已核实的 Windows 沙箱实现。",
       },
       // 电脑档披露：客机档（非 chat）绑定后原生本机工具/扩展/skills/MCP 全部关闭，
       // 工具面只允许团队工具与客机工具；chat 档没有客机工具，保留既有受控宿主读取工具。

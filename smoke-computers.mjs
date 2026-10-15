@@ -108,8 +108,8 @@ async function browserProof(id, browser, profile, html, tag) {
 
 try {
   server = await startServer({ home, port: 0, host: "127.0.0.1" });
-  const a = (await okPost("/api/bots", { name: `Computer A ${suffix}`, model, thinking: "low", approvalMode: "yolo", confirmApprovalMode: true })).bot;
-  const b = (await okPost("/api/bots", { name: `Computer B ${suffix}`, model, thinking: "low", approvalMode: "yolo", confirmApprovalMode: true })).bot;
+  const a = (await okPost("/api/bots", { name: `Computer A ${suffix}`, model, thinking: "low", permission: "full", confirmPermission: true })).bot;
+  const b = (await okPost("/api/bots", { name: `Computer B ${suffix}`, model, thinking: "low", permission: "full", confirmPermission: true })).bot;
   proof.bots = [{ id: a.id, name: a.name }, { id: b.id, name: b.name }];
   const pathA = `/api/bots/${a.id}/computer`;
   const pathB = `/api/bots/${b.id}/computer`;
@@ -240,7 +240,7 @@ try {
   assert.ok((await browserProof(pcA.id, browser, profile, page, "profile-after")).includes(`<p id="proof">${browserMarker}</p>`));
   pass("停启保留客机工作文件与真实 Chromium 浏览器 localStorage", { browser, profile, browserMarker });
 
-  const narrowedApproval = await api(`/api/bots/${b.id}`, { method: "PATCH", body: { approvalMode: "write" } });
+  const narrowedApproval = await api(`/api/bots/${b.id}`, { method: "PATCH", body: { permission: "ask" } });
   assert.equal(narrowedApproval.status, 200, narrowedApproval.data.error);
   const supervised = await startRun(b.id, "只调用 computer_shell 执行 printf SUPERVISED_APPROVAL_READY。等待真正批准后报告输出，不能换其他工具绕过。 ");
   const approval = await waitFor(async () => {
@@ -254,7 +254,7 @@ try {
   assert.ok(supervisedDone.reply?.includes("SUPERVISED_APPROVAL_READY"));
   pass("真实 guest 命令沿用 native write 审批卡与明确批准", { runId: supervised.id, approvalId: approval.id });
 
-  const chatMode = await api(`/api/bots/${b.id}`, { method: "PATCH", body: { executionMode: "chat" } });
+  const chatMode = await api(`/api/bots/${b.id}`, { method: "PATCH", body: { permission: "chat" } });
   assert.equal(chatMode.status, 200, chatMode.data.error);
   await okPost(`${pathB}/takeover`);
   const heldChat = await startRun(b.id, "只回复 CHAT_WHILE_HUMAN_HELD。");

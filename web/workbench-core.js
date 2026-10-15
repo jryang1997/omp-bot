@@ -147,11 +147,17 @@ export const runStateLabel = (state) => RUN_STATES[state] || state || "未知";
 const TERMINAL_STATES = new Set(["completed", "failed", "cancelled", "interrupted", "reconciliation_required"]);
 export const isLiveRun = (state) => !!state && !TERMINAL_STATES.has(state);
 
-export const APPROVAL_MODE_LABELS = {
-  "always-ask": "修改和执行前询问",
-  write: "运行命令前询问",
-  yolo: "少打扰",
+/** 用户可见的三档权限。和 src/domain.mjs 的 permissionOf 同一条归一规则。 */
+export const BOT_PERMISSION_LABELS = {
+  chat: "只聊天",
+  ask: "本机改东西先问我",
+  full: "全部放手",
 };
+export function permissionOf(bot) {
+  if ((bot?.executionMode || "supervised") === "chat") return "chat";
+  if ((bot?.approvalMode || "write") === "yolo") return "full";
+  return "ask";
+}
 
 export function fmtTime(at) {
   const date = new Date(at);

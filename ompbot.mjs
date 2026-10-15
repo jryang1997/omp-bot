@@ -14,7 +14,7 @@ import { existsSync } from "node:fs";
 import { delimiter, isAbsolute, join, resolve } from "node:path";
 import { Orchestrator } from "./src/orchestrator.mjs";
 import { TERMINAL_RUN_STATES } from "./src/constants.mjs";
-import { normalizeBudget } from "./src/domain.mjs";
+import { normalizeBudget, permissionOf } from "./src/domain.mjs";
 import { readServerDescriptor, serverDescriptorPath, startServer } from "./src/server.mjs";
 import { collectUsage, renderUsageTable } from "./src/usage.mjs";
 
@@ -518,11 +518,12 @@ function helpText() {
   routines add <name> --bot B --text T (--once <ISO> | --daily HH:MM --tz IANA | --every 30m) [--overlap skip|queue] [--timeout 10m] [--start]
   routines pause|resume|rm|get|run <id>
   settings show <bot> [--json]
-  settings set <bot> [--execution-mode supervised|chat|full] [--approval-mode always-ask|write|yolo]
+  settings set <bot> [--permission chat|ask|full] [--confirm-permission]
                      [--budget TOKENS|none] [--max-cost-usd N] [--max-time-ms N] [--max-concurrency N]
                      [--memory on|off] [--skills a,b] [--workspace DIR]
                      [--model M] [--thinking T]
-                     [--confirm-execution-mode] [--confirm-approval-mode]
+                     chat 只聊天；ask 本机改东西先问我；full 全部放手（要加 --confirm-permission）。
+                     旧的 --execution-mode / --approval-mode 仍接受，按同一规则归到三档。
   template export <file>        导出团队模板（不含密钥/聊天/审批/记忆）
   template import <file> [--dry-run]
   backup [--out DIR]            复制数据目录（先停服务，落盘后拷贝）
@@ -549,7 +550,7 @@ chat/say/demo/interactive 需要独占一个引擎，仍在本进程运行。拿
 命令会如实拒绝，绝不会假装成功。
 
 审批:
-  交互式命令遇到原生审批（approvalMode 为 always-ask/write 时会出现）会在终端问你。
+  交互式命令遇到原生审批（权限档为 ask 时会出现）会在终端问你。
   一次性命令（chat/say/demo）默认失败关闭：不替你回答，直接停止该运行。
   显式放行用 --approve <选项>（select）或 --approve yes|no（confirm），提问用 --answers '<json>'。
   凭据类请求（secret）永远不在 CLI 处理：请用 GUI 或在终端跑 \`omp login\`。
@@ -1134,6 +1135,7 @@ async function routinesLive(live, positionals, flags) {
   return undefined;
 }
 
+const PERMISSIONS = ["chat", "ask", "full"];
 const EXECUTION_MODES = ["supervised", "chat", "full"];
 const APPROVAL_MODES = ["always-ask", "write", "yolo"];
 
@@ -1143,8 +1145,7 @@ function showSettings(bot) {
     name: bot.name,
     model: bot.model || "",
     thinking: bot.thinking ?? null,
-    executionMode: bot.executionMode ?? "supervised",
-    approvalMode: bot.approvalMode ?? "write",
+    permission: permissionOf(bot),
     memoryEnabled: bot.memoryEnabled ?? false,
     skills: bot.skills ?? null,
     workspace: bot.workspace ?? null,
@@ -1158,27 +1159,34 @@ function settingsPatch(flags, currentBudget = null) {
   const patch = {};
   const budgetPatch = {};
   const warn = [];
+  const confirmed = !!(flags["confirm-permission"] || flags["confirm-execution-mode"] || flags["confirm-approval-mode"]);
+  if (typeof flags.permission === "string") {
+    const level = flags.permission;
+    if (!PERMISSIONS.includes(level)) die(`--permission 只能是 ${PERMISSIONS.join("|")}`);
+    if (level === "full" && !confirmed) {
+      die("full 全部放手：本机完全能力（不是沙箱）且跳过审批，需要用户显式加 --confirm-permission 才设置（对应 API 的 confirmPermission）。");
+    }
+    patch.permission = level;
+  }
+  // 旧标志照收，核心按同一规则归到三档（chat 归只聊天，yolo 归全部放手，其余归先问我）。
   if (typeof flags["execution-mode"] === "string") {
     const mode = flags["execution-mode"];
     if (!EXECUTION_MODES.includes(mode)) die(`--execution-mode 只能是 ${EXECUTION_MODES.join("|")}`);
-    if (mode === "full" && !flags["confirm-execution-mode"]) {
-      die("full 是本机完全能力（不是沙箱），需要用户显式加 --confirm-execution-mode 才设置（对应 API 的 confirmExecutionMode）。");
-    }
-    if (mode === "full") warn.push("full：可访问整个本机账户，任一拒绝都不能保证后续动作绕不过去。");
     patch.executionMode = mode;
   }
   if (typeof flags["approval-mode"] === "string") {
     const mode = flags["approval-mode"];
     if (!APPROVAL_MODES.includes(mode)) die(`--approval-mode 只能是 ${APPROVAL_MODES.join("|")}`);
-    if (mode === "yolo" && !flags["confirm-approval-mode"]) {
-      die("yolo 会自动放行原生工具调用，需要用户显式加 --confirm-approval-mode 才设置（对应 API 的 confirmApprovalMode）。");
+    if (mode === "yolo" && !confirmed) {
+      die("yolo 归到全部放手，需要用户显式加 --confirm-permission 才设置（对应 API 的 confirmPermission）。");
     }
-    if (mode === "yolo") warn.push("yolo：不再逐次审批，只适合一次性实验。");
     patch.approvalMode = mode;
   }
-  // 授权档的确认字段与 HTTP API 同名，核心会再校验一次。
-  if (flags["confirm-execution-mode"]) patch.confirmExecutionMode = true;
-  if (flags["confirm-approval-mode"]) patch.confirmApprovalMode = true;
+  if (patch.permission === "full" || patch.approvalMode === "yolo") {
+    warn.push("全部放手：可访问整个本机账户，不再逐次审批。共享电脑里装系统包仍会问。");
+  }
+  // 确认字段与 HTTP API 同名，核心会再校验一次。
+  if (confirmed) patch.confirmPermission = true;
   // 预算按核心的契约存对象（maxTokens/maxCostUsd/maxTimeMs/maxConcurrency），标量会被核心明确拒绝。
   if (typeof flags.budget === "string") {
     if (flags.budget === "none") {
@@ -1251,7 +1259,7 @@ async function runSettings() {
     const updated = await orch.updateBot(bot.id, patch);
     for (const line of warn) console.error(`注意: ${line}`);
     console.log(JSON.stringify(showSettings(updated ?? bot), null, 2));
-    console.log("策略类字段（executionMode/approvalMode/workspace/skills）会在下一条消息重建 runtime 后生效。");
+    console.log("策略类字段（permission/workspace/skills）会在下一条消息重建 runtime 后生效。");
     return undefined;
   } finally {
     await closeOrch(orch);
@@ -1434,7 +1442,7 @@ async function importTemplate(admin, file, flags, viaHttp) {
   for (const line of created) console.log(`  + ${line}`);
   for (const line of skipped) console.log(`  - ${line}`);
   console.log("导入的计划默认暂停；确认内容和权限档后再手动恢复。");
-  console.log("模板不含授权：新 bot 的权限档、审批档、记忆、技能过滤与预算都保持本机默认（supervised / write / 关）。");
+  console.log("模板不含授权：新 bot 的权限档、记忆、技能过滤与预算都保持本机默认（本机改东西先问我 / 关）。");
   return undefined;
 }
 
