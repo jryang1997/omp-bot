@@ -1,0 +1,4 @@
+# 由 build.mjs 和 bench/build-react.mjs 生成
+src/upstream/
+omp-mascot.min.js
+bench/*-bundle.js

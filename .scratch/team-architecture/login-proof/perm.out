@@ -1,0 +1,7 @@
+published
+drwxr-x--- root:team /var/lib/omp-login
+-rw-r----- root:team /var/lib/omp-login/Cookies.db
+-rw-r----- root:team /var/lib/omp-login/version
+bot-a: synced
+-rw------- bot-a:bot-a /home/bot-a/.config/chromium/Default/Cookies
+outsider: nothing published

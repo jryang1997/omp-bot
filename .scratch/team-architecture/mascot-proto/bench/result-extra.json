@@ -1,0 +1,28 @@
+{
+  "at": "2026-10-15T05:38:13.011Z",
+  "chrome": "153 headless, --disable-gpu, 2 vCPU sandbox",
+  "results": [
+    {
+      "impl": "native",
+      "state": "working",
+      "fps": 30,
+      "n": 20,
+      "size": 36,
+      "mainThreadBusyPct": 14.2,
+      "scriptPct": 7.2,
+      "browserCpuPctOfOneCore": 25.1,
+      "rafFps": 60
+    },
+    {
+      "impl": "native",
+      "state": "working",
+      "paused": true,
+      "n": 20,
+      "size": 36,
+      "mainThreadBusyPct": 1.4,
+      "scriptPct": 0.2,
+      "browserCpuPctOfOneCore": 4,
+      "rafFps": 60
+    }
+  ]
+}

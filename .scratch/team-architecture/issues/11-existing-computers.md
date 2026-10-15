@@ -2,7 +2,7 @@
 
 Type: grilling
 Label: wayfinder:grilling
-Status: open
+Status: resolved
 Blocked by: 02, 03, 09
 
 ## Question
@@ -20,6 +20,14 @@ Blocked by: 02, 03, 09
 ## Need from user
 
 选一个。删除旧虚拟机磁盘不可逆，必须由用户确认。
+
+## Answer
+
+2026-10-15 用户选 A。
+
+- 共享电脑第一次就绪后，omp-bot 依次开机每台旧电脑，把 `/work` 和主目录打包，解到共享电脑里对应 bot 用户的 `~/old-computer/`。不覆盖新文件，已复制过的跳过。
+- 旧电脑的磁盘和记录保留。界面上每台旧电脑有"删除旧电脑"按钮，用户点了才删。
+- 浏览器登录不复制，用户在共享电脑里重新登录一次，之后所有 bot 共用（02）。
 
 ## Comments
 

@@ -1,0 +1,90 @@
+{
+  "at": "2026-10-15T05:37:26.174Z",
+  "chrome": "153 headless, --disable-gpu, 2 vCPU sandbox",
+  "results": [
+    {
+      "impl": "react",
+      "state": "idle",
+      "n": 20,
+      "size": 36,
+      "mainThreadBusyPct": 23.8,
+      "scriptPct": 12,
+      "browserCpuPctOfOneCore": 42,
+      "rafFps": 60
+    },
+    {
+      "impl": "react",
+      "state": "working",
+      "n": 20,
+      "size": 36,
+      "mainThreadBusyPct": 24.2,
+      "scriptPct": 12.4,
+      "browserCpuPctOfOneCore": 43.8,
+      "rafFps": 60
+    },
+    {
+      "impl": "native",
+      "state": "idle",
+      "n": 20,
+      "size": 36,
+      "mainThreadBusyPct": 22.1,
+      "scriptPct": 11.2,
+      "browserCpuPctOfOneCore": 40.8,
+      "rafFps": 60
+    },
+    {
+      "impl": "native",
+      "state": "working",
+      "n": 20,
+      "size": 36,
+      "mainThreadBusyPct": 25.8,
+      "scriptPct": 13.4,
+      "browserCpuPctOfOneCore": 45.8,
+      "rafFps": 60
+    },
+    {
+      "impl": "react",
+      "state": "working",
+      "reduced": true,
+      "n": 20,
+      "size": 36,
+      "mainThreadBusyPct": 23.3,
+      "scriptPct": 12.2,
+      "browserCpuPctOfOneCore": 41.5,
+      "rafFps": 60
+    },
+    {
+      "impl": "native",
+      "state": "working",
+      "reduced": true,
+      "n": 20,
+      "size": 36,
+      "mainThreadBusyPct": 18.5,
+      "scriptPct": 8.7,
+      "browserCpuPctOfOneCore": 32.5,
+      "rafFps": 60
+    },
+    {
+      "impl": "react",
+      "state": "working",
+      "offscreen": true,
+      "n": 20,
+      "size": 36,
+      "mainThreadBusyPct": 22,
+      "scriptPct": 12.4,
+      "browserCpuPctOfOneCore": 23.4,
+      "rafFps": 60
+    },
+    {
+      "impl": "native",
+      "state": "working",
+      "offscreen": true,
+      "n": 20,
+      "size": 36,
+      "mainThreadBusyPct": 1.5,
+      "scriptPct": 0.3,
+      "browserCpuPctOfOneCore": 4.5,
+      "rafFps": 60
+    }
+  ]
+}

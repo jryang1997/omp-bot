@@ -2,7 +2,7 @@
 
 Type: grilling
 Label: wayfinder:grilling
-Status: open
+Status: resolved
 Blocked by: 03, 04
 
 ## Question
@@ -23,6 +23,35 @@ bot 既有本机 bash/read/edit，又有 computer_shell/files/screenshot/input�
 ## Done when
 
 工具面清单、审批规则、要删的门控代码列进 Answer。
+
+## Answer
+
+2026-10-15 用户选 B 并收成 3 档。
+
+### 工具面
+
+- 绑定电脑不再收窄。本机保留 omp 原生工具、扩展、技能和 MCP，客机工具加在上面。
+- 客机工具的描述开头统一写"在 Linux 共享电脑里"，本机原生工具不改名。`team/AGENTS.md` 写一段两台机器的分工。本机是用户的 Windows，改用户文件；共享电脑是 bot 自己的 Linux，装软件、开浏览器、跑构建都在那里，依赖和构建产物放客机本地盘。
+- 新增一个客机工具，用来申请装系统包。bot 在客机里没有免密 sudo，装系统包只能走它，它每次都要用户批准（D7）。
+
+### 审批
+
+收成 3 档，替代执行模式乘审批档的 9 种组合。
+
+| 档 | 本机 | 共享电脑 |
+| --- | --- | --- |
+| 只聊天 | 没有执行工具 | 不可用 |
+| 本机改东西先问我 | 原生 write 审批 | 除装系统包外都不问 |
+| 全部放手 | 不问 | 除装系统包外都不问 |
+
+- 旧组合迁移。chat 归"只聊天"。审批档是 yolo 的归"全部放手"，其余归"本机改东西先问我"。
+- 付款、对外发送、删除账号数据前先问用户，写进 `team/AGENTS.md`。这是约定，不是拦截。
+
+### 要删的门控
+
+- 绑定电脑时加的 `--no-tools --no-extensions --no-skills`。
+- 绑定电脑时关项目 MCP、逐个关用户 MCP 的 overlay 段。
+- 电脑档的运行时工具面校验和对应的披露文案。chat 档的保留。
 
 ## Comments
 

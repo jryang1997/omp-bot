@@ -1,0 +1,88 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>omp-mascot 原型</title>
+<style>
+  body { margin: 0; background: #0b0b0c; color: #e8e8ea; font: 14px/1.4 system-ui, "Noto Sans SC", sans-serif; display: grid; grid-template-columns: 240px 1fr 340px; height: 100vh; }
+  aside, main, section { padding: 16px; box-sizing: border-box; }
+  aside { background: #141416; border-right: 1px solid #222; }
+  section.profile { background: #141416; border-left: 1px solid #222; }
+  h2 { font-size: 12px; letter-spacing: .08em; color: #9a9aa2; text-transform: uppercase; margin: 18px 0 8px; font-weight: 600; }
+  .row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 10px; }
+  .row.on { background: #232327; }
+  .grid { display: grid; grid-template-columns: repeat(5, 56px); gap: 8px; }
+  .tile { width: 56px; height: 56px; display: grid; place-items: center; background: #1d1d20; border-radius: 12px; border: 1px solid transparent; }
+  .tile.on { border-color: #3b82f6; }
+  .swatch { width: 36px; height: 36px; border-radius: 50%; display: inline-block; margin: 0 6px 6px 0; }
+  .cluster { position: relative; display: inline-block; vertical-align: middle; margin-right: 18px; }
+  .cluster omp-mascot { position: absolute; }
+  .big { display: grid; place-items: center; padding: 18px 0; background: #1a1a1d; border-radius: 12px; }
+  small { color: #8a8a92; }
+</style>
+<aside>
+  <h2>侧边栏 36px</h2>
+  <div id="roster"></div>
+</aside>
+<main>
+  <h2>群头像 36px</h2>
+  <div id="groups"></div>
+  <h2>运行状态 44px</h2>
+  <div id="states" class="row" style="flex-wrap:wrap;gap:14px"></div>
+  <p><small>Mascot runtime adapted from OpenMausBot, Apache-2.0. Made with Blob Studio.</small></p>
+</main>
+<section class="profile">
+  <h2>详情 80px</h2>
+  <div class="big"><omp-mascot id="hero" body="cursor" color="green" size="80" label="Onyx"></omp-mascot></div>
+  <h2>表情</h2>
+  <div id="expr" class="grid"></div>
+  <h2>颜色</h2>
+  <div id="colors"></div>
+</section>
+<script type="module">
+  import { MASCOT_BODY_IDS, MASCOT_COLOR_IDS, MASCOT_COLORS } from './omp-mascot.js';
+  const m = (attrs) => {
+    const el = document.createElement('omp-mascot');
+    for (const [k, v] of Object.entries(attrs)) if (v !== undefined && v !== false) el.setAttribute(k, v === true ? '' : v);
+    return el;
+  };
+  const params = new URLSearchParams(location.search);
+  const still = params.has('still');
+  const bots = MASCOT_BODY_IDS.map((body, i) => ({ name: `bot-${i + 1}`, body, color: MASCOT_COLOR_IDS[i] }));
+  const main = { name: 'Main Bot', body: 'star', color: '#4D6BFE' };
+  const roster = document.getElementById('roster');
+  for (const [i, b] of [main, ...bots].entries()) {
+    const row = document.createElement('div'); row.className = 'row' + (i === 1 ? ' on' : '');
+    row.append(m({ body: b.body, color: b.color, size: 36, state: i % 3 === 2 ? 'working' : 'idle', paused: still }), Object.assign(document.createElement('span'), { textContent: `${b.name} · ${b.body}` }));
+    roster.append(row);
+  }
+  // 与 web/app.js roomAvatar 相同的座位布局
+  function seats(n, size) {
+    if (n === 1) return [[0, 0, size]];
+    if (n === 2) return [[0, 0, size * 2 / 3], [size / 3, size / 3, size * 2 / 3]];
+    if (n === 3) { const s = size * 5 / 9, r = size - s; return [[r / 2, 0, s], [0, r, s], [r, r, s]]; }
+    const h = size / 2; return [[0, 0, h], [h, 0, h], [0, h, h], [h, h, h]];
+  }
+  const groups = document.getElementById('groups');
+  for (const n of [2, 3, 4]) {
+    const box = document.createElement('span'); box.className = 'cluster'; box.style.width = box.style.height = '36px';
+    seats(n, 36).forEach(([x, y, s], i) => {
+      const b = bots[(i * 3 + n) % bots.length];
+      const el = m({ body: b.body, color: b.color, size: s.toFixed(1), paused: still });
+      Object.assign(el.style, { left: `${x}px`, top: `${y}px` }); box.append(el);
+    });
+    groups.append(box);
+  }
+  const states = document.getElementById('states');
+  for (const s of ['idle', 'thinking', 'working', 'alerting', 'happy', 'sad', 'sleeping']) {
+    const w = document.createElement('div'); w.style.textAlign = 'center';
+    w.append(m({ body: 'cursor', color: 'blue', size: 44, state: s, paused: still }), Object.assign(document.createElement('div'), { innerHTML: `<small>${s}</small>` }));
+    states.append(w);
+  }
+  const expr = document.getElementById('expr');
+  for (const [i, s] of ['idle', 'happy', 'curious', 'drowsy', 'working', 'thinking', 'listening', 'sleeping', 'suspicious', 'proud'].entries()) {
+    const t = document.createElement('div'); t.className = 'tile' + (i === 2 ? ' on' : '');
+    t.append(m({ body: 'cursor', color: 'green', size: 44, state: s, paused: true })); expr.append(t);
+  }
+  const colors = document.getElementById('colors');
+  for (const c of MASCOT_COLOR_IDS) colors.append(Object.assign(document.createElement('span'), { className: 'swatch', style: `background:${MASCOT_COLORS[c]}` }));
+  if (still) document.getElementById('hero').setAttribute('paused', '');
+</script>

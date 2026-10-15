@@ -1,0 +1,18 @@
+{"n":1,"phase":"settled","freeUsedDeltaMiB":426,"pss":{"bot-1": {"xvfb": 29.3, "spacesd": 34.9, "browser": 627.8, "other": 0.0, "total": 692.0}}}
+{"n":1,"phase":"idle-cpu","cpuPctOfOneVcpu":{"bot-1": 3.0}}
+{"n":1,"phase":"active-cpu","cpuPctOfOneVcpu":{"bot-1": 4.2},"drive":{"bot-1":{"shots":14,"p50":24,"p95":41,"avgKiB":235}}}
+{"n":1,"phase":"after-active","pss":{"bot-1": {"xvfb": 29.6, "spacesd": 54.6, "browser": 546.5, "other": 0.0, "total": 630.7}}}
+{"n":3,"phase":"settled","freeUsedDeltaMiB":1263,"pss":{"bot-1": {"xvfb": 23.2, "spacesd": 21.8, "browser": 520.1, "other": 0.0, "total": 565.1}, "bot-2": {"xvfb": 23.2, "spacesd": 21.8, "browser": 456.3, "other": 0.0, "total": 501.3}, "bot-3": {"xvfb": 23.3, "spacesd": 22.8, "browser": 456.4, "other": 0.0, "total": 502.5}}}
+{"n":3,"phase":"idle-cpu","cpuPctOfOneVcpu":{"bot-1": 2.3, "bot-2": 2.0, "bot-3": 1.9}}
+{"n":3,"phase":"active-cpu","cpuPctOfOneVcpu":{"bot-1": 4.5, "bot-2": 4.2, "bot-3": 4.1},"drive":{"bot-1":{"shots":14,"p50":38,"p95":59,"avgKiB":239},"bot-2":{"shots":14,"p50":39,"p95":50,"avgKiB":235},"bot-3":{"shots":14,"p50":38,"p95":44,"avgKiB":235}}}
+{"n":3,"phase":"after-active","pss":{"bot-1": {"xvfb": 23.5, "spacesd": 27.1, "browser": 462.6, "other": 0.0, "total": 513.3}, "bot-2": {"xvfb": 23.5, "spacesd": 27.1, "browser": 382.6, "other": 0.0, "total": 433.2}, "bot-3": {"xvfb": 23.6, "spacesd": 39.7, "browser": 381.6, "other": 0.0, "total": 444.8}}}
+{"n":5,"phase":"settled","freeUsedDeltaMiB":2299,"pss":{"bot-1": {"xvfb": 22.0, "spacesd": 19.2, "browser": 582.9, "other": 0.0, "total": 624.1}, "bot-2": {"xvfb": 22.0, "spacesd": 19.4, "browser": 489.5, "other": 0.0, "total": 530.9}, "bot-3": {"xvfb": 22.0, "spacesd": 19.4, "browser": 489.8, "other": 0.0, "total": 531.2}, "bot-4": {"xvfb": 22.0, "spacesd": 19.2, "browser": 431.0, "other": 0.0, "total": 472.3}, "bot-5": {"xvfb": 22.0, "spacesd": 19.2, "browser": 431.2, "other": 0.0, "total": 472.4}}}
+{"n":5,"phase":"idle-cpu","cpuPctOfOneVcpu":{"bot-1": 2.5, "bot-2": 2.2, "bot-3": 2.1, "bot-4": 1.7, "bot-5": 1.7}}
+{"n":5,"phase":"active-cpu","cpuPctOfOneVcpu":{"bot-1": 4.3, "bot-2": 4.1, "bot-3": 4.4, "bot-4": 4.3, "bot-5": 4.2},"drive":{"bot-1":{"shots":14,"p50":74,"p95":148,"avgKiB":243},"bot-2":{"shots":14,"p50":64,"p95":158,"avgKiB":239},"bot-3":{"shots":14,"p50":63,"p95":114,"avgKiB":239},"bot-4":{"shots":14,"p50":70,"p95":126,"avgKiB":235},"bot-5":{"shots":14,"p50":62,"p95":138,"avgKiB":235}}}
+{"n":5,"phase":"after-active","pss":{"bot-1": {"xvfb": 22.3, "spacesd": 32.3, "browser": 504.5, "other": 0.0, "total": 559.0}, "bot-2": {"xvfb": 22.3, "spacesd": 24.2, "browser": 424.0, "other": 0.0, "total": 470.5}, "bot-3": {"xvfb": 22.3, "spacesd": 35.8, "browser": 425.5, "other": 0.0, "total": 483.6}, "bot-4": {"xvfb": 22.3, "spacesd": 35.4, "browser": 350.8, "other": 0.0, "total": 408.5}, "bot-5": {"xvfb": 22.3, "spacesd": 35.5, "browser": 351.1, "other": 0.0, "total": 408.9}}}
+{"n":5,"phase":"browsers-closed","pss":{"bot-1": {"xvfb": 23.1, "spacesd": 32.4, "browser": 0.0, "other": 0.0, "total": 55.6}, "bot-2": {"xvfb": 23.2, "spacesd": 24.4, "browser": 0.0, "other": 0.0, "total": 47.5}, "bot-3": {"xvfb": 23.2, "spacesd": 36.0, "browser": 0.0, "other": 0.0, "total": 59.2}, "bot-4": {"xvfb": 23.1, "spacesd": 35.6, "browser": 0.0, "other": 0.0, "total": 58.7}, "bot-5": {"xvfb": 23.1, "spacesd": 35.7, "browser": 0.0, "other": 0.0, "total": 58.8}},"cpuPctOfOneVcpu":{"bot-1": 0.7, "bot-2": 0.6, "bot-3": 0.6, "bot-4": 0.6, "bot-5": 0.6}}
+{"profileDisk":"bot-1","du":"11M"}
+{"profileDisk":"bot-2","du":"11M"}
+{"profileDisk":"bot-3","du":"11M"}
+{"profileDisk":"bot-4","du":"11M"}
+{"profileDisk":"bot-5","du":"11M"}

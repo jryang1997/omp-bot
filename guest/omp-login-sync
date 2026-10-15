@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+"""共享电脑的网站登录同步。
+
+publish  由管理通道以 root 运行。把登录屏 Chromium 的 cookie 拷进共享登录库。
+sync     由每个 bot 用户的 Chromium 启动钩子运行。共享库比上次同步新时，把 cookie 并进自己的 profile。
+
+只同步 cookie。登录状态存在 localStorage 或 IndexedDB 里的网站不在范围内。
+所有 profile 都用 --password-store=basic，cookie 用同一把固定密钥加密，行可以直接搬。
+"""
+import argparse
+import os
+import sqlite3
+import sys
+import time
+
+DEFAULT_STORE = "/var/lib/omp-login"
+
+
+def default_profile():
+    base = os.environ.get("CHROME_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "chromium")
+
+
+def cookies_path(profile):
+    return os.path.join(profile, "Default", "Cookies")
+
+
+def profile_in_use(profile):
+    lock = os.path.join(profile, "SingletonLock")
+    try:
+        target = os.readlink(lock)
+    except OSError:
+        return False
+    pid = target.rsplit("-", 1)[-1]
+    if not pid.isdigit():
+        return True
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def read_version(path):
+    try:
+        with open(path, encoding="ascii") as f:
+            return int(f.read().strip() or 0)
+    except (OSError, ValueError):
+        return 0
+
+
+def write_atomic(path, text, mode=0o644, gid=None):
+    tmp = f"{path}.tmp-{os.getpid()}"
+    with open(tmp, "w", encoding="ascii") as f:
+        f.write(text)
+    os.chmod(tmp, mode)
+    if gid is not None:
+        os.chown(tmp, -1, gid)
+    os.replace(tmp, path)
+
+
+def publish(args):
+    src = cookies_path(args.from_profile)
+    if not os.path.exists(src):
+        print(f"no cookies in {args.from_profile}", file=sys.stderr)
+        return 2
+    os.makedirs(args.store, mode=0o750, exist_ok=True)
+    gid = None
+    if args.group:
+        import grp
+        gid = grp.getgrnam(args.group).gr_gid
+        os.chown(args.store, -1, gid)
+        os.chmod(args.store, 0o750)
+    dest = os.path.join(args.store, "Cookies.db")
+    tmp = f"{dest}.tmp-{os.getpid()}"
+    # backup API 在 Chromium 开着时也能拿到一致的快照。
+    with sqlite3.connect(f"file:{src}?mode=ro", uri=True) as s, sqlite3.connect(tmp) as d:
+        s.backup(d)
+    os.chmod(tmp, 0o640)
+    if gid is not None:
+        os.chown(tmp, -1, gid)
+    os.replace(tmp, dest)
+    write_atomic(os.path.join(args.store, "version"), str(time.time_ns()), 0o640, gid)
+    print("published")
+    return 0
+
+
+def columns(db, schema):
+    return [r[1] for r in db.execute(f"PRAGMA {schema}.table_info(cookies)")]
+
+
+def sync(args):
+    os.umask(0o077)
+    shared = os.path.join(args.store, "Cookies.db")
+    version = read_version(os.path.join(args.store, "version"))
+    if version == 0 or not os.path.exists(shared):
+        print("nothing published")
+        return 0
+    marker = os.path.join(args.profile, ".omp-login-version")
+    if read_version(marker) >= version:
+        print("up to date")
+        return 0
+    if profile_in_use(args.profile):
+        print("profile in use, skipped")
+        return 0
+    dest = cookies_path(args.profile)
+    os.makedirs(os.path.dirname(dest), mode=0o700, exist_ok=True)
+    with sqlite3.connect(f"file:{dest}", uri=True) as db:
+        # 发布是整文件原子替换，读的是替换前或替换后的完整快照。
+        db.execute("ATTACH DATABASE ? AS shared", (f"file:{shared}?mode=ro&immutable=1",))
+        if not columns(db, "main"):
+            # 这个 profile 还没有 cookie 库，整张表连同元数据照搬。
+            db.execute("CREATE TABLE meta AS SELECT * FROM shared.meta")
+            for (sql,) in db.execute("SELECT sql FROM shared.sqlite_master WHERE name='cookies' OR (type='index' AND tbl_name='cookies')"):
+                db.execute(sql)
+        main_cols, shared_cols = columns(db, "main"), set(columns(db, "shared"))
+        common = [c for c in main_cols if c in shared_cols]
+        if len(common) != len(main_cols):
+            print("cookie schema differs from the shared store, skipped", file=sys.stderr)
+            return 3
+        cols = ", ".join(common)
+        db.execute(f"INSERT OR REPLACE INTO main.cookies ({cols}) SELECT {cols} FROM shared.cookies")
+        db.commit()
+    write_atomic(marker, str(version), 0o600)
+    print("synced")
+    return 0
+
+
+def main():
+    p = argparse.ArgumentParser(prog="omp-login-sync")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    pub = sub.add_parser("publish")
+    pub.add_argument("--from", dest="from_profile", required=True)
+    pub.add_argument("--store", default=DEFAULT_STORE)
+    pub.add_argument("--group", default=None)
+    sy = sub.add_parser("sync")
+    sy.add_argument("--profile", default=default_profile())
+    sy.add_argument("--store", default=DEFAULT_STORE)
+    args = p.parse_args()
+    return publish(args) if args.cmd == "publish" else sync(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

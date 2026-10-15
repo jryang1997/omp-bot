@@ -40,3 +40,4 @@ OpenMausBot 的头像体系能不能拿来用，有哪些功能，移植进我�
 - 要一起改的地方。群头像 `roomAvatar` 依赖 `botMark`；Main Bot 现在固定是鲸鱼；后端要新增头像字段并持久化；README 和 `web/vendor/README.md` 的来源说明要更新。
 
 ## Comments
+- 2026-10-15 13 号补充。上游 `LICENSING.md` 写明名字和吉祥物是 Supamaus Software Private Limited 的商标，Apache-2.0 不授予商标权。处理办法和发布前的条件见 13。

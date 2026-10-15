@@ -1,0 +1,36 @@
+{
+  "ticket": "02-shared-browser-login",
+  "chromium": "Google Chrome for Testing 153.0.8010.12",
+  "at": "2026-10-15T05:18:29.371Z",
+  "steps": {
+    "botAOwnLogin": "logged-in:bot-a-own",
+    "userLogsInOnLoginScreen": "logged-in:alice",
+    "publish": "published",
+    "syncA": "synced",
+    "syncB": "synced",
+    "syncAAgain": "up to date",
+    "parallel": [
+      "logged-in:alice",
+      "logged-in:alice"
+    ],
+    "botAOwnLoginKept": "logged-in:bot-a-own",
+    "syncWhileRunning": "profile in use, skipped",
+    "afterRestart": [
+      "logged-in:alice",
+      "logged-in:alice"
+    ],
+    "localClearInA": [
+      "anonymous",
+      "logged-in:alice"
+    ],
+    "serverLogoutInB": "logged-out",
+    "afterServerLogout": [
+      "anonymous",
+      "anonymous"
+    ],
+    "afterRelogin": [
+      "logged-in:alice",
+      "logged-in:alice"
+    ]
+  }
+}

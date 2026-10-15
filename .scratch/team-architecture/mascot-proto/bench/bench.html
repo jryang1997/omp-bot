@@ -1,0 +1,19 @@
+<!doctype html><meta charset="utf-8"><style>body{margin:0;background:#111}#app{display:flex;flex-wrap:wrap;gap:4px;padding:8px}</style>
+<div id="app"></div>
+<script>if (new URLSearchParams(location.search).has("offscreen")) document.getElementById("app").style.marginTop = "6000px";</script>
+<script type="module">
+  const q = new URLSearchParams(location.search);
+  if (q.get('impl') === 'react') await import('./react-bundle.js');
+  else {
+    const { MASCOT_BODY_IDS } = await import('../omp-mascot.min.js');
+    const app = document.getElementById('app'), n = Number(q.get('n') ?? 20);
+    for (let i = 0; i < n; i++) {
+      const el = document.createElement('omp-mascot');
+      el.setAttribute('body', MASCOT_BODY_IDS[i % 10]); el.setAttribute('size', q.get('size') ?? '36'); el.setAttribute('state', q.get('state') ?? 'working');
+      if (q.get('fps')) el.setAttribute('fps', q.get('fps'));
+      if (q.has('paused')) el.setAttribute('paused', '');
+      app.append(el);
+    }
+  }
+  window.ready = true;
+</script>

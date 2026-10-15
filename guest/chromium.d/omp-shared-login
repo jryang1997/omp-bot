@@ -1,0 +1,6 @@
+# Debian 的 /usr/bin/chromium 启动前会 source /etc/chromium.d 下的每个文件。
+# 所有 profile 用同一种 cookie 加密方式，启动前把共享登录并进这个用户的 profile。
+# 每个 bot 的磁盘缓存最多 256 MiB（10 号票）。
+CHROMIUM_FLAGS="$CHROMIUM_FLAGS --password-store=basic --disk-cache-size=268435456"
+export CHROMIUM_FLAGS
+/usr/bin/python3 /opt/omp/bin/omp-login-sync sync >/dev/null 2>&1 || true

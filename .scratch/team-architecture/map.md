@@ -1,7 +1,7 @@
 # 团队架构重构 本机 omp bot 团队与共享 Linux 电脑
 
 Label: wayfinder:map
-Status: open
+Status: resolved
 
 ## Destination
 
@@ -46,15 +46,17 @@ Status: open
 - D11 技能库放 `team/skills/`，overlay 用 `customDirectories` 指向它，白名单沿用 `bot.skills` 到 `--skills`。私有技能要并进白名单，同名时库里那份赢，所以装技能时禁止重名。每个技能约占 110 字符，描述只露前 100 字符左右。见 [07](issues/07-skill-library-allowlist.md)。
 - D12 记忆用 mnemopi，`scoping: global` 加 `bank: bot-<id>`，库文件放 `team/.memory/`。不再改 `PI_CODING_AGENT_DIR`，`memory-config.mjs` 基本删掉，autolearn 关掉。团队共识只写 `team/AGENTS.md`，由 Main Bot 和用户写。见 [08](issues/08-memory-per-bot.md)。
 - D13 team 目录在 `~/.ompbot/team`，git 由 omp-bot 按每次改动提交，记忆、工作区、会话不进 git。bot 私有文件在 `bots/<id>/work`，单独挂进客机。旧数据只复制不删。用户授权按建议定。见 [09](issues/09-team-directory.md)。
+- D14 审批收成 3 档，只聊天、本机改东西先问我、全部放手。共享电脑里除装系统包外都不问，装系统包走一个新的客机工具，每次要用户批准。chat 迁到只聊天，yolo 迁到全部放手，其余迁到先问我。付款、对外发送、删账号数据写进 `team/AGENTS.md` 作约定。用户选 B。见 [05](issues/05-two-machine-tools.md)。
+- D15 旧的每 bot 电脑自动复制进共享电脑对应用户的 `~/old-computer/`，不覆盖、可跳过重复。旧磁盘保留，用户点"删除旧电脑"才删。用户选 A。见 [11](issues/11-existing-computers.md)。
+- D16 头像拿吉祥物、10 种身体、10 种颜色、表情、随状态变化的表情、上传和裁切，不做 AI 生成。直接替换 DS Bot 角色。Main Bot 固定 star 身体和专用颜色。见 [14](issues/14-avatar-scope.md)。
+- D17 网站登录全员共用。用户在专门的登录屏登录一次，omp-bot 把 cookie 发布到 root:team 只读的共享库，bot 浏览器启动前并入自己的 profile。只同步 cookie，不开调试端口。用户选 A，沙盒实测通过。见 [02](issues/02-shared-browser-login.md)。
+- D18 共享电脑默认 4 vCPU、8 GiB、64 GiB 动态磁盘，内存可调 4 到 16 GiB，vCPU 2 到 8。每个座席主要花在浏览器上，一个真实页面 0.4 到 0.6 GiB，屏幕本身约 50 MiB，不做自动休眠。多个 spacesd 要加 `--quic-port 0`。见 [10](issues/10-shared-computer-size.md)。
+- D19 头像用 `<omp-mascot>` 自定义元素，引擎从上游原样取出，画面与上游逐像素相同，gzip 26 KB。只有工作中、有未读或刚发生事件的头像才动，48px 以下 30 帧。吉祥物形象是上游的商标，发布前要等上游回复，不同意就换画面、留引擎。见 [13](issues/13-mascot-port-prototype.md)。
 
 ## Fog
 
-- 共享浏览器登录与多屏并行的冲突。网站登录全员共用还是按站点分配，等用户定。见 02。
-- 客机侧审批放不放宽，审批档要不要收成 3 档，等用户定。见 05。
-- 中文记忆召回要靠嵌入模型，沙盒没测出来。要在常驻进程里测，见 08 待验。
-- 共享虚拟机给多大。见 10。
-- 已有的每 bot 虚拟机怎么处理，删除不可逆，等用户定。见 11。
-- 吉祥物的 Blob Studio 来源怎么处理、Main Bot 用什么形象，等用户定。移植效果见 13。
+- 中文记忆召回要靠嵌入模型，沙盒没测出来。不推翻 D12，实施时在常驻进程里验，验不过就给 bot 配多语言嵌入模型。见 08。
+- 吉祥物商标等上游回复。不推翻目的地第 4 条，上游不同意时换画面、留引擎。见 13。
 
 ## Out of scope
 
@@ -68,20 +70,20 @@ Status: open
 | # | Type | 题目 | Blocked by | Status |
 | --- | --- | --- | --- | --- |
 | [01](issues/01-per-bot-screens.md) | research | 共享电脑里每个 bot 的屏幕 | | resolved |
-| [02](issues/02-shared-browser-login.md) | prototype | 共享浏览器登录与多屏并行 | 01 | open |
+| [02](issues/02-shared-browser-login.md) | prototype | 共享浏览器登录与多屏并行 | 01 | resolved |
 | [03](issues/03-isolation-goal.md) | grilling | 隔离要防到什么程度 | | resolved |
 | [04](issues/04-host-guest-files.md) | research | 本机 omp 怎么碰到客机里的文件 | | resolved |
-| [05](issues/05-two-machine-tools.md) | grilling | 两台机器的工具同时在场 | 03, 04 | open |
+| [05](issues/05-two-machine-tools.md) | grilling | 两台机器的工具同时在场 | 03, 04 | resolved |
 | [06](issues/06-agents-md-boundary.md) | research | AGENTS.md 往上找的边界 | | resolved |
 | [07](issues/07-skill-library-allowlist.md) | prototype | 共享技能库加每 bot 白名单 | | resolved |
 | [08](issues/08-memory-per-bot.md) | research | 记忆每 bot 一库与共识写入 | | resolved |
 | [09](issues/09-team-directory.md) | grilling | team 目录放哪、怎么管 | 06, 07, 08 | resolved |
-| [10](issues/10-shared-computer-size.md) | research | 共享电脑的规格 | 01, 02 | open |
-| [11](issues/11-existing-computers.md) | grilling | 已有的每 bot 电脑怎么办 | 02, 03, 09 | open |
+| [10](issues/10-shared-computer-size.md) | research | 共享电脑的规格 | 01, 02 | resolved |
+| [11](issues/11-existing-computers.md) | grilling | 已有的每 bot 电脑怎么办 | 02, 03, 09 | resolved |
 | [12](issues/12-avatar-research.md) | research | OpenMausBot 头像的许可、功能与移植成本 | | resolved |
-| [13](issues/13-mascot-port-prototype.md) | prototype | 吉祥物原生 DOM 移植 | 12 | open |
-| [14](issues/14-avatar-scope.md) | grilling | 头像拿哪些功能 | 13 | open |
+| [13](issues/13-mascot-port-prototype.md) | prototype | 吉祥物原生 DOM 移植 | 12 | resolved |
+| [14](issues/14-avatar-scope.md) | grilling | 头像拿哪些功能 | 13 | resolved |
 
 建议先做 01 和 03。01 决定"共用一台、每 bot 一块屏"能不能成立，03 决定后面所有隔离设计的力度。04 是这个方向最大的体验风险，可以并行。
 
-2026-10-15 进度。01、03、04、06、07、08、09、12 已 resolved。05、11、14 和 02、13 的前置问题已发给用户。prototype 02、13 各占一个会话，10 等 02。
+2026-10-15 进度。14 张票全部 resolved，Fog 里剩下的两条都不推翻目的地，地图到达终点，交给 `/to-spec`。
