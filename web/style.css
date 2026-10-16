@@ -27,6 +27,14 @@ body {
   --bt-user-ink: #fff;
   --ui-chrome: rgb(242 243 246 / .86);
   --ui-shadow: 0 12px 48px rgb(24 32 56 / .09), 0 2px 8px rgb(24 32 56 / .04);
+  /* 动效：强 ease-out 管进出和反馈，抽屉用 iOS 式曲线；UI 动效都在 300ms 内。 */
+  --ease-out: cubic-bezier(.23, 1, .32, 1);
+  --ease-in-out: cubic-bezier(.77, 0, .175, 1);
+  --ease-drawer: cubic-bezier(.32, .72, 0, 1);
+  --dur-press: 160ms;
+  --dur-pop: 200ms;
+  --dur-drawer: 280ms;
+  --dur-exit: 140ms;
 }
 body[data-ds-dark-theme] {
   color-scheme: dark;
@@ -446,7 +454,7 @@ table.usage tr.total td { font-weight: 600; border-top: 1px solid var(--bt-line-
 .btn.danger { color: #d33542; }
 .bt-menu { background: var(--bt-card); border-radius: 16px; border: 1px solid var(--bt-line); box-shadow: var(--ui-shadow); padding: 6px; animation: none; }
 .bt-menu > button { min-height: 44px; border-radius: 10px; }
-button { transition: background-color 120ms ease, transform 120ms cubic-bezier(.2,.8,.2,1); }
+button { transition: background-color 150ms ease, color 150ms ease, transform var(--dur-press) var(--ease-out); }
 button:active:not(:disabled) { transform: scale(.97); transition-duration: 0ms; }
 button:focus-visible { outline-offset: 2px; }
 .ui-intro { margin: 0; color: var(--bt-ink-2); font-size: 13px; line-height: 1.7; }
@@ -485,8 +493,19 @@ button:focus-visible { outline-offset: 2px; }
 .wb-view-head .btn, .ui-toolbar .btn { background: var(--bt-bubble); }
 .wb-dock { padding-inline: max(28px, calc((100% - var(--dsh-chat-content-width)) / 2)); }
 .toast { border-radius: 14px; box-shadow: var(--ui-shadow); padding: 14px 20px; }
-#modal, #new-menu, .toast { transition: opacity 160ms ease, transform 200ms cubic-bezier(.2,.8,.2,1); }
-@starting-style { #modal, #new-menu, .toast { opacity: 0; transform: scale(.985); } }
+/* 进场：弹窗从中间缩放淡入（不从 0 开始），菜单从按钮那个角展开，提示从下方升起，抽屉从右侧滑入。 */
+#modal, #new-menu { transition: opacity var(--dur-pop) var(--ease-out), transform var(--dur-pop) var(--ease-out); }
+#new-menu { transform-origin: top right; }
+@starting-style { #modal, #new-menu { opacity: 0; transform: scale(.96); } }
+#modal-back { transition: opacity var(--dur-pop) ease; }
+@starting-style { #modal-back { opacity: 0; } }
+.toast { transition: opacity var(--dur-pop) var(--ease-out), transform var(--dur-pop) var(--ease-out); }
+@starting-style { .toast { opacity: 0; transform: translateY(8px) scale(.98); } }
+.toast.is-leaving { opacity: 0; transform: translateY(4px) scale(.98); transition-duration: var(--dur-exit); transition-timing-function: ease; }
+#drawer { transition: opacity var(--dur-pop) var(--ease-out), transform var(--dur-drawer) var(--ease-drawer); }
+@starting-style { #drawer { opacity: 0; transform: translateX(24px); } }
+.ui-disclosure > summary::after { transition: transform var(--dur-pop) var(--ease-out); }
+.bt-tab { transition: background-color 150ms ease, color 150ms ease, box-shadow 150ms ease; }
 @media (prefers-reduced-transparency: reduce) {
   #sidebar, #mobile-head { background: var(--bt-sidebar); backdrop-filter: none; }
   #modal-back { backdrop-filter: none; }
@@ -580,7 +599,14 @@ button:focus-visible { outline-offset: 2px; }
 .omp-avatar-zoom-value { min-width: 40px; font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
 .omp-avatar-actions { display: flex; justify-content: flex-end; gap: 8px; }
 @media (prefers-reduced-motion: reduce) {
-  #drawer, #modal, #new-menu, #empty-state, .toast, button { animation: none; transition: none; }
+  /* 减少动效：不要位移和缩放，只留短淡入淡出帮助看清变化。 */
+  #empty-state, button { animation: none; transition: none; }
+  #drawer, #modal, #new-menu, .toast { transition: opacity 150ms ease; }
   button:active:not(:disabled) { transform: none; }
-  @starting-style { #modal, #new-menu, .toast { transform: none; } }
+  @starting-style { #modal, #new-menu, .toast, #drawer { transform: none; } }
+  .toast.is-leaving { transform: none; }
+}
+/* 悬停放大只给能悬停的设备，触屏点一下不会卡在放大状态。 */
+@media not ((hover: hover) and (pointer: fine)) {
+  .bt-react-strip button:hover { transform: none; }
 }

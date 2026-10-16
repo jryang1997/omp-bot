@@ -40,7 +40,12 @@ export function toast(message, isError = false) {
   const node = el("div", "toast" + (isError ? " err" : ""), message);
   if (isError) node.setAttribute("role", "alert");
   $("toast-wrap").append(node);
-  setTimeout(() => node.remove(), isError ? 6000 : 3000);
+  // 退场比进场快：先淡出再移除；动效被关掉时 transitionend 不来，兜底按时移除。
+  setTimeout(() => {
+    node.classList.add("is-leaving");
+    node.addEventListener("transitionend", () => node.remove(), { once: true });
+    setTimeout(() => node.remove(), 400);
+  }, isError ? 6000 : 3000);
 }
 
 /** Polite screen-reader announcement, separate from transient toasts. */
