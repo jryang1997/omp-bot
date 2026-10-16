@@ -176,7 +176,7 @@ node ompbot.mjs interactive room:工作组    # 群聊
 
 ```
 team/
-  AGENTS.md               共识层：所有 bot 共用的规矩，只有你和 Main Bot 改
+  AGENTS.md               共识层：所有 bot 共用的规矩，只有你和 Main Bot 改；文末是团队事实块
   skills/<name>/SKILL.md  技能库：所有 bot 共用，每个 bot 勾选要哪些
   workspace/              共享工作区，挂到共享电脑的 /workspace
   .memory/mnemopi.db      记忆库，每个 bot 一个 bank
@@ -187,7 +187,8 @@ team/
 ```
 
 - bot 的 omp 进程 cwd 是 `team/bots/<id>`，私聊群聊同一个 cwd，读到团队和自己两层 AGENTS.md。任一层改了，下一轮对话前换进程并续上会话。用户级的 AGENTS.md、CLAUDE.md、GEMINI.md 不进 bot。
-- `team/AGENTS.md` 第一次创建时写入模板（说话方式、征求同意、两台机器的分工、共享电脑规则），之后 omp-bot 不再改。
+- `team/AGENTS.md` 第一次创建时写入模板（说话方式、征求同意、两台机器的分工、共享电脑规则），之后 omp-bot 只改文末的团队事实块。
+- 团队事实：成员用 `propose_team_fact` 提议一条大家都该知道的事，必须写来源。提议先进待确认，你在任务页的「团队事实待确认」点接受，或主助手用 `review_team_proposals` 接受，才写进团队事实块并自动提交。改一条已有的事实要写明替换哪条；接受时那条已经被别人改过就拒绝，提示按最新内容重提。你在「现在的团队事实」里纠正过的旧说法，之后再有人提会当场被拒。块里的内容你也可以直接改，冲突按文件现状判断。接口 `GET/POST /api/team/facts`、`POST /api/team/proposals/<id>/accept|reject`，只给主人。
 - 装技能时选「装进共享库」或「只给这个 bot」，库里和任何私有技能不许重名。
 - 从 0.1.x 升级时旧数据只复制不移动：私聊的 `work` 合进 `bots/<id>/work`，群聊的进 `work/rooms/<scope>/`，会话进 `sessions/<scope>/`，私有技能进 `.omp/skills/`，旧记忆摘要进 `work/old-memory/`。目标已有同名文件就跳过。完成后 team 根上留 `.omp-bot-migrated.json`，重复启动不再迁移。
 
@@ -307,6 +308,7 @@ node test/seats.mjs     # 座席层：规格、建座席、最后一个停掉关
 node test/file-share.mjs # SFTP 服务：分根、钥匙、越界和外链拒绝、改名覆盖、并发追加、请求顺序、OpenSSH sftp
 node test/team.mjs      # 团队目录：模板、身份块、git、迁移只复制、技能库和白名单
 node test/delegation.mjs      # 派活：忙时排队、做完交回、重启恢复、撤权不越界（注入 runtime 夹具，零模型）
+node test/team-memory.mjs     # 团队事实：提议要确认、替换撞车被拒、纠正过的不写回、只有用户和主助手能接受
 node test/rpc-client.mjs      # RPC 传输层：竞态、被拒 admission、取消、坏帧恢复（内联协议夹具，零模型）
 node test/channels.mjs        # 设备配对与 IM 适配器：真实 Ledger + 本地假端点，不发真实消息
 node smoke-gui.mjs     # HTTP API 层：静态/CRUD/校验/SSE/目录穿越
