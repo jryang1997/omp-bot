@@ -345,6 +345,7 @@ table.usage tr.total td { font-weight: 600; border-top: 1px solid var(--bt-line-
 .wb-computer .bt-kv { flex-wrap: wrap; }
 .wb-computer .bt-kv span:last-child { overflow-wrap: anywhere; text-align: right; }
 .wb-computer .bt-set-row { flex-direction: column; align-items: stretch; }
+.wb-computer-login:not(:empty) { border-left: 3px solid var(--bt-accent); padding-left: 12px; margin: 4px 0 16px; }
 .wb-computer-body { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 .wb-computer-errors { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; }
 .wb-computer-errors:empty { display: none; }

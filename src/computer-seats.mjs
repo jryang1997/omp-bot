@@ -49,7 +49,16 @@ export const SHARED_MACHINE_RANGE = Object.freeze({ cpus: Object.freeze([2, 8]),
 export const GUEST_LIB_DIR = '/usr/local/lib/omp-bot';
 export const SEAT_SCRIPT = `${GUEST_LIB_DIR}/omp-seat`;
 /** 随仓库发布的客机脚本。已有镜像在第一次就绪时经管理通道补装。 */
-export const GUEST_FILES = Object.freeze([Object.freeze({ local: 'guest/omp-seat', guest: SEAT_SCRIPT, mode: '0755' })]);
+export const LOGIN_SYNC_SCRIPT = `${GUEST_LIB_DIR}/omp-login-sync`;
+/** 共享登录库：root:team，目录 0750，文件 0640，bot 只能读。 */
+export const LOGIN_STORE = '/var/lib/omp-login';
+export const CHROMIUM_HOOK = '/etc/chromium.d/omp-shared-login';
+// 每次开机后比对 sha256，不一致就补装。已有镜像第一次就绪时就装上登录脚本和浏览器钩子。
+export const GUEST_FILES = Object.freeze([
+  Object.freeze({ local: 'guest/omp-seat', guest: SEAT_SCRIPT, mode: '0755' }),
+  Object.freeze({ local: 'guest/omp-login-sync', guest: LOGIN_SYNC_SCRIPT, mode: '0755' }),
+  Object.freeze({ local: 'guest/chromium.d/omp-shared-login', guest: CHROMIUM_HOOK, mode: '0644' }),
+]);
 
 /** Debian 包名：小写字母、数字和 + - .，至少两个字符，以字母或数字开头。 */
 export const PACKAGE_NAME_PATTERN = /^[a-z0-9][a-z0-9+.-]+$/;
@@ -62,6 +71,22 @@ const SEAT_DOWN_TIMEOUT_MS = 30_000;
 const MANAGE_TIMEOUT_MS = 30_000;
 const SEAT_HEALTH_WAIT_MS = 15_000;
 const INSTALL_TIMEOUT_MS = 15 * 60_000;
+const LOGIN_BROWSER_TIMEOUT_MS = 30_000;
+const BROWSER_PROCESS = "'chromium|chrome'";
+// 登录屏的浏览器：已经开着就不再开。setsid 让它脱离这条命令，命令结束浏览器还在。
+const LOGIN_BROWSER_OPEN = [
+  `if pgrep -u "$(id -u)" -x ${BROWSER_PROCESS} >/dev/null; then echo running; exit 0; fi`,
+  'mkdir -p "$HOME/.omp-seat"',
+  'setsid -f chromium --no-first-run --no-default-browser-check --start-maximized about:blank > "$HOME/.omp-seat/chromium.log" 2>&1 < /dev/null',
+  `for _ in $(seq 100); do pgrep -u "$(id -u)" -x ${BROWSER_PROCESS} >/dev/null && { echo started; exit 0; }; sleep 0.1; done`,
+  'echo "浏览器没有起来" >&2; tail -n 20 "$HOME/.omp-seat/chromium.log" >&2; exit 1',
+].join('\n');
+// 正常关掉浏览器，它退出前才把 cookie 全部写进磁盘
+const LOGIN_BROWSER_CLOSE = [
+  `pkill -TERM -u "$(id -u)" -x ${BROWSER_PROCESS} || true`,
+  `for _ in $(seq 200); do pgrep -u "$(id -u)" -x ${BROWSER_PROCESS} >/dev/null || exit 0; sleep 0.1; done`,
+  'echo "浏览器 20 秒内没有关掉" >&2; exit 1',
+].join('\n');
 const OUTPUT_TAIL = 1_500;
 
 function fail(code, message) {
@@ -340,6 +365,38 @@ export class SeatBackend {
     return { packages: names, exitCode: out.exitCode, stdout: out.stdout, stderr: out.stderr, timedOut: out.timedOut === true };
   }
 
+  // ---------------- 共享登录 ----------------
+
+  /** 登录屏：开 omp-login 座席，浏览器没开就开一个。用户在这块屏上登录网站。 */
+  async openLogin() {
+    await this.start(LOGIN_SEAT_ID);
+    const out = await this.run(LOGIN_SEAT_ID, { command: LOGIN_BROWSER_OPEN, cwd: '~', timeoutMs: LOGIN_BROWSER_TIMEOUT_MS, tag: `login-open-${Date.now().toString(36)}-${++this.#seq}` });
+    if (out.exitCode !== 0) throw fail(COMPUTER_ERROR.START_FAILED, `登录屏的浏览器没有打开：${tail(out.stderr || out.stdout)}`);
+    return await this.status(LOGIN_SEAT_ID);
+  }
+
+  /**
+   * 完成登录：关掉登录屏的浏览器让 cookie 落盘，经管理通道以 root 发布到共享登录库，再停登录屏。
+   * bot 的浏览器下次启动时由钩子并进共享 cookie。
+   */
+  async publishLogin() {
+    const seat = this.#seats()[LOGIN_SEAT_ID] ?? null;
+    const before = await this.status(LOGIN_SEAT_ID);
+    if (!seat || before.state !== 'running') throw fail(COMPUTER_ERROR.NOT_CREATED, '登录屏没有开着，先点「登录网站」');
+    const closed = await this.run(LOGIN_SEAT_ID, { command: LOGIN_BROWSER_CLOSE, cwd: '~', timeoutMs: LOGIN_BROWSER_TIMEOUT_MS, tag: `login-close-${Date.now().toString(36)}-${++this.#seq}` });
+    if (closed.exitCode !== 0) throw fail(COMPUTER_ERROR.STOP_FAILED, `登录屏的浏览器没有关掉，没有发布：${tail(closed.stderr || closed.stdout)}`);
+    await this.#ensureGuestFiles();
+    const profile = path.posix.join(seat.home, '.config', 'chromium');
+    const out = await this.#manage(
+      `exec /usr/bin/python3 ${LOGIN_SYNC_SCRIPT} publish --from ${shQuote(profile)} --store ${LOGIN_STORE} --group team`,
+      { label: 'publish', timeoutMs: MANAGE_TIMEOUT_MS },
+    );
+    if (out.exitCode !== 0) throw fail(COMPUTER_ERROR.GUEST_RPC_FAILED, `发布登录失败（退出码 ${out.exitCode ?? 'null'}）：${tail(out.stderr || out.stdout)}`);
+    const publishedAt = new Date().toISOString();
+    const status = await this.stop(LOGIN_SEAT_ID);
+    return { publishedAt, status };
+  }
+
   // ---------------- 生命周期 ----------------
 
   /** 建座席、开机、停座席、关机全部排成一队，"最后一个座席停掉就关机"不会和别的座席开机撞上。 */
@@ -461,6 +518,8 @@ export class SeatBackend {
       fs.mkdirSync(this.#stageDir, { recursive: true });
       const staged = path.join(this.#stageDir, path.basename(file.local));
       fs.writeFileSync(staged, data);
+      const mkdir = await this.#manage(`mkdir -p ${shQuote(path.posix.dirname(file.guest))}`, { label: 'mkdir', timeoutMs: MANAGE_TIMEOUT_MS });
+      if (mkdir.exitCode !== 0) throw fail(COMPUTER_ERROR.START_FAILED, `建客机目录 ${path.posix.dirname(file.guest)} 失败：${tail(mkdir.stderr || mkdir.stdout)}`);
       const management = await this.#vm.management();
       const incoming = `${file.guest}.new`;
       await management.uploadFile({ localPath: staged, path: incoming }, {});

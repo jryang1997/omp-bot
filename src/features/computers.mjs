@@ -10,7 +10,7 @@
 // - 取消必须真正结束客机命令：backend 无法确认终态时抛 computer_effect_unknown，
 //   这里把对应 Run 标成 reconciliation_required / side_effect_unknown，绝不假称 cancelled。
 
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { canonicalFilename, clone, ferr, humanBytes, isFeatureError } from "./util.mjs";
 import { computerIdFor, genId } from "../domain.mjs";
@@ -45,6 +45,8 @@ const MAX_LISTING_CHARS = 16_000;
 
 const SCREENSHOT_TIMEOUT_MS = 30_000;
 const INPUT_TIMEOUT_MS = 30_000;
+/** 登录屏座席的电脑 id，和 src/computer-seats.mjs 的 LOGIN_SEAT_ID 一致。 */
+export const LOGIN_COMPUTER_ID = "login";
 const FILE_TIMEOUT_MS = 60_000;
 const TAKEOVER_DRAIN_MS = 20_000;
 /** 归还/停止等待在飞动作真正结束的上限：超时就拒绝转换并报告效果未知。 */
@@ -159,6 +161,24 @@ const CONFIRMED_NO_EFFECT_CODES = new Set([
   "computer_start_failed",
   "computer_status_failed",
 ]);
+
+/** 截图 PNG 写回给同源请求。 */
+function sendPng(res, shot) {
+  const data = shot?.data;
+  if (!Buffer.isBuffer(data) || data.length === 0) {
+    throw ferr(502, "computer_screenshot_invalid", "截图没有返回 PNG 字节");
+  }
+  res.writeHead(200, {
+    "Content-Type": shot.mimeType ?? "image/png",
+    "Content-Length": data.length,
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Cross-Origin-Resource-Policy": "same-origin",
+  });
+  res.end(data);
+  return true;
+}
 
 function backendErr(e, fallback = {}) {
   if (isFeatureError(e)) return e;
@@ -313,6 +333,8 @@ export class Computers {
     /** 重启时发现残留 agent 租约并作废的电脑（供事件/审计） */
     this.resetOnBoot = [];
     this.stateError = null;
+    /** 登录屏的控制代号：每次打开、完成、关闭都换，旧画面上的输入会被拒绝。 */
+    this.loginGeneration = 0;
     this._tagSeq = 0;
 
     this.#loadControl();
@@ -899,20 +921,129 @@ export class Computers {
     } catch (e) {
       throw backendErr(e, { code: "computer_screenshot_failed", status: 409 });
     }
-    const data = shot?.data;
-    if (!Buffer.isBuffer(data) || data.length === 0) {
-      throw ferr(502, "computer_screenshot_invalid", "截图没有返回 PNG 字节");
+    return sendPng(res, shot);
+  }
+
+  // ---------------- 共享登录（登录屏） ----------------
+  // 登录屏是共享电脑里的 omp-login 座席，不属于任何 bot。用户打开它、在里面登录网站、点「完成」，
+  // 座席层把 cookie 发布到共享登录库，bot 的浏览器下次启动时并进来。登录屏只给人用，没有 bot 租约，
+  // 开着时控制方就是用户。
+
+  async #loginBackend() {
+    const backend = await this.ensureBackend();
+    if (typeof backend.openLogin !== "function" || typeof backend.publishLogin !== "function") {
+      throw ferr(501, "computer_login_unsupported", "当前的电脑后端没有登录屏");
     }
-    res.writeHead(200, {
-      "Content-Type": shot.mimeType ?? "image/png",
-      "Content-Length": data.length,
-      "Cache-Control": "no-store",
-      "X-Content-Type-Options": "nosniff",
-      "Referrer-Policy": "no-referrer",
-      "Cross-Origin-Resource-Policy": "same-origin",
-    });
-    res.end(data);
-    return true;
+    return backend;
+  }
+
+  #loginFile() {
+    return join(this.home, "computers", "login.json");
+  }
+
+  #loginPublished() {
+    try {
+      const at = JSON.parse(readFileSync(this.#loginFile(), "utf8"))?.publishedAt;
+      return typeof at === "string" && at ? { at } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  #loginView(st) {
+    const state = st?.state ?? "stopped";
+    return {
+      id: LOGIN_COMPUTER_ID,
+      login: true,
+      bound: true,
+      state,
+      holder: state === "running" ? "human" : null,
+      generation: this.loginGeneration,
+      os: st?.os ?? "linux",
+      kind: st?.kind ?? "vm",
+      vm: st?.vm ?? null,
+      display: st?.display ?? null,
+      persistent: true,
+      error: st?.error ?? null,
+      published: this.#loginPublished(),
+    };
+  }
+
+  async loginStatus() {
+    const backend = await this.#loginBackend();
+    return this.#loginView(await backend.status(LOGIN_COMPUTER_ID));
+  }
+
+  async loginOpen() {
+    const backend = await this.#loginBackend();
+    let st;
+    try {
+      st = await backend.openLogin();
+    } catch (e) {
+      throw backendErr(e, { code: "computer_login_open_failed", status: 409 });
+    }
+    this.loginGeneration += 1;
+    this.orch.emit?.("computer_login_opened", { generation: this.loginGeneration });
+    return this.#loginView(st);
+  }
+
+  /** 完成：发布登录，停登录屏。 */
+  async loginDone() {
+    const backend = await this.#loginBackend();
+    let out;
+    try {
+      out = await backend.publishLogin();
+    } catch (e) {
+      throw backendErr(e, { code: "computer_login_publish_failed", status: 409 });
+    }
+    mkdirSync(join(this.home, "computers"), { recursive: true });
+    writeFileSync(this.#loginFile(), `${JSON.stringify({ publishedAt: out.publishedAt })}\n`);
+    this.loginGeneration += 1;
+    this.orch.emit?.("computer_login_published", { publishedAt: out.publishedAt });
+    return this.#loginView(out.status);
+  }
+
+  /** 不发布，直接关掉登录屏。 */
+  async loginStop() {
+    const backend = await this.#loginBackend();
+    let st;
+    try {
+      st = await backend.stop(LOGIN_COMPUTER_ID);
+    } catch (e) {
+      throw backendErr(e, { code: "computer_stop_failed", status: 409 });
+    }
+    this.loginGeneration += 1;
+    return this.#loginView(st);
+  }
+
+  async loginInput(body = {}) {
+    const backend = await this.#loginBackend();
+    const st = await backend.status(LOGIN_COMPUTER_ID);
+    if (st?.state !== "running") throw ferr(409, "computer_not_running", "登录屏没有开着");
+    const gen = Number(body?.generation);
+    if (!Number.isInteger(gen) || gen !== this.loginGeneration) {
+      throw ferr(409, "computer_generation_stale", `输入必须带当前控制代号（generation=${this.loginGeneration}）`, {
+        generation: this.loginGeneration,
+      });
+    }
+    const action = normalizeInputAction(body);
+    try {
+      await backend.input(LOGIN_COMPUTER_ID, action, { signal: AbortSignal.timeout(INPUT_TIMEOUT_MS) });
+    } catch (e) {
+      throw backendErr(e, { code: "computer_input_failed", status: 409 });
+    }
+    return this.#loginView(await backend.status(LOGIN_COMPUTER_ID));
+  }
+
+  async loginScreen(res) {
+    const backend = await this.#loginBackend();
+    let shot;
+    try {
+      shot = await backend.screenshot(LOGIN_COMPUTER_ID, { signal: AbortSignal.timeout(SCREENSHOT_TIMEOUT_MS) });
+    } catch (e) {
+      throw backendErr(e, { code: "computer_screenshot_failed", status: 409 });
+    }
+    return sendPng(res, shot);
   }
 
   // ---------------- 电脑租约（电脑×Run 粒度，覆盖整个回合与异步动作） ----------------

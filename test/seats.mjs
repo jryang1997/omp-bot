@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { overlayCreateArgs, qemuArgs } from "../src/computer-backend.mjs";
 import {
-  BOT_SEAT_COUNT, LOGIN_SEAT_ID, SEAT_GUEST_PORTS, SEAT_SCRIPT, SeatBackend, SeatShare,
+  BOT_SEAT_COUNT, CHROMIUM_HOOK, GUEST_FILES, LOGIN_SEAT_ID, LOGIN_SYNC_SCRIPT, SEAT_GUEST_PORTS, SEAT_SCRIPT, SeatBackend, SeatShare,
   expandHome, readSharedMachine, seatUser, sharedMachineSpec, validatePackages, writeSharedMachine,
 } from "../src/computer-seats.mjs";
 import { guestPath, seatShareRoots, shPath } from "../src/features/computers.mjs";
@@ -73,8 +73,11 @@ class FakeVm {
       },
     };
   }
+  events = [];
+  failSeatRun = null;
   #run({ command, env = null }) {
     this.commands.push(command);
+    this.events.push(`mgmt ${command}`);
     this.envs.push(env);
     const ok = (stdout = "") => ({ exitCode: 0, stdout, stderr: "" });
     let m;
@@ -85,6 +88,12 @@ class FakeVm {
       this.files.set(m[3], this.files.get(m[1]));
       this.files.delete(m[1]);
       return ok(`${sha(this.files.get(m[3]))}\n`);
+    }
+    if (/^mkdir -p '[^']+'$/.test(command)) return ok();
+    if (command.startsWith("exec /usr/bin/python3 /usr/local/lib/omp-bot/omp-login-sync publish ")) {
+      this.publishes = (this.publishes ?? 0) + 1;
+      if (this.failPublish) return { exitCode: 2, stdout: "", stderr: this.failPublish };
+      return ok("published\n");
     }
     const script = `exec ${SEAT_SCRIPT} `;
     if (!command.startsWith(script)) return { exitCode: 127, stdout: "", stderr: `unexpected ${command}` };
@@ -117,7 +126,14 @@ class FakeVm {
       reset() {},
       async screenshot() { need(); return { width: 1280, height: 800, mimeType: "image/png", data: Buffer.from(String(port)) }; },
       async input() { need(); },
-      async run(opts) { need(); this.runs.push(opts); return { exitCode: 0, stdout: `${port} ${opts.cwd}`, stderr: "" }; },
+      async run(opts) {
+        need();
+        this.runs.push(opts);
+        vm.events.push(`seat ${port} ${opts.command}`);
+        const failed = vm.failSeatRun?.(opts);
+        if (failed) return { exitCode: 1, stdout: "", stderr: failed };
+        return { exitCode: 0, stdout: `${port} ${opts.cwd}`, stderr: "" };
+      },
       async uploadFile(t) { need(); vm.uploads.push(t.path); return { path: t.path }; },
       async downloadFile(t) { need(); return { path: t.path }; },
     };
@@ -229,7 +245,7 @@ test("07 座席层：状态、创建、启动、停止，最后一个座席停�
     assert.equal(st.state, "running");
     assert.equal(vm.creates.length, 2);
     assert.equal(vm.seats.get(seatUser("pc_a")).token, a.token);
-    assert.equal(vm.uploads.length, uploadsBefore + 1, "开机后补装了客机脚本");
+    assert.equal(vm.uploads.length, uploadsBefore + GUEST_FILES.length, "开机后补装了全部客机文件");
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
@@ -286,23 +302,30 @@ test("07 令牌只经 env 传给管理通道，seats.json 是 0600，错误里�
   }
 });
 
-test("07 客机脚本：哈希一致就不重装，不一致经管理通道补装", async () => {
+test("07 客机脚本：哈希一致就不重装，不一致经管理通道补装（09 起含登录脚本和浏览器钩子）", async () => {
   const home = tmp("ompbot-seat-files-");
   try {
+    assert.deepEqual(GUEST_FILES.map((f) => [f.guest, f.mode]), [
+      [SEAT_SCRIPT, "0755"],
+      [LOGIN_SYNC_SCRIPT, "0755"],
+      [CHROMIUM_HOOK, "0644"],
+    ]);
     const vm = new FakeVm();
-    const local = readFileSync(new URL("../guest/omp-seat", import.meta.url));
-    vm.files.set(SEAT_SCRIPT, local);
+    for (const f of GUEST_FILES) vm.files.set(f.guest, readFileSync(new URL(`../${f.local}`, import.meta.url)));
+    const local = vm.files.get(SEAT_SCRIPT);
     vm.state = "running";
     const seats = seated(home, vm);
     await seats.start("pc_a");
     assert.equal(vm.uploads.length, 0, "镜像里已经是同一份脚本");
-    // 旧镜像里的旧脚本
+    // 旧镜像：旧的座席脚本，没有登录脚本和钩子
     const home2 = tmp("ompbot-seat-files2-");
     const vm2 = new FakeVm();
     vm2.files.set(SEAT_SCRIPT, Buffer.from("#!/bin/sh\necho old\n"));
     vm2.state = "running";
     await seated(home2, vm2).start("pc_a");
-    assert.deepEqual(vm2.uploads, [`${SEAT_SCRIPT}.new`]);
+    assert.deepEqual(vm2.uploads, GUEST_FILES.map((f) => `${f.guest}.new`));
+    assert.ok(vm2.commands.includes("mkdir -p '/etc/chromium.d'"), "钩子目录先建好");
+    for (const f of GUEST_FILES) assert.ok(vm2.files.has(f.guest), f.guest);
     assert.equal(sha(vm2.files.get(SEAT_SCRIPT)), sha(local));
     assert.ok(readFileSync(join(home2, "computers", "guest-files", "omp-seat")).equals(local), "先落成普通文件再上传");
     rmSync(home2, { recursive: true, force: true });
@@ -507,6 +530,115 @@ test("08 共享目录的根：workspace 是 team/workspace，bot 是自己的 wo
   assert.equal(roots("bot_gone"), null);
   live.delete("bot_a");
   assert.equal(roots("bot_a"), null);
+});
+
+// ---------------- 09 共享登录 ----------------
+test("09 登录屏：打开时开浏览器；完成时先关浏览器让 cookie 落盘，再经管理通道以 root 发布，然后停登录屏", async () => {
+  const home = tmp("ompbot-seat-login-");
+  try {
+    const vm = new FakeVm();
+    vm.createDelay = 0;
+    const seats = seated(home, vm);
+    await assert.rejects(seats.publishLogin(), (e) => e.code === "computer_not_created", "没开登录屏不能发布");
+    let st = await seats.openLogin();
+    assert.equal(st.state, "running");
+    assert.equal(st.seat.user, "omp-login");
+    const opened = vm.events.filter((e) => e.startsWith("seat 3316 "));
+    assert.equal(opened.length, 1);
+    assert.match(opened[0], /setsid -f chromium /);
+    assert.match(opened[0], /pgrep -u "\$\(id -u\)" -x 'chromium\|chrome'/, "已经开着就不再开");
+    // 发布失败：登录屏留着，用户可以重试
+    vm.failPublish = "no cookies";
+    vm.events.length = 0;
+    await assert.rejects(seats.publishLogin(), /发布登录失败.*no cookies/);
+    assert.equal((await seats.status(LOGIN_SEAT_ID)).state, "running");
+    vm.failPublish = null;
+    // 浏览器关不掉：不发布
+    vm.failSeatRun = (opts) => (opts.command.includes("pkill -TERM") ? "still running" : null);
+    const publishesBefore = vm.publishes;
+    await assert.rejects(seats.publishLogin(), /没有关掉，没有发布/);
+    assert.equal(vm.publishes, publishesBefore);
+    vm.failSeatRun = null;
+    vm.events.length = 0;
+    const out = await seats.publishLogin();
+    assert.ok(!Number.isNaN(Date.parse(out.publishedAt)));
+    assert.equal(out.status.state, "stopped");
+    const close = vm.events.findIndex((e) => e.startsWith("seat 3316 ") && e.includes("pkill -TERM"));
+    const publish = vm.events.findIndex((e) => e.startsWith("mgmt exec /usr/bin/python3 "));
+    const down = vm.events.findIndex((e) => e === "mgmt exec /usr/local/lib/omp-bot/omp-seat down omp-login");
+    assert.ok(close >= 0 && publish > close && down > publish, vm.events.join("\n"));
+    assert.equal(vm.events[publish],
+      "mgmt exec /usr/bin/python3 /usr/local/lib/omp-bot/omp-login-sync publish --from '/home/omp-login/.config/chromium' --store /var/lib/omp-login --group team");
+    // 最后一个座席停掉，共享电脑也关了
+    assert.equal(vm.state, "stopped");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("09 登录屏接口：打开、输入要带当前代号、完成记下发布时间、关闭不保存；后端没有登录屏时 501", async () => {
+  const home = tmp("ompbot-login-http-");
+  mkdirSync(home, { recursive: true });
+  const calls = [];
+  let state = "stopped";
+  const backend = {
+    status: async (id) => ({ state: id === "login" ? state : "stopped", vm: { state }, display: { width: 1280, height: 800 } }),
+    openLogin: async () => { calls.push("open"); state = "running"; return { state, vm: { state } }; },
+    publishLogin: async () => { calls.push("publish"); state = "stopped"; return { publishedAt: "2026-10-16T01:02:03.000Z", status: { state } }; },
+    stop: async (id) => { calls.push(`stop ${id}`); state = "stopped"; return { state }; },
+    input: async (id, action) => { calls.push(`input ${id} ${action.action}`); },
+    screenshot: async (id) => ({ width: 2, height: 2, mimeType: "image/png", data: Buffer.from(`png-${id}`) }),
+  };
+  const server = await startServer({ home, port: 0, computerBackend: backend, bin: join(home, "no-model-binary") });
+  const call = async (method, path, body) => {
+    const res = await fetch(`${server.url}/api/computer/login${path}`, {
+      method,
+      headers: { Authorization: `Bearer ${server.token}`, "Content-Type": "application/json" },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    const type = res.headers.get("content-type") ?? "";
+    return { status: res.status, data: type.includes("json") ? await res.json() : Buffer.from(await res.arrayBuffer()) };
+  };
+  try {
+    let r = await call("GET", "");
+    assert.equal(r.status, 200);
+    assert.deepEqual([r.data.computer.state, r.data.computer.holder, r.data.computer.published], ["stopped", null, null]);
+    r = await call("POST", "/input", { generation: 0, action: "click", x: 1, y: 1 });
+    assert.equal(r.status, 409, "没开不能输入");
+    r = await call("POST", "/open");
+    assert.equal(r.status, 200);
+    const gen = r.data.computer.generation;
+    assert.deepEqual([r.data.computer.state, r.data.computer.holder, gen], ["running", "human", 1]);
+    r = await call("POST", "/input", { generation: gen - 1, action: "click", x: 1, y: 1 });
+    assert.equal(r.status, 409);
+    assert.equal(r.data.code, "computer_generation_stale");
+    r = await call("POST", "/input", { generation: gen, action: "click", x: 1, y: 1 });
+    assert.equal(r.status, 200);
+    r = await call("GET", "/screen");
+    assert.equal(r.status, 200);
+    assert.equal(String(r.data), "png-login");
+    r = await call("POST", "/done");
+    assert.equal(r.status, 200);
+    assert.equal(r.data.computer.state, "stopped");
+    assert.equal(r.data.computer.published.at, "2026-10-16T01:02:03.000Z");
+    assert.ok(r.data.computer.generation > gen, "完成后旧代号作废");
+    assert.equal(JSON.parse(readFileSync(join(home, "computers", "login.json"), "utf8")).publishedAt, "2026-10-16T01:02:03.000Z");
+    await call("POST", "/open");
+    r = await call("POST", "/stop");
+    assert.equal(r.data.computer.state, "stopped");
+    assert.deepEqual(calls, ["open", "input login click", "publish", "open", "stop login"]);
+  } finally {
+    await server.close();
+  }
+  const bare = await startServer({ home, port: 0, computerBackend: { status: async () => ({ state: "stopped" }) }, bin: join(home, "no-model-binary") });
+  try {
+    const res = await fetch(`${bare.url}/api/computer/login`, { headers: { Authorization: `Bearer ${bare.token}` } });
+    assert.equal(res.status, 501);
+    assert.equal((await res.json()).code, "computer_login_unsupported");
+  } finally {
+    await bare.close();
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 for (const run of pending) await run();

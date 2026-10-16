@@ -261,6 +261,13 @@ export class WorkbenchFeatures {
 
       R("GET", /^\/api\/computer\/shared-machine$/, async () => ({ machine: await this.computers.sharedMachine() })),
       R("PUT", /^\/api\/computer\/shared-machine$/, async (c) => ({ machine: await this.computers.setSharedMachine(c.body ?? {}) })),
+      // 登录屏（共享登录）：打开、完成（发布）、不发布关掉；画面和输入同 bot 电脑，控制方固定是用户
+      R("GET", /^\/api\/computer\/login$/, async () => ({ computer: await this.computers.loginStatus() })),
+      R("POST", /^\/api\/computer\/login\/open$/, async () => ({ computer: await this.computers.loginOpen() })),
+      R("POST", /^\/api\/computer\/login\/done$/, async () => ({ computer: await this.computers.loginDone() })),
+      R("POST", /^\/api\/computer\/login\/stop$/, async () => ({ computer: await this.computers.loginStop() })),
+      R("GET", /^\/api\/computer\/login\/screen$/, async (c) => this.computers.loginScreen(c.res), { raw: true }),
+      R("POST", /^\/api\/computer\/login\/input$/, async (c) => ({ computer: await this.computers.loginInput(c.body ?? {}) })),
       R("GET", /^\/api\/bots\/([^/]+)\/computer$/, async (c) =>
         ({ computer: await this.computers.status(decodeURIComponent(c.params[0])) }),
       ),
