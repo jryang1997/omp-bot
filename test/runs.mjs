@@ -8,9 +8,8 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir, homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { Orchestrator } from "../src/orchestrator.mjs";
-import { memoryPrereqStatus, writePrivateMemoryConfig } from "../src/memory-config.mjs";
 import { BotRuntime, runtimeDirs, evaluateToolSurface, canonicalNativeModel } from "../src/bot.mjs";
 
 let passed = 0;
@@ -361,7 +360,9 @@ await test("startRun 同步返回持久 run 并原子预留 scope；第二个并
 
     const done = await t.orch.waitRun(run.id);
     assert.equal(done.state, "completed");
-    assert.equal(done.reply, "echo:hi");
+    // 夹具原样回显：bot 收到的第一行是场景和发送者，台账里的 text 仍是原文
+    assert.equal(done.reply, "echo:[私聊，用户]\nhi");
+    assert.equal(done.text, "hi");
     assert.equal(done.sessionId, "sess_fixture");
     // 原生用量差值持久在 run.stats 上（夹具一轮 15 tokens）
     assert.equal(done.stats.delta.totalTokens, 15);
@@ -370,7 +371,7 @@ await test("startRun 同步返回持久 run 并原子预留 scope；第二个并
     // 租约已释放：可以再起一条
     const second = t.orch.startRun({ botId: bot.id, text: "second" });
     const secondDone = await t.orch.waitRun(second.id);
-    assert.equal(secondDone.reply, "echo:second");
+    assert.equal(secondDone.reply, "echo:[私聊，用户]\nsecond");
     assert.equal(t.orch.listRuns({ botId: bot.id }).length, 2);
   } finally {
     await t.cleanup();
@@ -391,8 +392,8 @@ await test("真实 Store：私聊展示缓存与花名册默认字段落盘", as
 
     const chat = t.orch.getChat(bot.id);
     assert.deepEqual(chat.map((m) => m.role), ["user", "assistant"]);
-    assert.equal(chat[0].text, "记住我");
-    assert.equal(chat[1].text, "echo:记住我");
+    assert.equal(chat[0].text, "记住我", "聊天记录存原文，不带标签");
+    assert.equal(chat[1].text, "echo:[私聊，用户]\n记住我");
 
     const statePath = join(t.home, "state.json");
     assert.equal(existsSync(statePath), true);
@@ -677,19 +678,21 @@ await test("message_bot 同步投递：同工作区自动，回执带子 Run 与
     const b = t.orch.addBot({ name: "BetaTalker" });
     const fakeA = await t.orch.runtimeFor(a.id, "private");
     const fakeB = await t.orch.runtimeFor(b.id, "private");
-    fakeB.queue = [{ kind: "complete", text: "Beta 的答复" }];
+    // B 原样回显：看得到它收到的第一行是「私聊，🤖 发送者」
+    fakeB.queue = [];
     fakeA.queue = [{ kind: "tool", tool: "message_bot", args: { to: b.name, message: "帮我看看" } }];
 
     const run = t.orch.startRun({ botId: a.id, text: "去问 Beta", budget: { maxTokens: 100 } });
     const done = await t.orch.waitRun(run.id);
     assert.equal(done.state, "completed");
-    assert.match(done.reply, /Beta 的答复/);
+    assert.ok(done.reply.includes(`echo:[私聊，🤖 AlphaTalker (@${a.id})]\n帮我看看`), done.reply);
 
     const children = t.orch.listRuns({}).filter((r) => r.parentRunId === run.id);
     assert.equal(children.length, 1);
     assert.equal(children[0].kind, "delegation");
     assert.equal(children[0].depth, 1);
     assert.equal(children[0].botId, b.id);
+    assert.equal(children[0].text, "帮我看看", "台账里存原文");
     assert.deepEqual(children[0].budget, { maxTokens: 100 });
     assert.equal(children[0].state, "completed");
     assert.equal(t.orch.store.state.exchanges[0].status, "replied");
@@ -1459,7 +1462,7 @@ await test("人工接管暂停闸门：isPaused 时 startRun/runtimeFor 均 409 
   }
 });
 
-await test("策略与记忆前置校验：sandbox 被拒、全部放手需显式确认、记忆需原生 profile", async () => {
+await test("策略校验：sandbox 被拒、全部放手需显式确认、开记忆没有前置门槛", async () => {
   const t = newTeam();
   try {
     assert.throws(
@@ -1472,51 +1475,14 @@ await test("策略与记忆前置校验：sandbox 被拒、全部放手需显式
       () => t.orch.addBot({ name: "Yoloer", approvalMode: "yolo" }),
       (e) => e.status === 400 && e.code === "confirm_permission_required",
     );
-    // 记忆开关按真实前置判定：显式选定 keyless 模型（auth:none + loopback）才放行，
-    // 其余一律拒绝（失败关闭），绝不用「有 broker URL」这种假缝当授权。
-    const keyless = "magpie/workbuddy-ai/deepseek-v4.1-flash";
-    const globalModels = join(homedir(), ".omp", "agent", "models.yml");
-    if (existsSync(globalModels)) {
-      const prereq = memoryPrereqStatus({ model: keyless, agentDir: join(t.home, "bots", "bot_memory_probe", "private", "agent") });
-      assert.equal(prereq.ready, true, `本机 magpie keyless 应判定可用：${prereq.reason}`);
-      assert.equal(prereq.source, "native-keyless-loopback");
-      assert.equal(prereq.loopback, true);
-      assert.equal(prereq.auth, "none");
-
-      const allowed = t.orch.addBot({ name: "Memor", model: keyless, memoryEnabled: true });
-      assert.equal(allowed.memoryEnabled, true);
-      assert.equal(t.orch.updateBot(allowed.id, { memoryEnabled: true }).memoryEnabled, true);
-      // 记忆开启的 bot 改模型也要过前置：不能存下私有目录里没有定义的模型。
-      assert.throws(
-        () => t.orch.updateBot(allowed.id, { model: "cpa/gemini-3-flash" }),
-        (e) => e.status === 409 && e.code === "memory_prereq_missing",
-      );
-      assert.equal(t.orch.updateBot(allowed.id, { model: "magpie/opencode-go/deepseek-v4.1-flash:max" }).model, "magpie/opencode-go/deepseek-v4.1-flash:max");
-      // 未开记忆的 bot 改模型不受该关影响（后端仍由用户全局配置决定）。
-      const noMem = t.orch.addBot({ name: "NoMemModel" });
-      assert.equal(t.orch.updateBot(noMem.id, { model: "cpa/gemini-3-flash" }).model, "cpa/gemini-3-flash");
-      // 没选定模型（空）绝不放行：不能靠 loopback 或 broker URL 推断 keyless。
-      assert.throws(
-        () => t.orch.addBot({ name: "NoModel", memoryEnabled: true }),
-        (e) => e.status === 409 && e.code === "memory_prereq_missing",
-      );
-      // 非 keyless 的 provider（全局 cpa 需要 apiKey）必须拒绝。
-      assert.throws(
-        () => t.orch.addBot({ name: "CPA", model: "cpa/gemini-3-flash", memoryEnabled: true }),
-        (e) => e.status === 409 && e.code === "memory_prereq_missing",
-      );
-      // 不存在的 provider/模型也要拒绝，不静默降级到别的 provider。
-      assert.throws(
-        () => t.orch.addBot({ name: "Ghost", model: "nope/nope-model", memoryEnabled: true }),
-        (e) => e.status === 409 && e.code === "memory_prereq_missing",
-      );
-    } else {
-      assert.equal(memoryPrereqStatus({ model: keyless }).ready, false);
-      assert.throws(
-        () => t.orch.addBot({ name: "Memor", model: keyless, memoryEnabled: true }),
-        (e) => e.status === 409 && e.code === "memory_prereq_missing",
-      );
-    }
+    // 开记忆不再看模型来源：没选模型、需要 apiKey 的 provider、不存在的模型都照样能开，
+    // 模型和凭据走用户自己的 omp 配置，跑不起来时由运行时如实报错。
+    const memor = t.orch.addBot({ name: "Memor", memoryEnabled: true });
+    assert.equal(memor.memoryEnabled, true);
+    assert.equal(t.orch.addBot({ name: "CPA", model: "cpa/gemini-3-flash", memoryEnabled: true }).memoryEnabled, true);
+    assert.equal(t.orch.updateBot(memor.id, { model: "nope/nope-model" }).model, "nope/nope-model");
+    assert.equal(t.orch.updateBot(memor.id, { memoryEnabled: false }).memoryEnabled, false);
+    assert.equal(t.orch.updateBot(memor.id, { memoryEnabled: true }).memoryEnabled, true);
 
     const legit = t.orch.addBot({
       name: "Legit",
@@ -1549,12 +1515,7 @@ await test("策略与记忆前置校验：sandbox 被拒、全部放手需显式
       () => t.orch.updateBot(legit.id, { executionMode: "sandbox" }),
       (e) => e.code === "sandbox_unverified",
     );
-    if (!existsSync(globalModels)) {
-      assert.throws(
-        () => t.orch.updateBot(legit.id, { memoryEnabled: true }),
-        (e) => e.code === "memory_prereq_missing",
-      );
-    }
+    assert.equal(t.orch.updateBot(legit.id, { memoryEnabled: true }).memoryEnabled, true);
   } finally {
     await t.cleanup();
   }
@@ -1599,225 +1560,56 @@ await test("botWorkDir 与 BotRuntime 的目录规则一致（单一来源）", 
     assert.equal(t.orch.botWorkDir(bot.id, "room:r1").sessionDir, join(dirs.cwd, "sessions", "room_r1"));
     assert.equal(t.orch.botWorkDir(bot.id, "room:r1").cwd, dirs.cwd, "私聊群聊共用 cwd");
     assert.equal(dirs.baseDir, join(t.home, "bots", bot.id, "private"));
-    assert.equal(dirs.agentDir, join(dirs.baseDir, "agent"));
+    assert.equal(dirs.memoryDbPath, join(t.home, "team", ".memory", "mnemopi.db"), "所有 bot 一个记忆库，在 team 里");
+    assert.equal(dirs.agentDir, undefined, "不再有私有 agentDir");
   } finally {
     await t.cleanup();
   }
 });
 
-await test("私有记忆配置：只写选定 provider/模型的非密字段，绝不复制全局 config/auth", () => {
-  const home = mkdtempSync(join(tmpdir(), "ompbot-memcfg-"));
-  const agentDir = join(home, "bots", "bot_x", "private", "agent");
-  const sourceFile = join(home, "source-models.yml");
-  // 假凭据由拼接生成：测试只验证「不被复制」，不写入任何真实密钥。
-  const FAKE_KEY = ["sk", "test", "not", "real", "credential"].join("-");
-  const FAKE_PW = ["user", "not", "real", "pw"].join("-");
-  try {
-    // 源文件同时含 keyless 段与带凭据段：只有 keyless 段能被复制，凭据段必须整体拒绝。
-    writeFileSync(
-      sourceFile,
-      [
-        "providers:",
-        "  cpa:",
-        "    baseUrl: http://127.0.0.1:8317/v1",
-        "    api: openai-completions",
-        `    apiKey: ${FAKE_KEY}`,
-        "    authHeader: true",
-        "    models:",
-        "      - id: gemini-3-flash",
-        "        name: Gemini",
-        "  magpie:",
-        "    baseUrl: http://127.0.0.1:3425/v1",
-        "    api: openai-completions",
-        "    auth: none",
-        "    headers:",
-        "      User-Agent: omp",
-        "    compat:",
-        "      promptCacheSessionHeader: x-session-affinity",
-        "    models:",
-        "      - id: workbuddy-ai/deepseek-v4.1-flash",
-        "        name: Deepseek-V4.1-Flash · WorkBuddy AI",
-        "        reasoning: true",
-        "        thinking:",
-        "          mode: effort",
-        "          efforts:",
-        "            - low",
-        "            - max",
-        "        contextWindow: 1000000",
-        "        maxTokens: 128000",
-        "        input:",
-        "          - text",
-        "          - image",
-        "      - id: workbuddy-ai/other",
-        "        name: Other",
-        "",
-      ].join("\n"),
-    );
-
-    const status = memoryPrereqStatus({
-      model: "magpie/workbuddy-ai/deepseek-v4.1-flash:max",
-      agentDir,
-      sourceFile,
-    });
-    assert.equal(status.ready, true, status.reason);
-    assert.equal(status.source, "native-keyless-loopback");
-    assert.equal(status.provider, "magpie");
-    assert.equal(status.modelId, "workbuddy-ai/deepseek-v4.1-flash");
-    assert.equal(status.auth, "none");
-    assert.equal(status.loopback, true);
-    assert.deepEqual(status.roles, {
-      default: "magpie/workbuddy-ai/deepseek-v4.1-flash:max",
-      smol: "magpie/workbuddy-ai/deepseek-v4.1-flash:max",
-      memory: "magpie/workbuddy-ai/deepseek-v4.1-flash:max",
-    });
-    // 状态面只暴露非密字段，绝不带 apiKey/凭据。
-    assert.equal(JSON.stringify(status).includes(FAKE_KEY), false);
-
-    const out = writePrivateMemoryConfig({ agentDir, model: "magpie/workbuddy-ai/deepseek-v4.1-flash:max", sourceFile });
-    assert.deepEqual(out.written, ["models.yml"]);
-    const text = readFileSync(join(agentDir, "models.yml"), "utf8");
-    assert.ok(text.includes("auth: none"));
-    assert.ok(text.includes("workbuddy-ai/deepseek-v4.1-flash"));
-    assert.ok(!text.includes(FAKE_KEY), "绝不复制凭据");
-    assert.ok(!text.includes("cpa"), "绝不复制别的 provider");
-    assert.ok(!text.includes("apiKey"), "绝不带 apiKey 字段");
-    assert.ok(!text.includes("workbuddy-ai/other"), "只复制选定模型行，不带同 provider 的其它模型");
-    assert.ok(!text.includes("gemini-3-flash"));
-    // 没有全局 config.yml 的整份复制：私有目录里只有 models.yml 与（若有的）记忆目录。
-    assert.deepEqual(readdirSync(agentDir).sort(), ["models.yml"]);
-    assert.equal(existsSync(join(agentDir, "config.yml")), false);
-    assert.equal(existsSync(join(agentDir, "agent.db")), false);
-
-    // 非 keyless（cpa 带 apiKey）必须失败关闭，且不写文件。
-    const cpaStatus = memoryPrereqStatus({ model: "cpa/gemini-3-flash", agentDir: join(home, "agent-cpa"), sourceFile });
-    assert.equal(cpaStatus.ready, false);
-    assert.match(cpaStatus.reason, /凭据类键|auth: none|loopback/);
-    assert.throws(
-      () => writePrivateMemoryConfig({ agentDir: join(home, "agent-cpa"), model: "cpa/gemini-3-flash", sourceFile }),
-      (e) => e.code === "memory_prereq_missing" && e.status === 409,
-    );
-    assert.equal(existsSync(join(home, "agent-cpa", "models.yml")), false);
-
-    // 假 broker（只有 URL 没有 token）不是授权。
-    const prevUrl = process.env.OMP_AUTH_BROKER_URL;
-    const prevToken = process.env.OMP_AUTH_BROKER_TOKEN;
-    try {
-      process.env.OMP_AUTH_BROKER_URL = "http://127.0.0.1:8765";
-      delete process.env.OMP_AUTH_BROKER_TOKEN;
-      const fake = memoryPrereqStatus({ model: "cpa/gemini-3-flash", agentDir: join(home, "agent-fake"), sourceFile });
-      assert.equal(fake.ready, false, "只有 broker URL 没有 token 绝不能算就绪");
-      assert.match(fake.reason, /bearer token|token/);
-      // 带 token 的 broker 才算真前置；凭据行被剔除而不是复制（broker 在运行时给凭据）。
-      process.env.OMP_AUTH_BROKER_TOKEN = "test-token-not-a-real-credential";
-      const real = memoryPrereqStatus({ model: "cpa/gemini-3-flash", agentDir: join(home, "agent-broker"), sourceFile });
-      assert.equal(real.ready, true, real.reason);
-      assert.equal(real.source, "native-auth-broker");
-      assert.deepEqual(real.stripped.sort(), ["apiKey", "authHeader"]);
-      writePrivateMemoryConfig({ agentDir: join(home, "agent-broker"), model: "cpa/gemini-3-flash", sourceFile });
-      const brokerText = readFileSync(join(home, "agent-broker", "models.yml"), "utf8");
-      assert.ok(!brokerText.includes(FAKE_KEY), "broker 路径也绝不复制凭据值");
-      assert.ok(!/apiKey|authHeader/.test(brokerText), "broker 路径剔除凭据行");
-    } finally {
-      if (prevUrl === undefined) delete process.env.OMP_AUTH_BROKER_URL;
-      else process.env.OMP_AUTH_BROKER_URL = prevUrl;
-      if (prevToken === undefined) delete process.env.OMP_AUTH_BROKER_TOKEN;
-      else process.env.OMP_AUTH_BROKER_TOKEN = prevToken;
-    }
-
-    // 安全夹具：flow headers、引号键、被模型级 baseUrl 遮住的带凭据 provider baseUrl 都失败关闭。
-    const badFlow = join(home, "bad-flow.yml");
-    writeFileSync(badFlow, ["providers:", "  p:", "    baseUrl: http://127.0.0.1:1/v1", "    auth: none", `    headers: {authorization: "Bearer ${FAKE_KEY}"}`, "    models:", "      - id: m", ""].join("\n"));
-    const flow = memoryPrereqStatus({ model: "p/m", agentDir: join(home, "agent-flow"), sourceFile: badFlow });
-    assert.equal(flow.ready, false);
-    assert.match(flow.reason, /flow|锚点/);
-
-    const badQuoted = join(home, "bad-quoted.yml");
-    writeFileSync(badQuoted, ["providers:", "  p:", "    baseUrl: http://127.0.0.1:1/v1", "    auth: none", `    "apiKey": "${FAKE_KEY}"`, "    models:", "      - id: m", ""].join("\n"));
-    const quoted = memoryPrereqStatus({ model: "p/m", agentDir: join(home, "agent-quoted"), sourceFile: badQuoted });
-    assert.equal(quoted.ready, false);
-    assert.match(quoted.reason, /引号键|无法识别/);
-
-    const badUserinfo = join(home, "bad-userinfo.yml");
-    writeFileSync(badUserinfo, ["providers:", "  p:", `    baseUrl: https://user:${FAKE_PW}@example.com/v1`, "    auth: none", "    models:", "      - id: m", "        baseUrl: http://127.0.0.1:3425/v1", ""].join("\n"));
-    const shadowed = memoryPrereqStatus({ model: "p/m", agentDir: join(home, "agent-userinfo"), sourceFile: badUserinfo });
-    assert.equal(shadowed.ready, false, "provider 级 baseUrl 带 userinfo 不能因为模型级是 loopback 就放行");
-    assert.match(shadowed.reason, /userinfo/);
-    assert.equal(JSON.stringify(shadowed).includes(FAKE_PW), false, "状态面不回显凭据");
-
-    // 私有文件已存在且不是本工具生成的（没有生成标记）→ 原样保留，不改写用户文件。
-    const userAgent = join(home, "agent-user");
-    mkdirSync(userAgent, { recursive: true });
-    const userText = "providers:\n  mine:\n    baseUrl: http://127.0.0.1:9/v1\n    auth: none\n    models:\n      - id: m\n";
-    writeFileSync(join(userAgent, "models.yml"), userText);
-    const kept = writePrivateMemoryConfig({ agentDir: userAgent, model: "mine/m" });
-    assert.deepEqual(kept.written, []);
-    assert.equal(kept.preserved.includes("models.yml"), true);
-    assert.equal(readFileSync(join(userAgent, "models.yml"), "utf8"), userText);
-  } finally {
-    rmSync(home, { recursive: true, force: true });
-  }
-});
-
-await test("记忆运行时隔离：私有 agentDir + 清 profile + 只有私有 models.yml", async () => {
+await test("记忆运行时：不改 PI_CODING_AGENT_DIR，overlay 记忆段是 mnemopi，不生成私有 models.yml", async () => {
   const home = mkdtempSync(join(tmpdir(), "ompbot-memrun-"));
-  const sourceFile = join(home, "models.yml");
   const envKeys = ["PI_CODING_AGENT_DIR", "OMP_PROFILE", "PI_PROFILE"];
   const previousEnv = envKeys.map((key) => process.env[key]);
   try {
-    process.env.PI_CODING_AGENT_DIR = home;
-    delete process.env.OMP_PROFILE;
-    delete process.env.PI_PROFILE;
-    writeFileSync(
-      sourceFile,
-      [
-        "providers:",
-        "  magpie:",
-        "    baseUrl: http://127.0.0.1:3425/v1",
-        "    api: openai-completions",
-        "    auth: none",
-        "    models:",
-        "      - id: m1",
-        "        name: M1",
-        "",
-      ].join("\n"),
-    );
-    const rt = new BotRuntime({
-      bot: {
-        id: "bot_iso", name: "Iso", role: "", instructions: "", model: "magpie/m1", thinking: "",
-        isMain: false, executionMode: "supervised", approvalMode: "write", workspace: "",
-        memoryEnabled: true, skills: null, budget: null, createdAt: Date.now(),
-      },
-      scope: "private",
-      home,
-      bin: "omp-fixture",
-    });
-    // 私有点位与私有 provider 文件必须真在 Bot 目录内，且不复制全局配置/凭据。
-    rt._writePrivateModelConfig();
-    assert.equal(existsSync(join(rt.agentDir, "models.yml")), true);
-    assert.equal(existsSync(join(rt.agentDir, "config.yml")), false, "绝不复制全局 config.yml");
-    const text = readFileSync(join(rt.agentDir, "models.yml"), "utf8");
-    assert.ok(text.includes("auth: none"));
-    assert.ok(!text.includes("apiKey"));
-
-    // 环境：私有 agentDir + profile 变量被清掉（profile 会把 agentDir 顶回 profiles/<name>/agent）。
-    process.env.OMP_PROFILE = "isolation-fixture";
-    process.env.PI_PROFILE = "isolation-fixture";
+    for (const key of envKeys) delete process.env[key];
+    const base = {
+      id: "bot_mem", name: "Mem", role: "", instructions: "", model: "magpie/m1:high", thinking: "",
+      isMain: false, executionMode: "supervised", approvalMode: "write", workspace: "",
+      memoryEnabled: true, skills: null, budget: null, createdAt: Date.now(),
+    };
+    const rt = new BotRuntime({ bot: base, scope: "private", home, bin: "omp-fixture" });
     const env = rt.buildEnv();
-    assert.equal(env.PI_CODING_AGENT_DIR, rt.agentDir);
-    assert.equal(env.OMP_PROFILE, undefined);
-    assert.equal(env.PI_PROFILE, undefined);
-    assert.ok(rt.agentDir.startsWith(join(home, "bots", "bot_iso", "private")));
+    assert.equal("PI_CODING_AGENT_DIR" in env, false, "开记忆也不设 PI_CODING_AGENT_DIR");
+    assert.equal(rt.agentDir, undefined);
 
-    // 未开记忆的 bot 不带私有 agentDir（保持现状，后端仍由用户全局配置决定）。
-    const plain = new BotRuntime({
-      bot: { ...rt.bot, id: "bot_plain", memoryEnabled: false, model: "" },
-      scope: "private",
-      home,
-      bin: "omp-fixture",
-    });
-    const plainEnv = plain.buildEnv();
-    assert.equal(plainEnv.PI_CODING_AGENT_DIR, home);
-    assert.equal(existsSync(join(plain.agentDir, "models.yml")), false);
+    rt._buildArgs();
+    const overlay = readFileSync(join(rt.baseDir, "isolate.yml"), "utf8");
+    const dbPath = join(home, "team", ".memory", "mnemopi.db");
+    assert.match(overlay, /^memory:\n  backend: mnemopi$/m);
+    assert.match(overlay, /^  scoping: global$/m);
+    assert.ok(overlay.includes(`  bank: "bot-bot_mem"`), overlay);
+    assert.ok(overlay.includes(`  dbPath: ${JSON.stringify(dbPath)}`), "库文件在 team/.memory");
+    assert.match(overlay, /^  embeddingVariant: multilingual$/m);
+    assert.match(overlay, /^autolearn:\n  enabled: false$/m, "autolearn 关掉");
+    assert.match(overlay, /^modelRoles:\n  default: magpie\/m1:high\n  smol: magpie\/m1:high\n  memory: magpie\/m1:high$/m);
+    assert.equal(existsSync(join(rt.baseDir, "agent")), false, "不生成私有 agentDir");
+
+    // 用户自己设了 PI_CODING_AGENT_DIR 或 profile：原样转给子进程（那是用户的 omp 配置），不换成 bot 目录。
+    process.env.PI_CODING_AGENT_DIR = join(home, "user-agent");
+    process.env.OMP_PROFILE = "work";
+    const passEnv = rt.buildEnv();
+    assert.equal(passEnv.PI_CODING_AGENT_DIR, join(home, "user-agent"));
+    assert.equal(passEnv.OMP_PROFILE, "work");
+    for (const key of envKeys) delete process.env[key];
+
+    // 没开记忆：记忆段是 off，没有 mnemopi 段和 modelRoles。
+    const plain = new BotRuntime({ bot: { ...base, id: "bot_plain", memoryEnabled: false }, scope: "private", home, bin: "omp-fixture" });
+    plain._buildArgs();
+    const plainOverlay = readFileSync(join(plain.baseDir, "isolate.yml"), "utf8");
+    assert.match(plainOverlay, /^memory:\n  backend: off$/m);
+    assert.equal(plainOverlay.includes("mnemopi"), false);
+    assert.equal(plainOverlay.includes("modelRoles"), false);
   } finally {
     envKeys.forEach((key, i) => {
       if (previousEnv[i] === undefined) delete process.env[key];

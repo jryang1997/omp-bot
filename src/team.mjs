@@ -98,6 +98,7 @@ export function teamRoot(home) {
  * - workDir：私有文件，客机挂到 ~/work
  * - sessionDir：按 scope 分开的会话
  * - baseDir：运行时生成的 persona.md、isolate.yml（不进 team）
+ * - memoryDbPath：所有 bot 共用的 mnemopi 库，按 bank 分
  */
 export function teamPaths(home, botId, scope = "private") {
   const root = teamRoot(home);
@@ -113,8 +114,16 @@ export function teamPaths(home, botId, scope = "private") {
     librarySkillsDir: join(root, "skills"),
     sessionDir: join(cwd, "sessions", safeScope(scope)),
     baseDir,
-    agentDir: join(baseDir, "agent"),
+    memoryDbPath: join(root, ".memory", "mnemopi.db"),
   };
+}
+
+/**
+ * 一个 bot 的记忆 bank 名：bot-<id>。规则和 omp 的 sanitizeBankName 一致，
+ * 状态面按这个名字查库里的行（mnemopi 的 session_id 就是 bank）。
+ */
+export function memoryBank(botId) {
+  return `bot-${botId}`.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
 /**

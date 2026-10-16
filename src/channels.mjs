@@ -945,7 +945,7 @@ export class FeishuBridge {
     const source = `feishu:${identity.key}`;
     let run;
     try {
-      run = await this.orch.startRun({ botId: plan.botId, text: plan.text, kind: "chat", source });
+      run = await this.orch.startRun({ botId: plan.botId, text: plan.text, kind: "chat", source, sender: identity.label ? `飞书 ${identity.label}` : "飞书" });
     } catch (e) {
       await this.#deliver({ chatId, key: `err_${identity.key}_${this.#now()}`, text: `无法发起任务：${e.message}` });
       return { action: "run_rejected", runId: null };

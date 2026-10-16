@@ -4,52 +4,27 @@
 // 不复制 skill registry、不建第二记忆后端、不发明原生没有的 API。读不到的字段如实写 unknown，
 // 前置条件不满足时明确拒绝（4xx + 原因），而不是给假成功。
 
-import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, relative } from "node:path";
-import { clone, ferr, humanBytes, isInsideRoot } from "./util.mjs";
-import { memoryPrereqStatus } from "../memory-config.mjs";
-import { buildRuntimeEnv } from "../bot.mjs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { clone, ferr } from "./util.mjs";
 import { COMPUTER_TOOL_NAMES } from "./computers.mjs";
 import { computerIdFor, permissionOf } from "../domain.mjs";
-import { listSkills, parseSkillFrontmatter, teamPaths } from "../team.mjs";
-
-/**
- * 记忆路径必须在 Bot 私有目录内，且链路上不能有符号链接/junction。
- * 逐级 lstat（不跟随）判定：stat/existsSync 会穿透 reparse point，Windows 上对 junction 内的路径
- * 还可能直接报 UNKNOWN，靠 existsSync 往上找「最近存在的祖先」会把 junction 整级跳过。
- */
-function assertMemoryPath(root, target) {
-  if (!lexicallyUnder(root, target)) throw ferr(403, "memory_out_of_bot", "记忆路径不在 Bot 私有目录内");
-  const rel = relative(root, target);
-  if (isAbsolute(rel) || rel.split(/[\\/]+/).includes("..")) {
-    throw ferr(403, "memory_out_of_bot", "记忆路径不在 Bot 私有目录内");
-  }
-  let current = root;
-  for (const part of rel.split(/[\\/]+/).filter(Boolean)) {
-    current = join(current, part);
-    let st;
-    try {
-      st = lstatSync(current);
-    } catch (e) {
-      if (e?.code === "ENOENT") break; // 尾部还不存在：没有可借道的实体，后续 mkdir 会重建
-      throw ferr(403, "memory_out_of_bot", `记忆路径无法安全校验（${e?.code ?? e?.message}）`);
-    }
-    if (st.isSymbolicLink()) throw ferr(403, "memory_out_of_bot", "记忆路径经过符号链接或超出 Bot 私有目录");
-  }
-}
+import { listSkills, memoryBank, parseSkillFrontmatter, teamPaths } from "../team.mjs";
+import { MEMORY_EMBEDDING_VARIANT } from "../persona.mjs";
+import { DatabaseSync } from "node:sqlite";
 
 const SERVER_NAME_RE = /^[A-Za-z0-9_.:-][A-Za-z0-9_.: -]{0,98}$/;
 const SECRET_KEY_RE = /(token|secret|key|pass[\s_-]*word|authorization|cookie|credential)/i;
-const MAX_MEMORY_FILE_BYTES = 64 * 1024;
+const MEMORY_LIST_LIMIT = 50;
+const MEMORY_CONTENT_CLIP = 2000;
+const EMBEDDING_MODELS = { multilingual: "intfloat/multilingual-e5-large", en: "BAAI/bge-base-en-v1.5" };
 
 /**
  * Bot 的路径（与 BotRuntime/runtimeDirs 同一来源：团队目录模块）。
  * cwd 是 team/bots/<id>，项目级 .omp/（MCP、技能、配置）在这里；workDir 是它下面的 work/。
  * 用户选的 workspace 只用 --add-dir 加入，作为单独的允许读根返回，绝不当作 cwd
  * （否则项目级 MCP 配置/技能发现/检查点会写到用户工作区，而原生进程读不到）。
- * @returns {{cwd:string,baseDir:string,workDir:string,sessionDir:string,agentDir:string,workspace:string|null}}
+ * @returns {{cwd:string,baseDir:string,workDir:string,sessionDir:string,memoryDbPath:string,workspace:string|null}}
  */
 export function botPaths(orch, home, botId, scope = "private") {
   const provided =
@@ -65,11 +40,6 @@ export function botPaths(orch, home, botId, scope = "private") {
     sessionDir: rt?.sessionDir ?? paths.sessionDir,
     workspace,
   };
-}
-
-/** 原生 memory 目录名（二进制证据：join(memoryRoot, `--${lower(projectKey)}` → `-`)). */
-export function memorySlug(projectPath) {
-  return `--${String(projectPath).toLowerCase().replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
 }
 
 function readText(path, max = 200_000) {
@@ -207,7 +177,6 @@ export class NativeFeatures {
     this.home = home;
     this.bin = bin;
     this.paused = new Map(); // `${botId}::${scope}` → takeover record
-    this.memoryProbe = new Map(); // agentDir → {ok, error, at}
     const rooms = orch.listRooms?.() ?? [];
     for (const bot of orch.listBots?.() ?? []) {
       const scopes = ["private", ...rooms.filter((room) => room.members.includes(bot.id)).map((room) => `room:${room.id}`)];
@@ -477,223 +446,63 @@ export class NativeFeatures {
     return this.orch.installSkill({ ...body, botId });
   }
 
-  // ---------------- Memory（原生 local 后端，只管理 scoped 文件） ----------------
-
-  memoryRootCandidates(botId, scope = "private") {
-    const { agentDir, cwd } = this.paths(botId, scope);
-    const key = memorySlug(cwd);
-    const dir = join(agentDir, "memories", key);
-    return [{ dir, key, source: existsSync(dir) ? "native-existing" : "derived-native-key" }];
-  }
+  // ---------------- 记忆（mnemopi，每个 bot 一个 bank，只读） ----------------
 
   /**
-   * 无凭据模型来源的真实状态（与 CoreOwner 的 addBot/updateBot 门控同一处 helper）：
-   * 私有 models.yml 里选定 provider 声明 auth: none + loopback（原生 keyless），
-   * 或配置了带 token 的原生 auth broker。named profile 只换目录，不提供凭据，不算授权。
-   */
-  modelSource(botId, scope = "private") {
-    const bot = this.#requireBot(botId);
-    const { agentDir } = this.paths(botId, scope);
-    const rt = this.liveRuntime(botId, scope);
-    const status = memoryPrereqStatus({ model: bot.model, agentDir });
-    const envAgentDir = rt?.rpc?.env?.PI_CODING_AGENT_DIR ?? null;
-    const profileEnv = rt?.rpc?.env?.OMP_PROFILE ?? rt?.rpc?.env?.PI_PROFILE ?? null;
-    return {
-      ...status,
-      runtimeAgentDir: envAgentDir,
-      // 运行时若带 profile 变量，原生会把 agentDir 重定位到 profiles/<name>/agent，私有目录失效。
-      runtimeProfile: profileEnv,
-      runtimeIsolated: !!rt && envAgentDir === agentDir && !profileEnv,
-    };
-  }
-
-  /**
-   * 记忆状态。只有同时满足（私有 agentDir 在 Bot 目录内 + 选定模型在私有目录无凭据可用 +
-   * runtime 已按该 env 起且没被 profile 顶掉）才 available；否则明确拒绝，绝不落到共享 agentDir。
+   * 记忆状态。库是 team/.memory/mnemopi.db，所有 bot 一个文件，按 bank（bot-<id>）分。
+   * 这里只读：写入、遗忘都由 bot 自己在会话里做，omp-bot 不和 omp 进程抢着写同一个库。
    */
   memoryStatus(botId, scope = "private") {
     const bot = this.#requireBot(botId);
-    const { agentDir, workDir, cwd } = this.paths(botId, scope);
-    const isolated = isInsideRoot(join(this.home, "bots", botId), agentDir) || lexicallyUnder(join(this.home, "bots", botId), agentDir);
-    const source = this.modelSource(botId, scope);
-    const candidate = this.memoryRootCandidates(botId, scope)[0];
-    const memoryFile = join(candidate.dir, "MEMORY.md");
-    const learnedFile = join(candidate.dir, "learned.md");
-    const stat = (p) => (existsSync(p) ? lstatSync(p).size : 0);
-
-    const reasons = [];
-    if (bot.memoryEnabled !== true) reasons.push("bot.memoryEnabled=false（未开启原生 local 记忆）");
-    if (!isolated) reasons.push("私有 agentDir 不在 Bot 目录内");
-    if (!source.ready) reasons.push(`缺少无凭据模型来源（${source.reason}）`);
-    if (bot.memoryEnabled === true && !source.runtimeIsolated) {
-      reasons.push(
-        source.runtimeProfile
-          ? `runtime 带 profile 变量（${source.runtimeProfile}），原生会把 agentDir 重定位到 profiles/<name>/agent`
-          : "runtime 未以私有 PI_CODING_AGENT_DIR 启动（请在 Bot 启动前生效）",
-      );
-    }
-
+    const { memoryDbPath } = this.paths(botId, scope);
+    const dbPath = memoryDbPath ?? teamPaths(this.home, botId, scope).memoryDbPath;
+    const bank = memoryBank(botId);
+    const enabled = bot.memoryEnabled === true;
+    const read = readMemoryBank(dbPath, bank, 0);
     return {
-      enabled: bot.memoryEnabled === true,
-      available: reasons.length === 0,
-      reasons,
-      backend: "native-local",
-      root: candidate.dir,
-      rootSource: candidate.source,
-      isolation: { agentDir, cwd, workDir, insideBotHome: isolated, runtimeEnvMatch: source.runtimeIsolated },
-      files: {
-        "MEMORY.md": { exists: existsSync(memoryFile), bytes: stat(memoryFile), path: memoryFile },
-        "learned.md": { exists: existsSync(learnedFile), bytes: stat(learnedFile), path: learnedFile },
-      },
-      nativeClear: "disabled",
-      nativeClearReason:
-        "原生 /memory clear 会删除整个共享 jobs/threads/stage1 表，因此本接口不调用它；清理只截断本 Bot 私有目录里的两个文件。",
-      nativePrereq: {
-        ready: source.ready,
-        source: source.source,
-        reason: source.reason,
-        model: source.model,
-        provider: source.provider,
-        modelId: source.modelId,
-        auth: source.auth,
-        endpoint: source.endpoint,
-        loopback: source.loopback,
-        broker: source.broker,
-        providerSource: source.providerSource,
-        runtimeIsolated: source.runtimeIsolated,
-        files: source.files,
-        enforcingGate: "addBot/updateBot 与 runtime 启动共用 memoryPrereqStatus；不满足即 memory_prereq_missing",
-      },
-      capabilities: this.memoryProbe.get(agentDir) ?? null,
-      howTo: reasons.length
-        ? [
-            "给 Bot 显式选择本机 keyless 模型：<provider>/<model-id>（provider 在 models.yml 里声明 auth: none 且 baseUrl 指向 loopback）。",
-            "或配置带 token 的原生 auth broker（OMP_AUTH_BROKER_URL + OMP_AUTH_BROKER_TOKEN / <configRoot>/auth-broker.token）。",
-            "Bot 启动时由 runtime 写私有 models.yml 并设 PI_CODING_AGENT_DIR=<bot>/agent；本接口不会替你改全局认证。",
-          ]
-        : [],
+      enabled,
+      available: enabled,
+      reasons: enabled ? [] : ["记忆没开。在设置里打开，bot 下次启动生效。"],
+      backend: "mnemopi",
+      scoping: "global",
+      bank,
+      dbPath,
+      dbExists: read.exists,
+      dbBytes: read.bytes,
+      counts: read.counts,
+      readError: read.error,
+      embedding: { variant: MEMORY_EMBEDDING_VARIANT, model: EMBEDDING_MODELS[MEMORY_EMBEDDING_VARIANT] ?? null },
+      modelRoles: bot.model ? { default: bot.model, smol: bot.model, memory: bot.model } : null,
+      note: "私聊和群聊共用这一个 bank。要 bot 忘掉某件事，直接跟它说。",
     };
   }
 
-  /** 用原生 reader 验证「我们算出来的目录」与 OMP 实际解析的是同一个（一次性、带缓存）。 */
-  async verifyMemoryPath(botId, scope = "private") {
-    const status = this.memoryStatus(botId, scope);
-    if (!status.available) throw ferr(409, "memory_unavailable", "先启动已开启私有记忆的 Bot 再验证目录", { memory: status });
-    const { agentDir, cwd } = this.paths(botId, scope);
-    const cached = this.memoryProbe.get(agentDir);
-    if (cached?.ok) return cached;
-    const candidate = this.memoryRootCandidates(botId, scope)[0];
-    const name = `.ompbot-probe-${randomUUID()}.txt`;
-    const probePath = join(candidate.dir, name);
-    const root = this.paths(botId, scope).baseDir;
-    assertMemoryPath(root, probePath);
-    mkdirSync(candidate.dir, { recursive: true });
-    const marker = randomUUID();
-    writeFileSync(probePath, marker, { flag: "wx" });
-    const env = { ...buildRuntimeEnv(), PI_CODING_AGENT_DIR: agentDir };
-    delete env.OMP_PROFILE;
-    delete env.PI_PROFILE;
-    let out;
-    try {
-      out = await new Promise(resolve => execFile(this.bin, ["read", `memory://root/${name}`], {
-        cwd, env, timeout: 20_000, windowsHide: true, maxBuffer: 4 * 1024 * 1024,
-      }, (error, stdout, stderr) => resolve({ code: error ? error.code ?? 1 : 0, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") })));
-    } finally {
-      rmSync(probePath, { force: true });
-    }
-    const result = { ok: out.code === 0 && out.stdout.includes(marker), at: Date.now(), source: "native-reader-memory://root", dir: candidate.dir };
-    if (!result.ok) result.error = (out.stderr || out.stdout || `exit ${out.code}`).slice(0, 400).trim();
-    this.memoryProbe.set(agentDir, result);
-    return result;
-  }
-
+  /** 状态加最近的记忆条目（新的在前）。没开记忆也能看库里留下的内容。 */
   memoryRead(botId, scope = "private") {
     const status = this.memoryStatus(botId, scope);
-    if (!status.available) {
-      throw ferr(409, "memory_unavailable", `原生 local 记忆不可用：${status.reasons.join("；")}`, { memory: status });
-    }
-    const read = (f) => {
-      const p = status.files[f].path;
-      assertMemoryPath(this.paths(botId, scope).baseDir, p);
-      return existsSync(p) ? readFileSync(p, "utf8") : "";
-    };
-    return {
-      ...status,
-      content: { "MEMORY.md": read("MEMORY.md"), "learned.md": read("learned.md") },
-    };
-  }
-
-  memoryWrite(botId, scope, body = {}) {
-    const status = this.memoryStatus(botId, scope);
-    if (!status.available) {
-      throw ferr(409, "memory_unavailable", `原生 local 记忆不可用：${status.reasons.join("；")}`, { memory: status });
-    }
-    const file = String(body.file ?? "MEMORY.md");
-    if (file !== "MEMORY.md" && file !== "learned.md") {
-      throw ferr(400, "invalid_field", "只管理 MEMORY.md 与 learned.md");
-    }
-    const content = typeof body.content === "string" ? body.content : "";
-    if (Buffer.byteLength(content, "utf8") > MAX_MEMORY_FILE_BYTES) {
-      throw ferr(413, "memory_too_large", `内容超过 ${humanBytes(MAX_MEMORY_FILE_BYTES)}`);
-    }
-    const path = status.files[file].path;
-    assertMemoryPath(this.paths(botId, scope).baseDir, path);
-    mkdirSync(dirname(path), { recursive: true });
-    const tmp = `${path}.tmp-${randomUUID()}`;
-    try {
-      writeFileSync(tmp, content, { flag: "wx" });
-      renameSync(tmp, path);
-    } finally {
-      rmSync(tmp, { force: true });
-    }
-    this.orch.emit?.("bot_memory_updated", { botId, scope, file, bytes: Buffer.byteLength(content, "utf8") });
-    return this.memoryStatus(botId, scope);
-  }
-
-  /** 清理：只截断 Bot 私有目录里的文件；不调原生 /memory clear（它会删共享表）。 */
-  memoryClear(botId, scope = "private") {
-    const status = this.memoryStatus(botId, scope);
-    if (!status.available) {
-      throw ferr(409, "memory_unavailable", `原生 local 记忆不可用：${status.reasons.join("；")}`, { memory: status });
-    }
-    const backupRoot = join(this.home, "checkpoints", "memory-backups", botId);
-    const cleared = [];
-    for (const file of ["MEMORY.md", "learned.md"]) {
-      const path = status.files[file].path;
-      // 先做路径围栏再判存在：existsSync 会穿过 junction，先跳过就把逃逸路径静默当成「没有这个文件」。
-      assertMemoryPath(this.paths(botId, scope).baseDir, path);
-      if (!existsSync(path)) continue;
-      mkdirSync(backupRoot, { recursive: true });
-      const backup = join(backupRoot, `${file}.${Date.now()}.bak`);
-      writeFileSync(backup, readFileSync(path));
-      writeFileSync(path, "");
-      cleared.push({ file, backup, at: Date.now() });
-    }
-    this.orch.emit?.("bot_memory_cleared", { botId, scope, cleared: cleared.map((c) => c.file) });
-    return { ...this.memoryStatus(botId, scope), cleared };
+    const read = readMemoryBank(status.dbPath, status.bank, MEMORY_LIST_LIMIT);
+    return { ...status, memories: read.memories, readError: read.error ?? status.readError };
   }
 
   // ---------------- Browser 接管（原生 browser Eval prelude，人工期间暂停 Bot） ----------------
 
-  /** 该 Bot 生效的配置文件，按原生 settings.ts 层级：--config overlay > 项目 > 全局 agentDir。 */
+  /** 该 Bot 生效的配置文件，按原生 settings.ts 层级：--config overlay > 项目。全局层是用户自己的 agentDir，这里不读。 */
   browserConfigPaths(botId, scope = "private") {
-    const { cwd, agentDir, baseDir } = this.paths(botId, scope);
+    const { cwd, baseDir } = this.paths(botId, scope);
     return [
       { path: join(baseDir, "isolate.yml"), scope: "overlay-config" },
       { path: join(cwd, ".omp", "config.yml"), scope: "project-config" },
-      { path: join(agentDir, "config.yml"), scope: "global-config" },
     ];
   }
 
   /**
    * 读 Bot 生效的 browser 相关设置（只读原生配置文件，不复制设置系统）。
    * 按原生层级 overlay > project > global，取最高优先级的显式 `browser.enabled`；缺失写 unknown。
-   * 若 runtime 没有把 agentDir 钉到 Bot 私有目录，原生读的全局层是用户自己的 agentDir，
-   * 本接口不读用户级文件，只如实标注该层未纳入判定。
+   * 全局层是用户自己的 agentDir，本接口不读用户级文件，只如实标注该层未纳入判定。
    */
   browserSettings(botId, scope = "private") {
     const layers = this.browserConfigPaths(botId, scope);
-    const { baseDir, agentDir } = this.paths(botId, scope);
+    const { baseDir } = this.paths(botId, scope);
     const files = {};
     let explicitAt = null;
     let explicitRaw = null;
@@ -717,8 +526,7 @@ export class NativeFeatures {
         explicitSource = layer.scope;
       }
     }
-    const envAgentDir = this.liveRuntime(botId, scope)?.rpc?.env?.PI_CODING_AGENT_DIR ?? null;
-    const globalLayer = envAgentDir === agentDir ? "bot-private-agent-dir" : "user-agent-dir-not-read";
+    const globalLayer = "user-agent-dir-not-read";
     return {
       files,
       explicitEnabled,
@@ -727,10 +535,8 @@ export class NativeFeatures {
       source: explicitSource ?? (explicitAt == null ? "unknown" : "unparsed"),
       globalLayer,
       globalLayerNote:
-        globalLayer === "bot-private-agent-dir"
-          ? "runtime 已把 PI_CODING_AGENT_DIR 钉到 Bot 私有 agentDir，全局层已按该目录读取。"
-          : "runtime 未钉私有 agentDir，原生读的是用户自己的 agentDir（本接口不读用户级文件）；要在本 Bot 固定 browser 行为，请写 Bot 私有项目 .omp/config.yml。",
-      note: "只读 Bot 私有 overlay/项目 .omp/config.yml/私有 agentDir config.yml；原生默认 browser.enabled=true。",
+        "全局层是用户自己的 agentDir（本接口不读用户级文件）；要在本 Bot 固定 browser 行为，请写 Bot 项目 .omp/config.yml。",
+      note: "只读 Bot 的 overlay 和项目 .omp/config.yml；原生默认 browser.enabled=true。",
     };
   }
 
@@ -925,9 +731,54 @@ function pathKey(p, baseDir) {
   return p.startsWith(baseDir) ? p.slice(baseDir.length + 1) : p;
 }
 
-/** 词法范围检查（agentDir 可能还没建，故与 realpath 版互补）。 */
-function lexicallyUnder(root, target) {
-  const r = String(root).replace(/[\\/]+$/, "");
-  const t = String(target);
-  return t === r || t.startsWith(`${r}\\`) || t.startsWith(`${r}/`);
+/**
+ * 只读打开 mnemopi 库，数这个 bank 的条目，按需取最近几条。
+ * 库还没建（记忆没开过、还没存过）不算错；表结构对不上或读失败如实写 error。
+ * mnemopi 的 session_id 就是 bank 名，omp 写入时 scope 是 bank，所以按 session_id 过滤就只看到本 bot。
+ */
+function readMemoryBank(dbPath, bank, limit) {
+  const out = { exists: false, bytes: 0, counts: { working: 0, episodic: 0 }, memories: [], error: null };
+  try {
+    out.bytes = lstatSync(dbPath).size;
+    out.exists = true;
+  } catch {
+    return out;
+  }
+  let db;
+  try {
+    db = new DatabaseSync(dbPath, { readOnly: true });
+    const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name));
+    const rows = [];
+    for (const [table, kind] of [["working_memory", "working"], ["episodic_memory", "episodic"]]) {
+      if (!tables.has(table)) continue;
+      out.counts[kind] = Number(db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE session_id = ?`).get(bank)?.n ?? 0);
+      if (limit > 0) {
+        const list = db
+          .prepare(
+            `SELECT id, content, source, timestamp, created_at FROM ${table} WHERE session_id = ? AND superseded_by IS NULL ` +
+              "ORDER BY COALESCE(timestamp, created_at) DESC LIMIT ?",
+          )
+          .all(bank, limit);
+        for (const r of list) {
+          const content = String(r.content ?? "");
+          rows.push({
+            id: String(r.id),
+            kind,
+            source: r.source ?? null,
+            at: r.timestamp ?? r.created_at ?? null,
+            content: content.length > MEMORY_CONTENT_CLIP ? `${content.slice(0, MEMORY_CONTENT_CLIP)}…` : content,
+          });
+        }
+      }
+    }
+    rows.sort((x, y) => String(y.at ?? "").localeCompare(String(x.at ?? "")));
+    out.memories = rows.slice(0, limit);
+  } catch (e) {
+    out.error = `读记忆库失败：${e?.message ?? String(e)}`;
+  } finally {
+    try {
+      db?.close();
+    } catch {}
+  }
+  return out;
 }

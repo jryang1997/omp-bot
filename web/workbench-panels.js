@@ -469,14 +469,11 @@ export function createPanels({ client, deps }) {
       el("span", "bt-note", chatOnly ? (computer ? "只聊天（电脑只提供桌面）" : "只聊天") : computer ? "本机 + 共享电脑" : "本机账户权限")));
     root.append(section("权限与确认", permissionCard));
 
-    const memoryReady = capabilities?.memory?.nativePrereq?.ready === true;
-    const memoryReason = capabilities?.memory?.nativePrereq?.reason;
     const memoryToggle = checkbox(bot.memoryEnabled === true, (checked) => void patchBot(bot, { memoryEnabled: checked }));
-    if (!memoryReady && bot.memoryEnabled !== true) memoryToggle.disabled = true;
     const memoryCard = el("div", "bt-set-card");
-    memoryCard.append(row("记忆开关", memoryReady
-      ? "开启后使用这个助手的独立记忆，从下次任务生效。"
-      : `暂不能开启：${memoryReason || "尚未确认隔离模型来源"}`, memoryToggle));
+    memoryCard.append(row("记忆开关",
+      "开启后这个助手有自己的记忆库，私聊群聊通用，从下次任务生效。第一次开会下载约 2.8GB 的中文嵌入模型和运行库。",
+      memoryToggle));
     root.append(section("记忆", memoryCard));
 
     const loginCard = el("div", "bt-set-card");
@@ -1231,11 +1228,6 @@ export function createPanels({ client, deps }) {
     } catch (error) {
       probeError = error.message;
     }
-    const isolation = caps && caps.memory && typeof caps.memory.isolation === "object" ? caps.memory.isolation : null;
-    // 私有技能在 bot 目录（omp 的 cwd，team/bots/<id>）下的 .omp/skills。
-    const botDir = isolation && typeof isolation.cwd === "string" && isolation.cwd ? isolation.cwd : null;
-    const sep = botDir && botDir.includes("\\") ? "\\" : "/";
-    const skillsDir = botDir ? `${botDir.replace(/[\\/]+$/, "")}${sep}.omp${sep}skills` : null;
     const nativeCommands = caps && caps.skills && Array.isArray(caps.skills.commands) ? caps.skills.commands : null;
     const commandsError = caps && typeof caps.commandsError === "string" && caps.commandsError ? caps.commandsError : null;
     const probeNote = commandsError || probeError;
@@ -1243,7 +1235,7 @@ export function createPanels({ client, deps }) {
     const library = Array.isArray(data.library) ? data.library : [];
     const own = Array.isArray(data.private) ? data.private : [];
     const libraryDir = data.libraryDir || null;
-    const privateDir = data.privateDir || skillsDir;
+    const privateDir = data.privateDir || null;
     const saveFilter = async (next, revert) => {
       try {
         await api(`/api/bots/${encodeURIComponent(bot.id)}/skills`, { method: "PUT", body: { skills: next } });
@@ -1433,78 +1425,34 @@ export function createPanels({ client, deps }) {
 
   async function memoryPanel(bot) {
     const root = el("div", "wb-panel-body");
-    let data = null;
-    let unavailable = null;
-    try {
-      data = await api(`/api/bots/${encodeURIComponent(bot.id)}/memory`);
-    } catch (error) {
-      if (error.status === 409 && error.data?.memory) unavailable = error.data.memory;
-      else if (error.status === 404) { root.append(pendingNote("记忆", `/api/bots/${bot.id}/memory`)); return root; }
-      else throw error;
-    }
-    const status = unavailable || data;
+    const data = await apiOptional(`/api/bots/${encodeURIComponent(bot.id)}/memory`);
+    if (!data) { root.append(pendingNote("记忆", `/api/bots/${bot.id}/memory`)); return root; }
+    const counts = data.counts || {};
     const facts = el("div", "bt-set-card");
-    facts.append(kv("可用", status.available ? "是" : "否"));
-    facts.append(kv("开关", status.enabled ? "已开启" : "未开启"));
-    for (const file of Object.keys(status.files || {})) {
-      const info = status.files[file];
-      facts.append(kv(file, `${info.exists ? "存在" : "不存在"} · ${fmtSize(info.bytes)}`));
-    }
-    const memoryDetails = el("details", "wb-raw");
-    memoryDetails.append(el("summary", null, "记忆目录与原生细节"));
-    memoryDetails.append(kv("后端", status.backend || "native-local"));
-    memoryDetails.append(kv("记忆根", status.rootSource ? `${status.root}（${status.rootSource}）` : status.root));
-    memoryDetails.append(kv("隔离", status.isolation ? JSON.stringify(status.isolation) : "未知"));
-    memoryDetails.append(kv("原生 clear", status.nativeClear || "disabled"));
-    if (status.nativeClearReason) memoryDetails.append(el("div", "bt-note", status.nativeClearReason));
-    facts.append(memoryDetails);
+    facts.append(kv("开关", data.enabled ? "已开启" : "未开启（在设置里打开，下次任务生效）"));
+    facts.append(kv("条目", `${Number(counts.working || 0)} 条近期记忆 · ${Number(counts.episodic || 0)} 条整理后的记忆`));
+    if (data.readError) facts.append(el("div", "bt-note", data.readError));
+    if (data.note) facts.append(el("div", "bt-note", data.note));
+    const details = el("details", "wb-raw");
+    details.append(el("summary", null, "记忆库细节"));
+    details.append(kv("后端", data.backend || "mnemopi"));
+    details.append(kv("bank", data.bank || "未知"));
+    details.append(kv("库文件", data.dbExists ? `${data.dbPath}（${fmtSize(data.dbBytes)}）` : `${data.dbPath || "未知"}（还没建）`));
+    if (data.embedding) details.append(kv("嵌入模型", data.embedding.model || data.embedding.variant || "未知"));
+    facts.append(details);
     root.append(section("状态", facts));
 
-    if (unavailable) {
-      const reasons = el("div", "bt-set-card");
-      for (const reason of unavailable.reasons || []) reasons.append(el("div", "bt-set-row", reason));
-      root.append(section("缺少的前置项", reasons));
-      const how = el("div", "bt-set-card");
-      how.append(el("div", "bt-set-row", "到「能力」页打开「记忆开关」。开启后，Bot 会使用自己的记忆目录，新回合生效。"));
-      const setupDetails = el("details", "wb-raw");
-      setupDetails.append(el("summary", null, "模型与目录配置说明"));
-      for (const line of unavailable.howTo || []) setupDetails.append(el("div", "bt-note", line));
-      how.append(setupDetails);
-      root.append(section("如何启用", how));
-      const probe = el("div", "bt-set-card");
-      probe.append(row("路径自检", "用原生 reader 验证记忆目录与 OMP 解析一致（会临时写读一个标记文件）。", button("btn ghost", "运行自检", function () {
-        return busy(this, api(`/api/bots/${encodeURIComponent(bot.id)}/memory/probe`).then((out) => {
-          const result = out.probe || out;
-          probe.replaceChildren(kv("结果", result.ok ? "一致" : "不一致"), kv("目录", result.dir), kv("来源", result.source), kv("错误", result.error));
-        }).catch((error) => toast(`自检失败：${error.message}`, true)), "检测中…");
-      })));
-      root.append(section("路径自检", probe));
-      return root;
+    const list = el("div", "bt-set-card");
+    const memories = Array.isArray(data.memories) ? data.memories : [];
+    if (!memories.length) list.append(el("div", "bt-note", data.enabled ? "还没记下东西。多聊几轮，它会自己存。" : "库里没有这个助手的记忆。"));
+    for (const item of memories) {
+      const rowEl = el("div", "bt-set-row wb-memory-item");
+      const when = item.at ? String(item.at).replace("T", " ").slice(0, 16) : "";
+      rowEl.append(el("div", "bt-note", [when, item.kind === "episodic" ? "整理后" : "近期", item.source].filter(Boolean).join(" · ")));
+      rowEl.append(el("div", "wb-memory-text", item.content || ""));
+      list.append(rowEl);
     }
-
-    const files = Object.keys(data.content || {});
-    const editor = el("div", "wb-form");
-    const fileSelect = select(files.map((file) => [file, file]), files[0] || "MEMORY.md");
-    const area = el("textarea", "bt-textarea wb-memory-edit");
-    area.rows = 12;
-    area.setAttribute("aria-label", "记忆文件内容");
-    const paint = () => { area.value = data.content?.[fileSelect.value] ?? ""; };
-    fileSelect.onchange = paint;
-    paint();
-    editor.append(row("文件", "只管理 Bot 私有目录里的 MEMORY.md 与 learned.md。", fileSelect), area);
-    const memoryActions = el("div", "bt-actions");
-    memoryActions.append(
-      button("btn primary", "保存", function () {
-        return busy(this, api(`/api/bots/${encodeURIComponent(bot.id)}/memory`, { method: "PUT", body: { file: fileSelect.value, content: area.value } })
-          .then((next) => { data = { ...data, ...next }; toast("记忆已保存"); }), "保存中…");
-      }),
-      button("btn ghost danger", "清空两个文件", function () {
-        if (!confirm("清空该 Bot 的原生作用域记忆文件？（会先备份到 checkpoints/memory-backups，原始资料不受影响）")) return;
-        return busy(this, api(`/api/bots/${encodeURIComponent(bot.id)}/memory/clear`, { method: "POST", body: {} })
-          .then((next) => { data = { ...data, content: { "MEMORY.md": "", "learned.md": "" } }; paint(); toast(`已清空 ${(next.cleared || []).length} 个文件`); }), "清空中…");
-      }));
-    editor.append(memoryActions);
-    root.append(section("内容", editor));
+    root.append(section("最近的记忆", list));
     return root;
   }
 

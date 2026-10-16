@@ -226,6 +226,26 @@ export function hasMentionAll(text) {
  * @param {Array} o.after 排在当前说话者之后的成员（可能为空）
  * @param {string} [o.notice] 额外提示
  */
+/**
+ * omp-bot 发给 bot 的消息第一行：场景和发送者，例如「[私聊，用户]」「[群聊，产品群]」。
+ * mnemopi 存原文时这一行跟着进库，bot 以后回想得起是谁、在哪说的。
+ */
+export function sceneTag({ room = null, sender = "用户" } = {}) {
+  const clean = (v) => String(v ?? "").replace(/[\r\n\[\]]+/g, " ").trim();
+  return room ? `[群聊，${clean(room) || "未命名群"}]` : `[私聊，${clean(sender) || "用户"}]`;
+}
+
+/** 运行来源对应的发送者称呼（没有显式 sender 时用）。 */
+export function senderOf(source) {
+  const s = String(source ?? "");
+  if (!s || s === "user") return "用户";
+  if (s.startsWith("device:")) return "用户（手机）";
+  if (s.startsWith("feishu:")) return "飞书";
+  if (s === "routine") return "定时任务";
+  if (s === "bot") return "其他 bot";
+  return s;
+}
+
 export function roomPrompt({ room, members, self, turnNumber, after = [], notice }) {
   const roster = members.map((m) => (m.id === self.id ? `${m.name}（你）` : m.name)).join("、");
   const recent = room.log
@@ -235,6 +255,7 @@ export function roomPrompt({ room, members, self, turnNumber, after = [], notice
   const afterLine = after.length ? after.map((m) => m.name).join("、") : "（没有了，你是这一串的最后）";
   const otherName = members.find((m) => m.id !== self.id)?.name ?? "某人";
   return [
+    sceneTag({ room: room.name }),
     `你在群聊「${room.name}」里。成员：${roster}。`,
     notice ? `提示：${notice}` : "",
     `这是本次讨论的第 ${turnNumber} 次发言，轮到你了。你之后还排着：${afterLine}。`,

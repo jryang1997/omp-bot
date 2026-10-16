@@ -5,11 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { existsSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { makeBot, normalizeBot, permissionOf, permissionModes } from "../src/domain.mjs";
+import { makeBot, makeRoom, normalizeBot, permissionOf, permissionModes, roomPrompt, sceneTag, senderOf } from "../src/domain.mjs";
+import { writePersonaFiles, personaText } from "../src/persona.mjs";
 import { BotRuntime } from "../src/bot.mjs";
 import { Computers } from "../src/features/computers.mjs";
 import { COMPUTER_TOOL_NAMES } from "../src/constants.mjs";
-import { MIGRATION_MARKER, OLD_MEMORY_NOTE, TEAM_AGENTS_TEMPLATE, parseIdentityBlock, renderIdentityBlock, replaceIdentityBlock, skillArgs, teamPaths } from "../src/team.mjs";
+import { MIGRATION_MARKER, OLD_MEMORY_NOTE, TEAM_AGENTS_TEMPLATE, TEAM_GITIGNORE, memoryBank, parseIdentityBlock, renderIdentityBlock, replaceIdentityBlock, skillArgs, teamPaths } from "../src/team.mjs";
 import { Orchestrator } from "../src/orchestrator.mjs";
 import { permissionOf as uiPermissionOf, BOT_PERMISSION_LABELS } from "../web/workbench-core.js";
 
@@ -553,6 +554,51 @@ test("03 技能面板列出库技能和私有技能，勾选写回 bot.skills，
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+// ---------------- 04 记忆 mnemopi ----------------
+test("04 记忆库在 team/.memory，bank 是 bot-<id>，不进 git", () => {
+  const p = teamPaths("/h", "bot_abc_1", "room:r9");
+  assert.equal(p.memoryDbPath, join("/h", "team", ".memory", "mnemopi.db"));
+  assert.equal(teamPaths("/h", "bot_abc_1").memoryDbPath, p.memoryDbPath, "私聊群聊一个库");
+  assert.equal(p.agentDir, undefined);
+  assert.equal(memoryBank("bot_abc_1"), "bot-bot_abc_1");
+  assert.equal(memoryBank("we ird/id"), "bot-we-ird-id", "和 omp 的 bank 名清洗规则一致");
+  assert.ok(TEAM_GITIGNORE.includes(".memory/"));
+});
+
+test("04 开记忆的 overlay：mnemopi、global、bank、team 里的库、autolearn 关、角色钉住", () => {
+  const dir = tmp("ompbot-persona-");
+  try {
+    const bot = makeBot({ id: "bot_m", name: "M", model: "p/m", memoryEnabled: true });
+    const dbPath = join(dir, "team", ".memory", "mnemopi.db");
+    const { overlayPath } = writePersonaFiles(bot, dir, { memory: { dbPath, bank: memoryBank(bot.id) } });
+    const y = readFileSync(overlayPath, "utf8");
+    assert.match(y, /^memory:\n  backend: mnemopi\nmnemopi:\n  scoping: global\n  bank: "bot-bot_m"\n/m);
+    assert.ok(y.includes(`  dbPath: ${JSON.stringify(dbPath)}\n`));
+    assert.match(y, /^autolearn:\n  enabled: false$/m);
+    assert.match(y, /^modelRoles:\n  default: p\/m\n  smol: p\/m\n  memory: p\/m$/m);
+    assert.throws(() => writePersonaFiles(bot, dir, {}), /记忆库路径/, "缺库路径不写记忆段，免得落到用户自己的库");
+    const off = readFileSync(writePersonaFiles({ ...bot, memoryEnabled: false }, dir, {}).overlayPath, "utf8");
+    assert.match(off, /^memory:\n  backend: off$/m);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("04 消息第一行标场景和发送者", () => {
+  assert.equal(sceneTag({ sender: "张三" }), "[私聊，张三]");
+  assert.equal(sceneTag({ room: "产品群" }), "[群聊，产品群]");
+  assert.equal(sceneTag({ sender: "a]\n[b" }), "[私聊，a b]", "发送者里的换行和方括号不能伪造第二行标签");
+  assert.equal(sceneTag({ sender: "" }), "[私聊，用户]");
+  assert.equal(senderOf("user"), "用户");
+  assert.equal(senderOf("device:d1"), "用户（手机）");
+  assert.equal(senderOf("feishu:k"), "飞书");
+  assert.equal(senderOf("routine"), "定时任务");
+  const room = makeRoom({ id: "room_1", name: "产品群", members: ["bot_a"], adminId: "bot_a" });
+  const prompt = roomPrompt({ room, members: [{ id: "bot_a", name: "A" }], self: { id: "bot_a", name: "A" }, turnNumber: 1 });
+  assert.equal(prompt.split("\n")[0], "[群聊，产品群]");
+  assert.ok(personaText().includes("[私聊，用户]"), "bot 知道标签的含义");
 });
 
 for (const run of pending) await run();

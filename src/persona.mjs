@@ -10,16 +10,37 @@
 //    残留（如实披露，不宣称全封）：用户级 ~/.omp/agent/RULES.md 与用户级 mcp.json
 //    在 native 源开启时仍会加载；要一并挡掉只能废掉整个 native 源，代价是失去 bot
 //    私有项目 MCP/skills，因此选择保留。
-// 3) 记忆：默认关闭共享/本地记忆后端与 autolearn；用户显式开启时用原生 local 后端，
-//    隔离靠 BotRuntime 把 PI_CODING_AGENT_DIR 指向 bot 私有 agentDir（含 agent.db 与
-//    memories 目录）。该私有目录的模型来源由 memory-config.mjs 写成最小 models.yml
-//    （选定 provider 的非密传输行 + 选定模型行），凭据留在全局 auth store；记忆整理用的
-//    default/smol/memory 角色钉在选定模型上，不继承用户全局的 cpa/tiny 等 provider。
+// 3) 记忆：默认关闭记忆后端与 autolearn；用户显式开启时用 mnemopi，scoping 是 global，
+//    bank 是 bot-<id>，库文件在 team/.memory/mnemopi.db（所有 bot 一个文件，按 bank 分）。
+//    不改 PI_CODING_AGENT_DIR，模型和凭据走用户自己的 omp 配置；autolearn 关掉；
+//    default/smol/memory 角色钉在选定模型上，记忆抽取不落到用户全局的别的 provider。
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { COMPUTER_PROMPT_TOOLS, COMPUTER_TOOL_NAMES, DEFAULT_TASK_CONCURRENCY } from "./constants.mjs";
-import { memoryModelRoles } from "./memory-config.mjs";
+
+/**
+ * 嵌入模型。multilingual = intfloat/multilingual-e5-large，中文换说法也召回得到；
+ * 实测数据和内存代价见 CHANGELOG（0.2.0 记忆一节）。
+ */
+export const MEMORY_EMBEDDING_VARIANT = "multilingual";
+
+/**
+ * `<provider>/<model-id>[:<effort>]` 的显式选择。没有 provider 前缀返回 null（不猜 provider）。
+ */
+export function splitSelector(model) {
+  const raw = typeof model === "string" ? model.trim() : "";
+  const slash = raw.indexOf("/");
+  if (slash <= 0 || slash === raw.length - 1) return null;
+  return { raw, provider: raw.slice(0, slash), rest: raw.slice(slash + 1) };
+}
+
+/** 记忆相关角色：default、smol、memory 全钉在选定模型（值用原始 selector，含思考档）。 */
+export function memoryModelRoles(model) {
+  const sel = splitSelector(model);
+  if (!sel) return null;
+  return { default: sel.raw, smol: sel.raw, memory: sel.raw };
+}
 
 /**
  * 只关用户级上下文文件。项目级都打开：team 是 git 仓库，omp 往上找 AGENTS.md 停在 team 根，
@@ -52,7 +73,7 @@ export function personaText() {
     ``,
     `- 你可以用 message_bot 工具给团队里的其他 bot 发消息并直接拿到它的回复。`,
     `- 需要对方在后台并行处理时用 delegate_bot：它立即返回子 Run id，你之后可以继续做自己的事。`,
-    `- 收到其他 bot 的消息时，消息会带署名，形如「Message from 🤖 名字 (@id): …」。`,
+    `- 每条消息第一行是方括号标签，写着场景和发送者，形如「[私聊，用户]」「[私聊，🤖 名字 (@id)]」「[群聊，产品群]」。记事时把来源一起记下。`,
     `- 群聊里，如果这轮你没有实质内容要说，只回复 [PASS]。`,
     `- 想点名某个成员接着说，用 @名字。`,
     `- 跨合作范围（不同工作区）的私有上下文不共享；不要索要其他工作区的私有资料。`,
@@ -67,6 +88,7 @@ export function personaText() {
  * @param {object} [opts]
  * @param {string[]} [opts.extraDisabledExtensions] 额外要禁用的扩展 id（如 chat 档逐个关掉的 `mcp:<name>`）
  * @param {string} [opts.librarySkillsDir] 共享技能库目录（team/skills），写进 skills.customDirectories
+ * @param {{dbPath:string, bank:string}} [opts.memory] 开启记忆时必填：mnemopi 库文件和 bank
  */
 export function writePersonaFiles(bot, dir, opts = {}) {
   mkdirSync(dir, { recursive: true });
@@ -91,23 +113,31 @@ export function writePersonaFiles(bot, dir, opts = {}) {
   }
 
   if (bot.memoryEnabled === true) {
-    // 记忆由用户显式开启：原生 local 后端 + autolearn，根目录靠运行时环境
-    // PI_CODING_AGENT_DIR 指向本 bot 私有 agentDir（见 BotRuntime.buildEnv）。
+    const mem = opts.memory ?? {};
+    // 缺库路径就不写记忆段：omp 会退回用户自己 agentDir 下的 mnemopi 库，和用户记忆混在一个文件里。
+    if (typeof mem.dbPath !== "string" || !mem.dbPath || typeof mem.bank !== "string" || !mem.bank) {
+      throw new Error("开启记忆需要 team 里的记忆库路径和 bank 名");
+    }
+    // JSON 串就是合法的 YAML 双引号串，Windows 路径里的反斜杠和冒号不会出问题。
     lines.push(
-      "# 2) 记忆由用户显式开启：原生 local 后端；隔离依赖 PI_CODING_AGENT_DIR 指向本 bot 私有目录。",
-      "#    不改用户全局配置，也不调用原生的全局 clear（那会删掉用户所有项目的记忆队列）。",
+      "# 2) 记忆由用户显式开启：mnemopi，每个 bot 一个 bank，库在 team/.memory，私聊群聊通用。",
+      "#    autolearn 关掉，记忆只走 mnemopi 的自动召回和自动存档。",
       "memory:",
-      "  backend: local",
+      "  backend: mnemopi",
+      "mnemopi:",
+      "  scoping: global",
+      `  bank: ${JSON.stringify(mem.bank)}`,
+      `  dbPath: ${JSON.stringify(mem.dbPath)}`,
+      `  embeddingVariant: ${MEMORY_EMBEDDING_VARIANT}`,
       "autolearn:",
-      "  enabled: true",
+      "  enabled: false",
     );
-    // 记忆整理阶段用 default/smol/memory 角色选模型；不钉住就会落到用户全局配置里的
-    // cpa/tiny 等别的 provider（私有目录没有它们的定义，直接不可用）。overlay 层压在
-    // 全局配置之上，所以这三个角色只用选定模型。
+    // 记忆抽取用 smol 角色选模型；不钉住就会落到用户全局配置里的别的 provider。
+    // overlay 层压在全局配置之上，所以这三个角色只用选定模型。
     const roles = memoryModelRoles(bot.model);
     if (roles) {
       lines.push(
-        "# 2b) 记忆/整理角色钉在选定模型上（overlay 层覆盖用户全局 modelRoles）。",
+        "# 2b) 记忆相关角色钉在选定模型上（overlay 层覆盖用户全局 modelRoles）。",
         "modelRoles:",
         ...Object.entries(roles).map(([role, value]) => `  ${role}: ${value}`),
       );

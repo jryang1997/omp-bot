@@ -11,7 +11,8 @@ import { Ledger } from "../src/ledger.mjs";
 import { WorkbenchFeatures } from "../src/features.mjs";
 import { decodeBase64, sniffMime } from "../src/features/attachments.mjs";
 import { computeNextRun, advancePast, isValidTimeZone, normalizeSchedule, tzParts, zonedTimeToUtc } from "../src/features/routines.mjs";
-import { botPaths, memorySlug, parseSkillFrontmatter, validateMcpServer } from "../src/features/native.mjs";
+import { botPaths, parseSkillFrontmatter, validateMcpServer } from "../src/features/native.mjs";
+import { DatabaseSync } from "node:sqlite";
 import { canonicalFilename, isInsideRoot, lexicallyInside, sha256Hex } from "../src/features/util.mjs";
 import { symlinkSync } from "node:fs";
 import { readChannelConfig } from "../src/channels.mjs";
@@ -795,10 +796,9 @@ test("skills：私有技能总是加载，白名单只管共享库，过滤 glob
   features.native.putSkills(bot.id, { skills: null });
 });
 
-test("parseSkillFrontmatter 读 name/description，memorySlug 与原生命名一致", () => {
+test("parseSkillFrontmatter 读 name/description", () => {
   assert.deepStrictEqual(parseSkillFrontmatter("---\nname: a\ndescription: \"b c\"\n---\nx"), { name: "a", description: "b c" });
   assert.deepStrictEqual(parseSkillFrontmatter("no frontmatter"), {});
-  assert.strictEqual(memorySlug("C:\\Users\\Jerry\\Desktop\\omp_bot"), "--c--users-jerry-desktop-omp_bot--");
 });
 
 test("capabilities：汇总原生模型/工具/命令，未知字段写 unknown", async () => {
@@ -844,24 +844,57 @@ test("capabilities：汇总原生模型/工具/命令，未知字段写 unknown"
   nativeCommands = { commands: [] };
 });
 
-test("memory：未开 memoryEnabled 或缺少隔离前置时明确拒绝，绝不落到共享 agentDir", () => {
+test("memory：mnemopi 只读状态，库在 team/.memory，只看本 bot 的 bank", () => {
   const bot = mkBot({ name: "记忆Bot" });
-  const err = expectError(() => features.native.memoryRead(bot.id, "private"), "memory_unavailable", 409);
-  const mem = err.extra.memory;
-  assert.strictEqual(mem.enabled, false);
-  assert.strictEqual(mem.available, false);
-  assert.ok(mem.reasons.some((r) => r.includes("memoryEnabled")), "要说明是 memoryEnabled 未开");
-  assert.ok(mem.root.startsWith(join(home, "bots", bot.id)), "记忆根只能在 Bot 私有目录内");
-  assert.ok(!mem.root.includes(join(homedir(), ".omp")), "绝不 fallback 到用户共享 agentDir");
-  assert.strictEqual(mem.nativeClear, "disabled");
-  assert.ok(mem.nativeClearReason.includes("共享"), "要说明为何不调用原生 /memory clear");
-  assert.ok(mem.howTo.length >= 2, "要给出真实的前置配置路径");
+  const dbPath = join(home, "team", ".memory", "mnemopi.db");
+  // 库还没建：不报错，计数为 0
+  const cold = features.native.memoryRead(bot.id, "private");
+  assert.strictEqual(cold.enabled, false);
+  assert.strictEqual(cold.backend, "mnemopi");
+  assert.strictEqual(cold.scoping, "global");
+  assert.strictEqual(cold.bank, `bot-${bot.id}`);
+  assert.strictEqual(cold.dbPath, dbPath);
+  assert.strictEqual(cold.dbExists, false);
+  assert.deepStrictEqual(cold.memories, []);
+  assert.ok(cold.reasons[0].includes("没开"));
+  assert.strictEqual(cold.embedding.model, "intfloat/multilingual-e5-large");
+
+  // 一个库里两个 bank：只读到自己的，按时间新的在前
+  fsMkdirSync(join(home, "team", ".memory"), { recursive: true });
+  const db = new DatabaseSync(dbPath);
+  db.exec("CREATE TABLE working_memory (id TEXT PRIMARY KEY, content TEXT, source TEXT, timestamp TEXT, session_id TEXT, superseded_by TEXT, created_at TEXT)");
+  db.exec("CREATE TABLE episodic_memory (id TEXT PRIMARY KEY, content TEXT, source TEXT, timestamp TEXT, session_id TEXT, superseded_by TEXT, created_at TEXT)");
+  const put = (table, id, content, at, bank, superseded = null) =>
+    db.prepare(`INSERT INTO ${table} VALUES (?, ?, 'conversation', ?, ?, ?, ?)`).run(id, content, at, bank, superseded, at);
+  put("working_memory", "w1", "[私聊，用户] 我的猫叫年糕", "2026-01-01T10:00:00Z", `bot-${bot.id}`);
+  put("working_memory", "w2", "[群聊，产品群] 周五发版", "2026-01-02T10:00:00Z", `bot-${bot.id}`);
+  put("working_memory", "w3", "旧说法", "2026-01-03T10:00:00Z", `bot-${bot.id}`, "w2");
+  put("episodic_memory", "e1", "用户养猫", "2026-01-01T12:00:00Z", `bot-${bot.id}`);
+  put("working_memory", "x1", "别的 bot 的秘密", "2026-01-05T10:00:00Z", "bot-someone-else");
+  db.close();
 
   bot.memoryEnabled = true;
-  const err2 = expectError(() => features.native.memoryWrite(bot.id, "private", { file: "MEMORY.md", content: "x" }), "memory_unavailable", 409);
-  assert.ok(err2.extra.memory.reasons.some((r) => r.includes("runtime")), "runtime 未按私有 agentDir 启动也要拒绝");
-  assert.strictEqual(existsSync(join(home, "bots", bot.id, "private", "agent", "memories")), false, "拒绝时不得创建任何记忆文件");
-  expectError(() => features.native.memoryClear(bot.id, "private"), "memory_unavailable", 409);
+  const mem = features.native.memoryRead(bot.id, "private");
+  assert.strictEqual(mem.enabled, true);
+  assert.strictEqual(mem.available, true);
+  assert.strictEqual(mem.dbExists, true);
+  assert.deepStrictEqual(mem.counts, { working: 3, episodic: 1 });
+  assert.deepStrictEqual(mem.memories.map((m) => m.id), ["w2", "e1", "w1"], "被替换的旧条目不列，新的在前");
+  assert.strictEqual(mem.memories[1].kind, "episodic");
+  assert.ok(!JSON.stringify(mem).includes("别的 bot 的秘密"), "读不到别的 bank");
+  // 群聊 scope 看的是同一个 bank
+  assert.deepStrictEqual(features.native.memoryRead(bot.id, "room:r1").memories.map((m) => m.id), ["w2", "e1", "w1"]);
+  // 只读：没有写入、清空、探测
+  assert.strictEqual(features.native.memoryWrite, undefined);
+  assert.strictEqual(features.native.memoryClear, undefined);
+  assert.strictEqual(features.native.verifyMemoryPath, undefined);
+
+  // 表结构对不上：如实报错，不抛
+  fsRmSync(dbPath, { force: true });
+  fsWriteFileSync(dbPath, "not a database");
+  const broken = features.native.memoryRead(bot.id, "private");
+  assert.ok(broken.readError && broken.readError.includes("读记忆库失败"));
+  fsRmSync(dbPath, { force: true });
   bot.memoryEnabled = false;
 });
 
@@ -878,7 +911,8 @@ test("botPaths：cwd 永远是 team 里的 Bot 目录，workspace 只作独立�
   );
   assert.strictEqual(p.workDir, join(p.cwd, "work"));
   assert.strictEqual(p.sessionDir, join(p.cwd, "sessions", "room_r1"));
-  assert.strictEqual(p.agentDir, join(home, "bots", bot.id, "room_r1", "agent"));
+  assert.strictEqual(p.memoryDbPath, join(home, "team", ".memory", "mnemopi.db"));
+  assert.strictEqual(p.agentDir, undefined);
   assert.strictEqual(p.workspace, ws);
   mkdirSync(p.cwd, { recursive: true });
   const roots = features.artifacts.scanRoots({ botId: bot.id }, { cwd: p.cwd });
@@ -1198,34 +1232,6 @@ test("MCP：添加服务保留其他服务秘密与启停配置，坏原件不�
   writeFileSync(file, "{invalid");
   await expectErrorAsync(() => features.native.putMcp(bot.id, "private", { mcpServers: { third: { command: "node" } } }), "mcp_config_invalid", 409);
   assert.strictEqual(readFileSync(file, "utf8"), "{invalid");
-});
-
-test("memory：冷目录不采用其他项目记忆，读写和清理拒绝链接逃逸", () => {
-  const bot = mkBot({ model: "qa/flash", memoryEnabled: true });
-  const paths = botPaths(orch, home, bot.id);
-  mkdirSync(paths.agentDir, { recursive: true });
-  writeFileSync(join(paths.agentDir, "models.yml"), "providers:\n  qa:\n    baseUrl: http://127.0.0.1:12345/v1\n    auth: none\n    api: openai-completions\n    models:\n      - id: flash\n        contextWindow: 1000\n        maxTokens: 100\n");
-  orch.runtimes.set(`${bot.id}::private`, { rpc: { env: { PI_CODING_AGENT_DIR: paths.agentDir } }, cwd: paths.workDir });
-  const unrelated = join(paths.agentDir, "memories", "unrelated-project");
-  mkdirSync(unrelated, { recursive: true });
-  writeFileSync(join(unrelated, "learned.md"), "OTHER_PROJECT_PRIVATE");
-  features.native.memoryWrite(bot.id, "private", { file: "learned.md", content: "OWN_PRIVATE" });
-  assert.strictEqual(features.native.memoryRead(bot.id).content["learned.md"], "OWN_PRIVATE");
-  features.native.memoryClear(bot.id);
-  assert.strictEqual(features.native.memoryRead(bot.id).content["learned.md"], "");
-  assert.strictEqual(readFileSync(join(unrelated, "learned.md"), "utf8"), "OTHER_PROJECT_PRIVATE");
-  const target = join(home, "memory-external-target");
-  mkdirSync(target, { recursive: true });
-  writeFileSync(join(target, "learned.md"), "TARGET_UNCHANGED");
-  const root = features.native.memoryStatus(bot.id).root;
-  rmSync(root, { recursive: true, force: true });
-  symlinkSync(target, root, "junction");
-  expectError(() => features.native.memoryRead(bot.id), "memory_out_of_bot", 403);
-  expectError(() => features.native.memoryWrite(bot.id, "private", { file: "learned.md", content: "BAD" }), "memory_out_of_bot", 403);
-  expectError(() => features.native.memoryClear(bot.id), "memory_out_of_bot", 403);
-  assert.strictEqual(readFileSync(join(target, "learned.md"), "utf8"), "TARGET_UNCHANGED");
-  rmSync(root, { recursive: true, force: true });
-  orch.runtimes.delete(`${bot.id}::private`);
 });
 
 test("browser：重启保留人工暂停，进程退出后可归还且不假称 settled", async () => {

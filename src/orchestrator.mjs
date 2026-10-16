@@ -21,7 +21,6 @@ import { Store, defaultHome } from "./store.mjs";
 import { Ledger } from "./ledger.mjs";
 import { BotRuntime, runtimeDirs } from "./bot.mjs";
 import { TeamDir, identityFields } from "./team.mjs";
-import { memoryPrereqStatus } from "./memory-config.mjs";
 import { WorkbenchFeatures } from "./features.mjs";
 import { Relay } from "./relay.mjs";
 import {
@@ -36,6 +35,8 @@ import {
   isTerminalRunState,
   permissionOf,
   permissionModes,
+  sceneTag,
+  senderOf,
 } from "./domain.mjs";
 import {
   MAX_HOPS,
@@ -287,12 +288,6 @@ export class Orchestrator {
     const { executionMode, approvalMode } = resolvePermission(input, null);
     const id = genId("bot");
     const model = input.model ?? "";
-    // 记忆前置用真实私有目录判定：同一处 helper 供 add/update/运行时启动与状态面使用。
-    validateMemoryPrereq({
-      enabled: input.memoryEnabled === true,
-      model,
-      agentDir: runtimeDirs(this.home, id, "private").agentDir,
-    });
     const bot = makeBot({
       id,
       name: input.name,
@@ -421,16 +416,6 @@ export class Orchestrator {
     if (!bot) return null;
     // 档位只经 resolvePermission 写入：旧字段和三档都归一成一种组合，升到全部放手要确认。
     patch = { ...patch, ...resolvePermission(patch, bot) };
-    // 记忆开启的 bot 改模型同样要过前置关：否则会存下一个私有目录里没有定义的模型，
-    // 之后每次启动都失败（私有 models.yml 只有原选定 provider/模型）。
-    const nextMemoryEnabled = patch.memoryEnabled === undefined ? bot.memoryEnabled === true : patch.memoryEnabled === true;
-    if (nextMemoryEnabled && (patch.memoryEnabled !== undefined || patch.model !== undefined)) {
-      validateMemoryPrereq({
-        enabled: true,
-        model: patch.model ?? bot.model ?? "",
-        agentDir: runtimeDirs(this.home, id, "private").agentDir,
-      });
-    }
     if (patch.budget !== undefined) normalizeBudget(patch.budget, "bot.budget");
     const next = { ...bot };
     for (const k of [
@@ -895,7 +880,8 @@ export class Orchestrator {
     try {
       child = this.startRun({
         botId: target.id,
-        text: `Message from 🤖 ${fromBot.name} (@${fromBot.id}):\n${message}`,
+        text: message,
+        sender: `🤖 ${fromBot.name} (@${fromBot.id})`,
         source: "bot",
         parentRunId,
         depth: hop + 1,
@@ -979,7 +965,8 @@ export class Orchestrator {
     try {
       child = this.startRun({
         botId: target.id,
-        text: `Task from 🤖 ${fromBot.name} (@${fromBot.id}):\n${message}`,
+        text: message,
+        sender: `🤖 ${fromBot.name} (@${fromBot.id})`,
         source: "bot",
         parentRunId,
         depth: hop + 1,
@@ -1018,6 +1005,7 @@ export class Orchestrator {
       depth = 0,
       taskId = null,
       images,
+      sender = null,
     } = input;
 
     if (typeof text !== "string" || (!text.trim() && !attachmentIds.length)) {
@@ -1133,6 +1121,8 @@ export class Orchestrator {
       timeoutMs: effectiveTimeout,
       images,
       spoken: [],
+      // 发送者称呼：bot 之间传话时是「🤖 名字 (@id)」，其余按来源推断（见 senderOf）。
+      sender: typeof sender === "string" && sender.trim() ? sender.trim().slice(0, 80) : null,
     };
     this.runs.set(run.id, ctrl);
     if (parentRunId) this.runs.get(parentRunId)?.children.add(run.id);
@@ -1473,7 +1463,8 @@ export class Orchestrator {
         botId: run.botId,
         scope: run.scope,
         signal: ctrl.abort.signal,
-        text: prepared?.text ?? run.text,
+        // 第一行标上场景和发送者；台账和聊天记录里仍是原文。
+        text: `${sceneTag({ sender: ctrl.sender ?? senderOf(run.source) })}\n${prepared?.text ?? run.text}`,
         images,
         timeoutMs: ctrl.timeoutMs,
       });
@@ -2450,26 +2441,6 @@ function validateModeAuthority({ executionMode, approvalMode }) {
     throw httpErr(400, `未知审批档: ${approvalMode}`, "approval_invalid");
   }
   return true;
-}
-
-/**
- * Bot 私有记忆的前置检查（addBot/updateBot/运行时启动共用一处判定）。
- * 原生 local 记忆的 agentDir 里放 agent.db 与 memories；共用用户 agentDir 会读到用户所有会话，
- * 所以记忆只能跑在 Bot 私有 agentDir 上，而该目录的模型来源必须自带（私有 models.yml 里
- * 选定 provider 的非密传输信息 + 选定模型行），凭据仍留在全局 auth store。
- * 前置不成立就明确拒绝开启，绝不用共享 agentDir 跑本地记忆整理。
- */
-function validateMemoryPrereq({ enabled, model, agentDir }) {
-  if (!enabled) return true;
-  const status = memoryPrereqStatus({ model, agentDir });
-  if (status.ready) return true;
-  throw httpErr(
-    409,
-    `开启 Bot 私有记忆需要选定模型能在私有目录无凭据使用（${status.reason}）。` +
-      "可显式选择 loopback 且 auth: none 的原生 keyless provider（如本机 magpie），" +
-      "或配置带 token 的原生 auth broker；否则拒绝开启，避免落到用户全局会话与共享配置。",
-    "memory_prereq_missing",
-  );
 }
 
 /**

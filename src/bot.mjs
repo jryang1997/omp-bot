@@ -15,15 +15,14 @@
 // 死锁防护：turn 进行中 busy=true，且贯穿整个嵌套 message_bot 调用链
 // （A 调 B 时 A 的回合没结束，A.busy 一直为真）。编排器见目标 busy 即拒绝。
 
-import { join, isAbsolute, resolve } from "node:path";
+import { dirname, join, isAbsolute, resolve } from "node:path";
 import { mkdirSync, readdirSync, existsSync, statSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { EventEmitter } from "node:events";
 import { RpcClient } from "./rpc-client.mjs";
 import { writePersonaFiles } from "./persona.mjs";
-import { writePrivateMemoryConfig } from "./memory-config.mjs";
 import { policySignature } from "./domain.mjs";
-import { contextDigest, skillArgs, teamPaths } from "./team.mjs";
+import { contextDigest, memoryBank, skillArgs, teamPaths } from "./team.mjs";
 import {
   RPC_STARTUP_TIMEOUT_MS,
   RPC_COMMAND_TIMEOUT_MS,
@@ -184,7 +183,6 @@ export class BotRuntime extends EventEmitter {
     // cwd 是 team/bots/<id>（私聊群聊共用），会话按 scope 分开；persona/overlay 等生成文件不进 team。
     this.dirs = runtimeDirs(this.home, this.bot.id, this.scope);
     this.baseDir = opts.dir ?? this.dirs.baseDir;
-    this.agentDir = join(this.baseDir, "agent");
     this.sessionDir = opts.dir ? join(this.baseDir, "sessions") : this.dirs.sessionDir;
     this.cwd = opts.cwd ?? this.dirs.cwd;
     this.workDir = opts.cwd ? join(opts.cwd, "work") : this.dirs.workDir;
@@ -245,29 +243,11 @@ export class BotRuntime extends EventEmitter {
   }
 
   /**
-   * 子进程环境：最小放行集 + 显式开启记忆时把原生 agent 目录指向 bot 私有目录。
-   * named profile（OMP_PROFILE/PI_PROFILE）会重定位 agentDir 到 profiles/<name>/agent 并压过
-   * PI_CODING_AGENT_DIR，所以这里显式清掉 profile 变量，保证私有目录不会被继承的 profile 顶掉。
+   * 子进程环境：最小放行集。不再改 PI_CODING_AGENT_DIR，模型、凭据和用户 MCP 都走用户自己的 omp 配置；
+   * 记忆库位置由 overlay 的 mnemopi.dbPath 指到 team/.memory。
    */
   buildEnv() {
-    const env = buildRuntimeEnv();
-    if (this.bot.memoryEnabled === true) {
-      // 原生 local 记忆根 = <agentDir>/memories/...，agent.db/models.yml 都随 agentDir 走；
-      // 把 agentDir 钉到 bot 私有目录才不会读到用户全局 threads 与用户模型配置。
-      env.PI_CODING_AGENT_DIR = this.agentDir;
-      delete env.OMP_PROFILE;
-      delete env.PI_PROFILE;
-    }
-    return env;
-  }
-
-  /**
-   * 私有 agentDir 的模型来源：写最小 models.yml（选定 provider 的非密传输行 + 选定模型行），
-   * 不整份复制用户全局 config.yml/models.yml，不复制任何凭据（凭据留在全局 auth store）。
-   * 前置不满足就抛 memory_prereq_missing（失败关闭），不静默用无模型的私有目录启动。
-   */
-  _writePrivateModelConfig() {
-    return writePrivateMemoryConfig({ agentDir: this.agentDir, model: this.bot.model });
+    return buildRuntimeEnv();
   }
 
   /** 拼原生启动参数。收窄档（chat）用 --no-tools + --no-extensions 收窄工具来源。 */
@@ -275,6 +255,7 @@ export class BotRuntime extends EventEmitter {
     const { argv: personaArgv } = writePersonaFiles(this.bot, this.baseDir, {
       extraDisabledExtensions: this._narrowedDisabledExtensions(),
       librarySkillsDir: this.dirs.librarySkillsDir,
+      memory: { dbPath: this.dirs.memoryDbPath, bank: memoryBank(this.bot.id) },
     });
     const mode = this.bot.executionMode === "chat" ? "rpc" : "rpc-ui";
     const args = ["--session-dir", this.sessionDir, ...personaArgv];
@@ -307,10 +288,7 @@ export class BotRuntime extends EventEmitter {
       mkdirSync(this.workDir, { recursive: true });
       mkdirSync(this.sessionDir, { recursive: true });
       this.env = this.buildEnv();
-      if (this.bot.memoryEnabled === true) {
-        mkdirSync(this.agentDir, { recursive: true });
-        this._writePrivateModelConfig();
-      }
+      if (this.bot.memoryEnabled === true) mkdirSync(dirname(this.dirs.memoryDbPath), { recursive: true });
       const { mode, args } = this._buildArgs();
       this.policySignature = this._signature();
 

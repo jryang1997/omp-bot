@@ -247,19 +247,6 @@ export class WorkbenchFeatures {
         return { installed, ...(await this.native.skillsStatus(botId, c.scope)) };
       }),
       R("GET", /^\/api\/bots\/([^/]+)\/memory$/, (c) => this.native.memoryRead(decodeURIComponent(c.params[0]), c.scope)),
-      R("PUT", /^\/api\/bots\/([^/]+)\/memory$/, (c) => {
-        const botId = decodeURIComponent(c.params[0]);
-        this.native.memoryWrite(botId, c.scope, c.body ?? {});
-        return this.native.memoryRead(botId, c.scope);
-      }),
-      R("POST", /^\/api\/bots\/([^/]+)\/memory\/clear$/, (c) => {
-        const botId = decodeURIComponent(c.params[0]);
-        const cleared = this.native.memoryClear(botId, c.scope);
-        return { ...this.native.memoryRead(botId, c.scope), cleared: cleared.cleared };
-      }),
-      R("GET", /^\/api\/bots\/([^/]+)\/memory\/probe$/, async (c) => ({
-        probe: await this.native.verifyMemoryPath(decodeURIComponent(c.params[0]), c.scope),
-      })),
       R("POST", /^\/api\/bots\/([^/]+)\/browser\/takeover$/, async (c) =>
         ({ takeover: await this.native.browserTakeover(decodeURIComponent(c.params[0]), c.scope, c.body ?? {}) }),
       ),
