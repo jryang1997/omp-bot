@@ -51,7 +51,12 @@ async function session(viewport, dark, prefix) {
   await page.waitForTimeout(800);
   if (dark) await safe("theme", async () => { const isDark = await page.evaluate(() => document.body.hasAttribute("data-ds-dark-theme")); if (!isDark) await page.click("#btn-theme"); });
   await safe("chat", async () => { await page.getByText("小总", { exact: true }).first().click(); await shot(page, `${prefix}01-chat`); });
-  if (viewport.width < 600) { await ctx.close(); return; }
+  if (viewport.width < 600) {
+    // 手机上侧栏收起，直接点按钮的 DOM 进任务页。
+    await safe("m-tasks", async () => { await page.evaluate(() => document.getElementById("btn-activity").click()); await page.waitForSelector(".wb-delegation-list:not(.hidden)", { timeout: 8000 }); await shot(page, `${prefix}02-tasks`); });
+    await safe("m-run", async () => { await page.click(`.wb-run-tile[data-run-id="${fx.id}"] button`); await shot(page, `${prefix}03-run-detail`); });
+    await ctx.close(); return;
+  }
   await safe("settings", async () => { await page.click("#btn-settings"); await shot(page, `${prefix}06-settings`); await page.click("#drawer-close"); });
   await safe("computer", async () => { await page.click("#btn-computer"); await shot(page, `${prefix}07-computer`); await page.click("#drawer-close"); });
   await safe("perm", async () => { await page.click("#btn-permissions"); await shot(page, `${prefix}08-permissions`); await page.keyboard.press("Escape"); await page.click("#drawer-close").catch(() => {}); await page.click("#modal-close").catch(() => {}); });

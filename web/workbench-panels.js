@@ -184,51 +184,46 @@ export function createPanels({ client, deps }) {
     const root = el("section", "wb-activity-view");
     const head = el("div", "wb-view-head");
     head.append(el("h1", null, "任务"));
-    root.append(head);
-    root.append(el("p", "ui-intro", "助手正在做的事、做完的事和等你决定的事都在这里。"));
-
     const toolbar = el("div", "ui-toolbar");
-    toolbar.append(button("btn ghost", "刷新", () => void draw()));
     toolbar.append(button("btn ghost", "连接手机", () => deps.openDrawer("连接手机", () => pairingSection())));
     toolbar.append(button("btn ghost", "飞书连接", () => deps.openDrawer("飞书连接", () => feishuSection())));
-    root.append(toolbar);
+    toolbar.append(button("btn ghost", "刷新", () => void draw()));
+    head.append(toolbar);
+    root.append(head);
 
     let filter = "all";
     let query = "";
 
-    // 计数直接复用页签的筛选规则，页签和数字不会对不上。
-    const metrics = el("div", "ui-metrics");
-    const metricValues = new Map();
-    for (const id of ["active", "attention", "completed"]) {
-      const [, label] = FILTERS.find(([filterId]) => filterId === id);
-      const metric = el("div", "ui-metric");
-      metric.dataset.metric = id;
-      const value = el("span", "ui-metric-value", "0");
-      metric.append(value, el("span", "ui-metric-label", label));
-      metricValues.set(id, value);
-      metrics.append(metric);
-    }
-    root.append(metrics);
-
+    // 页签上直接带数量，计数复用页签的筛选规则，数字和列表不会对不上。
+    const bar = el("div", "wb-task-bar");
     const tabs = el("div", "bt-tabs wb-tabs");
+    tabs.setAttribute("role", "tablist");
     const tabButtons = new Map();
+    const metricValues = new Map();
     for (const [id, label] of FILTERS) {
       const tab = button("bt-tab", label, () => { filter = id; paint(); });
       tab.setAttribute("role", "tab");
       tab.dataset.filter = id;
+      if (id !== "all") {
+        const count = el("span", "wb-tab-count", "0");
+        count.dataset.metric = id;
+        tab.append(count);
+        metricValues.set(id, count);
+      }
       tabButtons.set(id, tab);
       tabs.append(tab);
     }
-    root.append(tabs);
+    bar.append(tabs);
 
     const search = el("input", "bt-input wb-search");
     search.type = "search";
     search.placeholder = "搜索任务内容、助手名称或状态";
     search.setAttribute("aria-label", "搜索任务");
     search.oninput = () => { query = search.value.trim(); paint(); };
-    root.append(search);
+    bar.append(search);
+    root.append(bar);
 
-    const list = el("div", "wb-run-list");
+    const list = el("div", "wb-run-list wb-row-group");
     const approvals = el("div", "wb-approval-list");
     const empty = el("div", "bt-empty hidden");
     const emptyTitle = el("div", null, "还没有任务");
@@ -348,24 +343,18 @@ export function createPanels({ client, deps }) {
       delegationBox.classList.toggle("hidden", delegations.length === 0);
       if (!delegations.length) return;
       delegationBox.append(el("div", "wb-dock-label", `助手之间派的活（${delegations.length}）`));
-      for (const rec of delegations) delegationBox.append(delegationTile(rec));
+      const group = el("div", "wb-row-group");
+      for (const rec of delegations) group.append(delegationTile(rec));
+      delegationBox.append(group);
     }
 
     function delegationTile(rec) {
-      const tile = el("div", "wb-run-tile");
+      const who = `${rec.fromName || rec.fromBotId} → ${rec.targetName || rec.targetBotId}`;
+      const status = delegationStatus(rec);
+      const tile = compactRow({ who, text: rec.message, label: status.label, tone: delegationTone(rec), at: rec.createdAt },
+        () => void deps.openDrawer(who, () => delegationDetail(rec)));
       tile.dataset.delegationId = rec.id;
-      tile.dataset.state = delegationStatus(rec).key;
-      const top = el("div", "wb-run-top");
-      top.append(el("span", "wb-run-bot", `${rec.fromName || rec.fromBotId} → ${rec.targetName || rec.targetBotId}`));
-      top.append(el("span", "bt-state wb-run-state", delegationStatus(rec).label));
-      tile.append(top);
-      tile.append(el("div", "wb-run-text", String(rec.message || "").slice(0, 240) || "（没有内容）"));
-      const foot = el("div", "wb-run-foot");
-      foot.append(el("span", "wb-run-time", fmtTime(rec.createdAt)));
-      const actions = el("div", "bt-actions");
-      actions.append(button("btn ghost", "详情", () => void deps.openDrawer(`${rec.fromName || rec.fromBotId} → ${rec.targetName || rec.targetBotId}`, () => delegationDetail(rec))));
-      foot.append(actions);
-      tile.append(foot);
+      tile.dataset.state = status.key;
       return tile;
     }
 
@@ -408,7 +397,9 @@ export function createPanels({ client, deps }) {
       const all = client.all();
       for (const [id, value] of metricValues) {
         const predicate = FILTERS.find(([filterId]) => filterId === id)[2];
-        value.textContent = String(all.filter(predicate).length);
+        const n = all.filter(predicate).length;
+        value.textContent = String(n);
+        value.classList.toggle("is-zero", n === 0);
       }
       paintApprovals();
       const predicate = FILTERS.find(([id]) => id === filter)[2];
@@ -423,27 +414,35 @@ export function createPanels({ client, deps }) {
       announce(`${runs.length} 个任务`);
     }
 
+    /** 列表里的一行：谁、做什么、状态、时间。整行是一个按钮，点开详情。 */
+    function compactRow({ who, text, label, tone, at }, open) {
+      const tile = el("div", "wb-run-tile wb-row");
+      const main = el("button", "wb-row-main");
+      main.type = "button";
+      main.onclick = open;
+      const pill = el("span", "wb-pill wb-run-state", label);
+      pill.dataset.tone = tone;
+      main.append(
+        el("span", "wb-run-bot", who),
+        el("span", "wb-run-text", String(text || "").replace(/\s+/g, " ").trim().slice(0, 240) || "（没有内容）"),
+        pill,
+        el("span", "wb-run-time", fmtWhen(at)),
+      );
+      tile.append(main);
+      return tile;
+    }
+
     function runTile(run) {
       const bot = deps.botFor(run.botId);
-      const row = el("div", "wb-run-tile");
-      row.dataset.runId = run.id;
-      row.dataset.state = run.state;
-      const top = el("div", "wb-run-top");
-      top.append(el("span", "wb-run-bot", bot?.name || run.botId || "任务"));
-      top.append(el("span", "bt-state wb-run-state", runStateLabel(run.state)));
-      row.append(top);
-      row.append(el("div", "wb-run-text", String(run.text || "").slice(0, 240) || "（没有内容）"));
       // kind、scope、深度这些内部字段只留在任务详情里，主视图不出现。
-      const foot = el("div", "wb-run-foot");
-      foot.append(el("span", "wb-run-time", fmtTime(run.createdAt)));
-      const actions = el("div", "bt-actions");
-      actions.append(button("btn ghost", "详情", () => void deps.openDrawer(`${bot?.name || "助手"}的任务`, () => runDetail(run))));
+      const tile = compactRow({ who: bot?.name || run.botId || "任务", text: run.text, label: runStateLabel(run.state), tone: runTone(run.state), at: run.createdAt },
+        () => void deps.openDrawer(`${bot?.name || "助手"}的任务`, () => runDetail(run)));
+      tile.dataset.runId = run.id;
+      tile.dataset.state = run.state;
       if (isLiveRun(run.state)) {
-        actions.append(button("btn ghost danger", "停止", () => void client.cancel(run.id).then(() => { toast("已接受取消请求"); paint(); }).catch((error) => toast(error.message, true))));
+        tile.append(button("btn ghost danger wb-row-stop", "停止", () => void client.cancel(run.id).then(() => { toast("已接受取消请求"); paint(); }).catch((error) => toast(error.message, true))));
       }
-      foot.append(actions);
-      row.append(foot);
-      return row;
+      return tile;
     }
 
     async function draw() {
