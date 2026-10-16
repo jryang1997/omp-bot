@@ -153,7 +153,8 @@ function fakeJson() {
   };
 }
 
-const workOf = (botId, scope = "private") => botPaths(orch, home, botId, scope).workDir;
+// omp 进程的 cwd（team/bots/<id>），项目级 .omp/ 在这里。
+const workOf = (botId, scope = "private") => botPaths(orch, home, botId, scope).cwd;
 
 // ---------------- 资料：接收、规范化、归属 ----------------
 
@@ -463,7 +464,7 @@ test("无 workspace 的 Bot：推导出的工作区在 Bot 私有目录内，扫
   const paths = botPaths(orch, home, bot.id, "private");
   assert.strictEqual(
     paths.workDir,
-    join(home, "bots", bot.id, "private", "work"),
+    join(home, "team", "bots", bot.id, "work"),
     "空 workspace 必须回落到 Bot 私有 work 目录，而不是空串",
   );
   assert.notStrictEqual(paths.workDir, "");
@@ -864,22 +865,24 @@ test("memory：未开 memoryEnabled 或缺少隔离前置时明确拒绝，绝�
   bot.memoryEnabled = false;
 });
 
-test("botPaths：cwd 永远是 Bot 私有 work 目录，workspace 只作独立读根", () => {
+test("botPaths：cwd 永远是 team 里的 Bot 目录，workspace 只作独立读根", () => {
   const ws = join(home, "ws-explicit");
   mkdirSync(ws, { recursive: true });
   const bot = mkBot({ workspace: ws });
   const p = botPaths(orch, home, bot.id, "room:r1");
   assert.strictEqual(p.baseDir, join(home, "bots", bot.id, "room_r1"));
   assert.strictEqual(
-    p.workDir,
-    join(home, "bots", bot.id, "room_r1", "work"),
+    p.cwd,
+    join(home, "team", "bots", bot.id),
     "workspace 是 --add-dir 的读根，绝不能当作 cwd（否则项目级 MCP 配置写到用户工作区，原生读不到）",
   );
+  assert.strictEqual(p.workDir, join(p.cwd, "work"));
+  assert.strictEqual(p.sessionDir, join(p.cwd, "sessions", "room_r1"));
   assert.strictEqual(p.agentDir, join(home, "bots", bot.id, "room_r1", "agent"));
   assert.strictEqual(p.workspace, ws);
-  mkdirSync(join(home, "bots", bot.id, "room_r1", "work"), { recursive: true });
-  const roots = features.artifacts.scanRoots({ botId: bot.id }, { cwd: p.workDir });
-  assert.deepStrictEqual(roots, [p.workDir, ws], "扫描应包含私有 cwd 与允许的工作区两个独立根");
+  mkdirSync(p.cwd, { recursive: true });
+  const roots = features.artifacts.scanRoots({ botId: bot.id }, { cwd: p.cwd });
+  assert.deepStrictEqual(roots, [p.cwd, ws], "扫描应包含私有 cwd 与允许的工作区两个独立根");
 });
 
 test("browser：按 eval 描述判定能力；运行中/未 settled/无 eval/chat 一律拒绝接管", async () => {

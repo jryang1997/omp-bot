@@ -156,6 +156,7 @@ async function loadAll() {
         closeDrawer(false);
       }
       state.runs?.restore(snapshot);
+      noteTeamGit(snapshot.team);
       renderSidebar();
       renderSelected();
       renderDock();
@@ -165,6 +166,16 @@ async function loadAll() {
   })();
   try { return await state.refresh; }
   finally { state.refresh = null; }
+}
+
+function noteTeamGit(team) {
+  if (!team || team.git !== false || state.teamGitNoted) return;
+  state.teamGitNoted = true;
+  try {
+    if (localStorage.getItem("omp-bot-team-git-noted")) return;
+    localStorage.setItem("omp-bot-team-git-noted", "1");
+  } catch { }
+  toast("这台电脑没有 Git。团队设定照常保存，装上 Git 后才有改动历史。");
 }
 
 function renderSidebar() {

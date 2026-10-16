@@ -1,8 +1,9 @@
 // persona.mjs — bot 人格文件与上下文隔离 overlay。
 //
 // 隔离目标与实测边界（依据官方 docs 与源码核查，本机未逐项实跑）：
-// 1) 人格：用 --append-system-prompt <file> 注入 bot 身份，保留 omp 默认工具/工作流策略。
-// 2) 上下文净化：逐文件关掉用户级/项目级 AGENTS.md、CLAUDE.md、GEMINI.md。
+// 1) 人格：身份在 team/bots/<id>/AGENTS.md，团队共识在 team/AGENTS.md，omp 当项目级上下文读；
+//    --append-system-prompt 只追加团队工具说明，保留 omp 默认工具/工作流策略。
+// 2) 上下文净化：逐文件关掉用户级 AGENTS.md、CLAUDE.md、GEMINI.md，项目级打开。
 //    不能用整源开关：disabledProviders 里写 native 会连同原生 MCP 服务器、skills、
 //    命令、hooks、tools 一起移除，而 native 正是读取 bot 私有 <cwd>/.omp/mcp.json 的
 //    provider。所以这里只用 disabledExtensions 的精确 id + skills 的用户级开关。
@@ -20,14 +21,14 @@ import { join } from "node:path";
 import { COMPUTER_PROMPT_TOOLS, COMPUTER_TOOL_NAMES, DEFAULT_TASK_CONCURRENCY } from "./constants.mjs";
 import { memoryModelRoles } from "./memory-config.mjs";
 
-/** 要逐文件关闭的上下文文件 id（scope: 文件名）。 */
+/**
+ * 只关用户级上下文文件。项目级都打开：team 是 git 仓库，omp 往上找 AGENTS.md 停在 team 根，
+ * bot 读到 team 和自己两层（先通用后具体）。
+ */
 const CONTEXT_FILES_TO_DISABLE = [
   "context-file:user:AGENTS.md",
-  "context-file:project:AGENTS.md",
   "context-file:user:CLAUDE.md",
-  "context-file:project:CLAUDE.md",
   "context-file:user:GEMINI.md",
-  "context-file:project:GEMINI.md",
 ];
 
 /** 用户级 skills/规则来源开关（项目级保持默认，供 bot 私有 .omp/skills 使用）。 */
@@ -39,38 +40,15 @@ const USER_SOURCE_TOGGLES = [
   "enableOpencodeUser",
 ];
 
-/** 生成 bot 的人格提示文本。 */
-export function personaText(bot) {
-  const lines = [
-    `# 你的身份`,
+/**
+ * persona.md 只留 omp-bot 必须注入的内容：团队工具怎么用、渠道消息的格式。
+ * 名字、角色、专属指令在 team/bots/<id>/AGENTS.md 的身份块里，说话方式和征求同意在 team/AGENTS.md。
+ */
+export function personaText() {
+  return [
+    `# 团队协作`,
     ``,
-    `你是「${bot.name}」，一个常驻的 AI bot 团队成员。`,
-  ];
-  if (bot.role) lines.push(`你的角色定位：${bot.role}`);
-  // OMP 默认面向技术读者；追加日常表达，仍由原生工具审批决定是否放行。
-  lines.push(
-    ``,
-    `# 说话方式（默认）`,
-    ``,
-    `- 默认用简体中文，对方用别的语言就跟着用；口吻像同事聊天。`,
-    `- 先说结果、对用户的影响、他接下来要做什么，细节按需要再补。`,
-    `- 把对方当普通用户，不默认他懂技术；术语只在需要时出现，第一次出现就用一句大白话解释。`,
-    `- 日常对话别写成「问题 / 决策 / 检查 / 下一步」那样的工程清单；用户要技术细节时再展开。`,
-    `- 回复用户时别贴日志、路径、变量名、内部工具名、Run id、协议字段，除非用户想看，或它们本身就是答案。`,
-    `- 用户当场的要求和下面「你的专属指令」优先于这些默认。`,
-    ``,
-    `# 征求同意（默认）`,
-    ``,
-    `- 用户明确交办的常规、可逆的事，直接做完再汇报，不要每一步都回来问。`,
-    `- 对外发消息、对外发布、付款、重要且不可逆的数据改动、账号和权限变更，先取得用户明确同意；用户没有回应不算同意。`,
-    `- 被拒绝或被取消的操作就停下，不换工具或路径重试，也不提议用别的工具绕开，用一句大白话说清这件事没做成；用户重新明确授权前不再尝试。`,
-  );
-  if (bot.instructions) {
-    lines.push(``, `# 你的专属指令`, ``, bot.instructions);
-  }
-  lines.push(
-    ``,
-    `# 团队协作规则`,
+    `你是 omp-bot 团队的常驻成员。你是谁、怎么说话、做事规矩，见项目里的两层 AGENTS.md：team 根下是团队共识，bots/<你的 id>/ 下是你自己的身份。`,
     ``,
     `- 你可以用 message_bot 工具给团队里的其他 bot 发消息并直接拿到它的回复。`,
     `- 需要对方在后台并行处理时用 delegate_bot：它立即返回子 Run id，你之后可以继续做自己的事。`,
@@ -79,8 +57,7 @@ export function personaText(bot) {
     `- 想点名某个成员接着说，用 @名字。`,
     `- 跨合作范围（不同工作区）的私有上下文不共享；不要索要其他工作区的私有资料。`,
     `- 回答简洁、直接，别复述规则本身。`,
-  );
-  return lines.join("\n");
+  ].join("\n");
 }
 
 /**
@@ -93,13 +70,13 @@ export function personaText(bot) {
 export function writePersonaFiles(bot, dir, opts = {}) {
   mkdirSync(dir, { recursive: true });
   const personaPath = join(dir, "persona.md");
-  writeFileSync(personaPath, personaText(bot), "utf8");
+  writeFileSync(personaPath, personaText(), "utf8");
 
   const extraDisabled = Array.isArray(opts.extraDisabledExtensions) ? opts.extraDisabledExtensions : [];
   const overlayPath = join(dir, "isolate.yml");
   const lines = [
     "# omp-bot 生成的隔离 overlay（每 bot 一份，不改用户全局配置）。",
-    "# 1) 逐文件关掉用户级/项目级上下文文件；不用整源开关，避免连原生 MCP 一起废掉。",
+    "# 1) 逐文件关掉用户级上下文文件，项目级（team 和 bot 两层 AGENTS.md）打开；不用整源开关，避免连原生 MCP 一起废掉。",
     "disabledExtensions:",
     ...CONTEXT_FILES_TO_DISABLE.map((id) => `  - ${id}`),
     ...extraDisabled.map((id) => `  - ${id}`),

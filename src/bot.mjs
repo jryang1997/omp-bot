@@ -23,6 +23,7 @@ import { RpcClient } from "./rpc-client.mjs";
 import { writePersonaFiles } from "./persona.mjs";
 import { writePrivateMemoryConfig } from "./memory-config.mjs";
 import { policySignature } from "./domain.mjs";
+import { contextDigest, teamPaths } from "./team.mjs";
 import {
   RPC_STARTUP_TIMEOUT_MS,
   RPC_COMMAND_TIMEOUT_MS,
@@ -79,20 +80,13 @@ export function buildRuntimeEnv() {
 }
 
 /**
- * 一个 bot 在某 scope 下的目录规则（BotRuntime 与编排器共用一份，避免路径规则分叉）。
+ * 一个 bot 在某 scope 下的目录规则（BotRuntime 与编排器共用一份，来源是团队目录模块）。
  * @param {string} home
  * @param {string} botId
  * @param {string} scope
  */
 export function runtimeDirs(home, botId, scope) {
-  const safeScope = String(scope).replace(/[^a-zA-Z0-9_-]/g, "_");
-  const baseDir = join(home, "bots", botId, safeScope);
-  return {
-    baseDir,
-    workDir: join(baseDir, "work"),
-    sessionDir: join(baseDir, "sessions"),
-    agentDir: join(baseDir, "agent"),
-  };
+  return teamPaths(home, botId, scope);
 }
 
 /** 用户当前 profile 的 agent 目录（默认 ~/.omp/agent，可被 PI_CODING_AGENT_DIR 重定位）。 */
@@ -187,13 +181,15 @@ export class BotRuntime extends EventEmitter {
     this.onAssistantText = opts.onAssistantText ?? null;
     this.commandTimeoutMs = opts.commandTimeoutMs ?? RPC_COMMAND_TIMEOUT_MS;
 
+    // cwd 是 team/bots/<id>（私聊群聊共用），会话按 scope 分开；persona/overlay 等生成文件不进 team。
     this.dirs = runtimeDirs(this.home, this.bot.id, this.scope);
     this.baseDir = opts.dir ?? this.dirs.baseDir;
     this.agentDir = join(this.baseDir, "agent");
-    this.sessionDir = join(this.baseDir, "sessions");
-    this.cwd = opts.cwd ?? join(this.baseDir, "work");
+    this.sessionDir = opts.dir ? join(this.baseDir, "sessions") : this.dirs.sessionDir;
+    this.cwd = opts.cwd ?? this.dirs.cwd;
+    this.workDir = opts.cwd ? join(opts.cwd, "work") : this.dirs.workDir;
     // 工作区是用户显式选的目录，通过 --add-dir 加入；bot 自己的 cwd 保持不变，
-    // 这样人格文件、session 和原生项目本地记忆都留在 bot 私有目录里。
+    // 这样身份、session 和原生项目配置都留在 bot 自己的目录里。
     this.workspace = assertWorkspace(this.bot.workspace ?? "");
 
     this.state = RUNTIME_STATE.STOPPED;
@@ -227,13 +223,18 @@ export class BotRuntime extends EventEmitter {
     return this.bot.executionMode === "chat";
   }
 
+  /** 两层 AGENTS.md 的摘要：文件变了签名就变，下一轮重启进程续上会话，新内容进系统提示词。 */
+  _contextDigest() {
+    return contextDigest({ teamAgentsFile: this.dirs.teamAgentsFile, agentsFile: join(this.cwd, "AGENTS.md") });
+  }
+
   _signature() {
-    return policySignature(this.bot, { cwd: this.cwd, scope: this.scope });
+    return policySignature(this.bot, { cwd: this.cwd, scope: this.scope, contextDigest: this._contextDigest() });
   }
 
   /** 策略是否仍与当前 runtime 进程一致（不一致必须重建，不许宽进程收窄复用）。 */
   matchesPolicy(bot) {
-    const next = policySignature(bot, { cwd: this.cwd, scope: this.scope });
+    const next = policySignature(bot, { cwd: this.cwd, scope: this.scope, contextDigest: this._contextDigest() });
     return next === this.policySignature;
   }
 
@@ -298,6 +299,7 @@ export class BotRuntime extends EventEmitter {
     this.state = RUNTIME_STATE.STARTING;
     try {
       mkdirSync(this.cwd, { recursive: true });
+      mkdirSync(this.workDir, { recursive: true });
       mkdirSync(this.sessionDir, { recursive: true });
       this.env = this.buildEnv();
       if (this.bot.memoryEnabled === true) {

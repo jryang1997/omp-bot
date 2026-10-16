@@ -20,6 +20,7 @@ import { readFile, mkdir } from "node:fs/promises";
 import { Store, defaultHome } from "./store.mjs";
 import { Ledger } from "./ledger.mjs";
 import { BotRuntime, runtimeDirs } from "./bot.mjs";
+import { TeamDir, identityFields } from "./team.mjs";
 import { memoryPrereqStatus } from "./memory-config.mjs";
 import { WorkbenchFeatures } from "./features.mjs";
 import { Relay } from "./relay.mjs";
@@ -157,6 +158,14 @@ export class Orchestrator {
       throw e;
     }
 
+    // 团队目录：bot 的 cwd、身份块、会话都在这里。只读副本不写任何东西。
+    this.team = new TeamDir({
+      home: this.home,
+      readonly: this.store.readonly === true,
+      git: opts.teamGit,
+      onEvent: (type, data) => this.emit(type, data),
+    });
+
     /** @type {Map<string, BotRuntime>} key = `${botId}::${scope}` */
     this.runtimes = new Map();
     /** scope 租约：leaseKey → runId。startRun 里原子预留。 */
@@ -185,6 +194,7 @@ export class Orchestrator {
           computerBackend: opts.computerBackend ?? null,
           computerRuntimeDir: opts.computerRuntimeDir ?? null,
         });
+      this._ensureTeam();
       this._recover();
     } catch (e) {
       try {
@@ -299,16 +309,64 @@ export class Orchestrator {
       budget: input.budget ?? null,
     });
     this.store.putBot(bot);
+    this.team.writeIdentity(bot);
+    this.team.commit(`身份：新建 ${bot.name}`);
     this.emit("bot_added", { bot });
     return bot;
   }
 
   getBot(id) {
-    return normalizeBot(this.store.getBot(id));
+    return this._syncIdentity(normalizeBot(this.store.getBot(id)));
   }
 
   listBots() {
-    return this.store.listBots().map((b) => normalizeBot(b)).filter(Boolean);
+    return this.store.listBots().map((b) => this._syncIdentity(normalizeBot(b))).filter(Boolean);
+  }
+
+  // ---- 团队目录 ----
+
+  /** 建团队目录；花名册里每个 bot 都要有身份块（老 bot 第一次启动时补上，已有文件以文件为准）。 */
+  _ensureTeam() {
+    if (this.team.readonly) return;
+    this.team.ensure();
+    const added = [];
+    for (const raw of this.store.listBots()) {
+      const bot = normalizeBot(raw);
+      if (!bot) continue;
+      if (this.team.readIdentity(bot.id)) {
+        this._syncIdentity(bot);
+        continue;
+      }
+      if (this.team.writeIdentity(bot)) added.push(bot.name);
+    }
+    if (added.length) this.team.commit(`身份：补上 ${added.join("、")}`);
+  }
+
+  /**
+   * 用户或 bot 在 AGENTS.md 里改了身份块，以文件为准回填花名册。
+   * 只比较名字、角色、专属指令；文件没变时只多一次 stat。
+   */
+  _syncIdentity(bot) {
+    if (!bot || this.team.readonly) return bot;
+    const parsed = this.team.readIdentityIfChanged(bot.id);
+    if (!parsed) return bot;
+    const current = identityFields(bot);
+    const patch = {};
+    if (parsed.name && parsed.name !== current.name) patch.name = parsed.name;
+    if (parsed.role !== current.role) patch.role = parsed.role;
+    if (parsed.instructions !== current.instructions) patch.instructions = parsed.instructions;
+    if (!Object.keys(patch).length) return bot;
+    const next = normalizeBot({ ...bot, ...patch });
+    if (!next) return bot;
+    this.store.putBot(next);
+    this.emit("bot_updated", { bot: next, source: "agents-file" });
+    this.team.commit(`身份：${next.name} 在 AGENTS.md 里改了${identityChangeLabel(patch)}`);
+    return next;
+  }
+
+  /** 团队目录状态：没有 git 时界面提示装 Git 才有改动历史。 */
+  teamStatus() {
+    return this.team.status();
   }
 
   removeBot(id) {
@@ -357,6 +415,13 @@ export class Orchestrator {
     const normalized = normalizeBot({ ...next, id });
     if (!normalized) throw httpErr(400, "更新后的 bot 记录不合法", "bot_invalid");
     this.store.putBot(normalized);
+    const identityPatch = Object.fromEntries(
+      Object.entries(identityFields(normalized)).filter(([k, v]) => v !== identityFields(bot)[k]),
+    );
+    if (normalized.isMain !== bot.isMain) identityPatch.isMain = true;
+    if (Object.keys(identityPatch).length && this.team.writeIdentity(normalized)) {
+      this.team.commit(`身份：${normalized.name} 改了${identityChangeLabel(identityPatch)}`);
+    }
     this.emit("bot_updated", { bot: normalized });
     if (affectsRuntime) {
       const active = this._activeRunIdsForBot(id);
@@ -1113,7 +1178,7 @@ export class Orchestrator {
     }
   }
 
-  /** bot 私有目录规则（与 BotRuntime 共用一份），供 Features 写项目级 MCP/skills。 */
+  /** bot 的各类路径（团队目录模块唯一来源，与 BotRuntime 共用），供 Features 写项目级 MCP/skills。 */
   botWorkDir(botId, scope = "private") {
     return runtimeDirs(this.home, botId, scope);
   }
@@ -2278,6 +2343,7 @@ export class Orchestrator {
     }
     this.runtimes.clear();
     this.leases.clear();
+    await this.team.flush();
     // 释放资源必须走到最后一步：任何一步失败都不能让 SQLite 句柄活过 shutdown
     // （句柄没关时 Windows 清理 workbench.sqlite 会 EPERM）。失败当场经事件如实上报，不静默吞掉。
     const release = (step, fn) => {
@@ -2292,6 +2358,12 @@ export class Orchestrator {
     release("store.releaseLock", () => this.store.releaseLock());
     release("ledger.close", () => this.ledger.close());
   }
+}
+
+/** 身份改动的中文说明，写进 team 的提交信息。 */
+function identityChangeLabel(patch) {
+  const labels = { name: "名字", role: "角色", instructions: "专属指令", isMain: "主助手标记" };
+  return Object.keys(patch).map((k) => labels[k] ?? k).join("、");
 }
 
 /**

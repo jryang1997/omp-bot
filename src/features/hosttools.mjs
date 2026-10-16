@@ -11,6 +11,7 @@ import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { basename, join, relative } from "node:path";
 import { ferr, humanBytes, isInsideRoot, lexicallyInside } from "./util.mjs";
+import { teamPaths } from "../team.mjs";
 
 const MAX_READ_BYTES = 200 * 1024;
 const MAX_FETCH_BYTES = 512 * 1024;
@@ -210,7 +211,7 @@ export async function fetchPublic(rawUrl, { signal, maxBytes = MAX_FETCH_BYTES, 
 export function hostToolsFor(runtime, { home }) {
   const bot = runtime?.bot;
   const rtCwd = typeof runtime?.cwd === "string" && runtime.cwd.trim() ? runtime.cwd.trim() : null;
-  const workDir = rtCwd ?? join(home, "bots", bot?.id ?? "unknown", "private", "work");
+  const workDir = rtCwd ?? teamPaths(home, bot?.id ?? "unknown").cwd;
   const attachmentRoot = join(home, "attachments", bot?.id ?? "");
 
   const roots = [workDir, bot?.workspace].filter((p) => typeof p === "string" && p.trim());

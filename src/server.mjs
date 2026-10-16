@@ -408,7 +408,9 @@ export async function startServer({ port = 3099, host = "127.0.0.1", home, bin =
     const approvals = pendingApprovals();
     const scope = deviceScope(principal);
     if (!scope) {
-      return { bots, rooms, activeRuns: runs.filter((r) => ACTIVE_STATES.includes(r.state)), pendingApprovals: approvals, lastSeq };
+      // team：团队目录位置和有没有 git（没有 git 时界面提示装 Git 才有改动历史）。设备视图不带。
+      const team = typeof orch.teamStatus === "function" ? orch.teamStatus() : null;
+      return { bots, rooms, activeRuns: runs.filter((r) => ACTIVE_STATES.includes(r.state)), pendingApprovals: approvals, lastSeq, team };
     }
     const myBots = bots.filter((b) => scope.has(b.id));
     const ids = new Set(myBots.map((b) => b.id));

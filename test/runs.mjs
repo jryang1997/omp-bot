@@ -1592,9 +1592,13 @@ await test("botWorkDir 与 BotRuntime 的目录规则一致（单一来源）", 
     const bot = t.orch.addBot({ name: "DirProbe" });
     const dirs = t.orch.botWorkDir(bot.id, "private");
     assert.deepEqual(dirs, runtimeDirs(t.home, bot.id, "private"));
+    // cwd、私有文件、会话在 team 目录里；persona/overlay 等生成文件留在 <home>/bots/<id>/<scope>
+    assert.equal(dirs.cwd, join(t.home, "team", "bots", bot.id));
+    assert.equal(dirs.workDir, join(dirs.cwd, "work"));
+    assert.equal(dirs.sessionDir, join(dirs.cwd, "sessions", "private"));
+    assert.equal(t.orch.botWorkDir(bot.id, "room:r1").sessionDir, join(dirs.cwd, "sessions", "room_r1"));
+    assert.equal(t.orch.botWorkDir(bot.id, "room:r1").cwd, dirs.cwd, "私聊群聊共用 cwd");
     assert.equal(dirs.baseDir, join(t.home, "bots", bot.id, "private"));
-    assert.equal(dirs.workDir, join(dirs.baseDir, "work"));
-    assert.equal(dirs.sessionDir, join(dirs.baseDir, "sessions"));
     assert.equal(dirs.agentDir, join(dirs.baseDir, "agent"));
   } finally {
     await t.cleanup();

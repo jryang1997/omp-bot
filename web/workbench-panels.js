@@ -1232,9 +1232,10 @@ export function createPanels({ client, deps }) {
       probeError = error.message;
     }
     const isolation = caps && caps.memory && typeof caps.memory.isolation === "object" ? caps.memory.isolation : null;
-    const workDir = isolation && typeof isolation.workDir === "string" && isolation.workDir ? isolation.workDir : null;
-    const sep = workDir && workDir.includes("\\") ? "\\" : "/";
-    const skillsDir = workDir ? `${workDir.replace(/[\\/]+$/, "")}${sep}.omp${sep}skills` : null;
+    // 私有技能在 bot 目录（omp 的 cwd，team/bots/<id>）下的 .omp/skills。
+    const botDir = isolation && typeof isolation.cwd === "string" && isolation.cwd ? isolation.cwd : null;
+    const sep = botDir && botDir.includes("\\") ? "\\" : "/";
+    const skillsDir = botDir ? `${botDir.replace(/[\\/]+$/, "")}${sep}.omp${sep}skills` : null;
     const nativeCommands = caps && caps.skills && Array.isArray(caps.skills.commands) ? caps.skills.commands : null;
     const commandsError = caps && typeof caps.commandsError === "string" && caps.commandsError ? caps.commandsError : null;
     const probeNote = commandsError || probeError;

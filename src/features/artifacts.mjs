@@ -123,8 +123,11 @@ export class Artifacts {
 
     this.#snapshotRoots(botId, roots); // 记录扫描基线，供 checkpoint/审计复用
 
+    // bot 目录（team/bots/<id>）根上的 AGENTS.md 是身份文件，不是产出。
+    const identityFile = runtime?.cwd ? join(runtime.cwd, "AGENTS.md") : null;
     for (const root of roots) {
       for (const abs of walkFiles(root, { skipDirs: SKIP_DIRS })) {
+        if (abs === identityFile) continue;
         scanned += 1;
         let st;
         try {

@@ -295,7 +295,8 @@ export function normalizeBot(raw) {
  * 记忆开关、电脑绑定任何一个变了都必须重建进程：宽权限进程不得承接收窄后的 Run，
  * 绑定电脑后进程要带上客机工具和对应的 overlay 审批段重新起。
  * @param {object} bot
- * @param {{cwd:string, scope:string}} ctx
+ * 两层 AGENTS.md 的内容摘要（ctx.contextDigest）也在里面：文件变了就重启进程续上会话。
+ * @param {{cwd:string, scope:string, contextDigest?:string}} ctx
  */
 export function policySignature(bot, ctx) {
   const c = bot.computer ?? null;
@@ -311,6 +312,7 @@ export function policySignature(bot, ctx) {
     `computer=${c ? `${c.runtime}:${c.kind}:${c.image}` : "-"}`,
     `cwd=${ctx?.cwd ?? ""}`,
     `scope=${ctx?.scope ?? ""}`,
+    `context=${ctx?.contextDigest ?? ""}`,
   ];
   return parts.join("|");
 }

@@ -13,6 +13,7 @@ import { memoryPrereqStatus } from "../memory-config.mjs";
 import { buildRuntimeEnv } from "../bot.mjs";
 import { COMPUTER_TOOL_NAMES } from "./computers.mjs";
 import { computerIdFor, permissionOf } from "../domain.mjs";
+import { teamPaths } from "../team.mjs";
 
 /**
  * 记忆路径必须在 Bot 私有目录内，且链路上不能有符号链接/junction。
@@ -44,27 +45,25 @@ const SECRET_KEY_RE = /(token|secret|key|pass[\s_-]*word|authorization|cookie|cr
 const MAX_MEMORY_FILE_BYTES = 64 * 1024;
 
 /**
- * Bot 的私有路径（与 BotRuntime/runtimeDirs 同一规则）。
- * cwd 永远是 <baseDir>/work；用户选的 workspace 只用 --add-dir 加入，作为单独的允许读根返回，
- * 绝不当作 cwd（否则项目级 MCP 配置/技能发现/检查点会写到用户工作区，而原生进程读不到）。
- * @returns {{baseDir:string,workDir:string,sessionDir:string,agentDir:string,workspace:string|null}}
+ * Bot 的路径（与 BotRuntime/runtimeDirs 同一来源：团队目录模块）。
+ * cwd 是 team/bots/<id>，项目级 .omp/（MCP、技能、配置）在这里；workDir 是它下面的 work/。
+ * 用户选的 workspace 只用 --add-dir 加入，作为单独的允许读根返回，绝不当作 cwd
+ * （否则项目级 MCP 配置/技能发现/检查点会写到用户工作区，而原生进程读不到）。
+ * @returns {{cwd:string,baseDir:string,workDir:string,sessionDir:string,agentDir:string,workspace:string|null}}
  */
 export function botPaths(orch, home, botId, scope = "private") {
   const provided =
     typeof orch?.botWorkDir === "function" ? orch.botWorkDir(botId, scope) : typeof orch?.botPaths === "function" ? orch.botPaths(botId, scope) : null;
-  if (provided?.baseDir && provided?.workDir) {
-    return { agentDir: provided.agentDir ?? join(provided.baseDir, "agent"), ...provided };
-  }
-  const safeScope = String(scope).replace(/[^a-zA-Z0-9_-]/g, "_");
-  const baseDir = join(home, "bots", botId, safeScope);
-  const rt = orch?.runtimes?.get?.(`${botId}::${scope}`);
   const ws = orch?.getBot?.(botId)?.workspace;
+  const workspace = typeof ws === "string" && ws.trim() ? ws.trim() : null;
+  if (provided?.baseDir && provided?.cwd) return { workspace, ...provided };
+  const rt = orch?.runtimes?.get?.(`${botId}::${scope}`);
+  const paths = teamPaths(home, botId, scope);
   return {
-    baseDir,
-    workDir: rt?.cwd ?? join(baseDir, "work"),
-    sessionDir: rt?.sessionDir ?? join(baseDir, "sessions"),
-    agentDir: join(baseDir, "agent"),
-    workspace: typeof ws === "string" && ws.trim() ? ws.trim() : null,
+    ...paths,
+    cwd: rt?.cwd ?? paths.cwd,
+    sessionDir: rt?.sessionDir ?? paths.sessionDir,
+    workspace,
   };
 }
 
@@ -337,8 +336,8 @@ export class NativeFeatures {
   // ---------------- MCP（Bot 私有项目配置） ----------------
 
   mcpFile(botId, scope = "private") {
-    const { workDir } = this.paths(botId, scope);
-    return join(workDir, ".omp", "mcp.json");
+    const { cwd } = this.paths(botId, scope);
+    return join(cwd, ".omp", "mcp.json");
   }
 
   mcpStatus(botId, scope = "private") {
@@ -418,10 +417,10 @@ export class NativeFeatures {
 
   // ---------------- Skills（原生发现 + 过滤） ----------------
 
-  /** Bot 私有项目里的原生 skill 目录（<work>/.omp/skills/<name>/SKILL.md）。 */
+  /** Bot 私有项目里的原生 skill 目录（team/bots/<id>/.omp/skills/<name>/SKILL.md）。 */
   localSkills(botId, scope = "private") {
-    const { workDir } = this.paths(botId, scope);
-    const root = join(workDir, ".omp", "skills");
+    const { cwd } = this.paths(botId, scope);
+    const root = join(cwd, ".omp", "skills");
     if (!existsSync(root)) return [];
     const out = [];
     let entries = [];
@@ -489,8 +488,8 @@ export class NativeFeatures {
   // ---------------- Memory（原生 local 后端，只管理 scoped 文件） ----------------
 
   memoryRootCandidates(botId, scope = "private") {
-    const { agentDir, workDir } = this.paths(botId, scope);
-    const key = memorySlug(workDir);
+    const { agentDir, cwd } = this.paths(botId, scope);
+    const key = memorySlug(cwd);
     const dir = join(agentDir, "memories", key);
     return [{ dir, key, source: existsSync(dir) ? "native-existing" : "derived-native-key" }];
   }
@@ -522,7 +521,7 @@ export class NativeFeatures {
    */
   memoryStatus(botId, scope = "private") {
     const bot = this.#requireBot(botId);
-    const { agentDir, workDir } = this.paths(botId, scope);
+    const { agentDir, workDir, cwd } = this.paths(botId, scope);
     const isolated = isInsideRoot(join(this.home, "bots", botId), agentDir) || lexicallyUnder(join(this.home, "bots", botId), agentDir);
     const source = this.modelSource(botId, scope);
     const candidate = this.memoryRootCandidates(botId, scope)[0];
@@ -549,7 +548,7 @@ export class NativeFeatures {
       backend: "native-local",
       root: candidate.dir,
       rootSource: candidate.source,
-      isolation: { agentDir, workDir, insideBotHome: isolated, runtimeEnvMatch: source.runtimeIsolated },
+      isolation: { agentDir, cwd, workDir, insideBotHome: isolated, runtimeEnvMatch: source.runtimeIsolated },
       files: {
         "MEMORY.md": { exists: existsSync(memoryFile), bytes: stat(memoryFile), path: memoryFile },
         "learned.md": { exists: existsSync(learnedFile), bytes: stat(learnedFile), path: learnedFile },
@@ -588,7 +587,7 @@ export class NativeFeatures {
   async verifyMemoryPath(botId, scope = "private") {
     const status = this.memoryStatus(botId, scope);
     if (!status.available) throw ferr(409, "memory_unavailable", "先启动已开启私有记忆的 Bot 再验证目录", { memory: status });
-    const { agentDir, workDir } = this.paths(botId, scope);
+    const { agentDir, cwd } = this.paths(botId, scope);
     const cached = this.memoryProbe.get(agentDir);
     if (cached?.ok) return cached;
     const candidate = this.memoryRootCandidates(botId, scope)[0];
@@ -605,7 +604,7 @@ export class NativeFeatures {
     let out;
     try {
       out = await new Promise(resolve => execFile(this.bin, ["read", `memory://root/${name}`], {
-        cwd: workDir, env, timeout: 20_000, windowsHide: true, maxBuffer: 4 * 1024 * 1024,
+        cwd, env, timeout: 20_000, windowsHide: true, maxBuffer: 4 * 1024 * 1024,
       }, (error, stdout, stderr) => resolve({ code: error ? error.code ?? 1 : 0, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") })));
     } finally {
       rmSync(probePath, { force: true });
@@ -686,10 +685,10 @@ export class NativeFeatures {
 
   /** 该 Bot 生效的配置文件，按原生 settings.ts 层级：--config overlay > 项目 > 全局 agentDir。 */
   browserConfigPaths(botId, scope = "private") {
-    const { workDir, agentDir, baseDir } = this.paths(botId, scope);
+    const { cwd, agentDir, baseDir } = this.paths(botId, scope);
     return [
       { path: join(baseDir, "isolate.yml"), scope: "overlay-config" },
-      { path: join(workDir, ".omp", "config.yml"), scope: "project-config" },
+      { path: join(cwd, ".omp", "config.yml"), scope: "project-config" },
       { path: join(agentDir, "config.yml"), scope: "global-config" },
     ];
   }
@@ -824,7 +823,7 @@ export class NativeFeatures {
   }
 
   browserStatus(botId, scope = "private") {
-    const { workDir } = this.paths(botId, scope);
+    const { cwd } = this.paths(botId, scope);
     const key = `${botId}::${scope}`;
     const takeover = this.paused.get(key) ?? null;
     const rt = this.liveRuntime(botId, scope);
@@ -843,7 +842,7 @@ export class NativeFeatures {
         "接管 = 先要求该 Bot 当前空闲且原生 isSettled，随后暂停它的新回合；用户在 OMP 打开的可见窗口里自行操作。",
         "归还 = 复查原生 isSettled 与流状态，通过才解除暂停；原生未就绪时保留暂停并如实回报错误。",
         "本接口不向浏览器注入任何输入，也不新增浏览器引擎；窗口与标签页由原生 browser prelude 管理。",
-        `Bot 工作目录：${workDir}`,
+        `Bot 工作目录：${cwd}`,
       ],
     };
   }
