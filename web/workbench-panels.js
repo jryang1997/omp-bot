@@ -739,24 +739,24 @@ export function createPanels({ client, deps }) {
   async function capabilitiesPanel(bot) {
     currentBot = bot;
     const root = el("div", "wb-panel-body");
-    root.append(el("p", "ui-intro", "这里决定这个助手能做什么，以及动手前要不要先问你。改动会立刻保存。"));
+    root.append(el("p", "ui-intro", "决定它能做什么、动手前问不问你。改动立刻保存。"));
     const capabilities = await apiOptional(`/api/bots/${encodeURIComponent(bot.id)}/native/capabilities`);
     const computer = capabilities && capabilities.computer && capabilities.computer.bound === true ? capabilities.computer : null;
     // 常用设置放最前：能做什么、问不问、在哪里工作，然后是记忆与登录。
     const permissionCard = el("div", "bt-set-card");
     const PERMISSION_HINTS = {
-      chat: "只聊天：不运行命令，不改文件，也不用电脑。",
-      ask: "本机改东西先问我：读写文件照常，运行命令和操作浏览器前先问你。共享电脑里除装系统包都不问。",
-      full: "全部放手：本机和共享电脑都不再逐次问你，装系统包仍会问。可访问当前账户有权限的文件和程序。",
+      chat: "不运行命令，不改文件，不用电脑。",
+      ask: "读写文件照常，运行命令和操作浏览器前先问你。",
+      full: "不再逐次问你，装系统包仍会问。",
     };
     const level = permissionOf(bot);
-    permissionCard.append(row("权限", `${PERMISSION_HINTS[level]}选择从下一次任务生效。工作目录不限制文件访问范围。`,
+    permissionCard.append(row("权限", `${PERMISSION_HINTS[level]}下一次任务生效。`,
       select(Object.entries(BOT_PERMISSION_LABELS), level, async (value) => {
         if (value === "full" && !confirm(`让「${bot.name}」全部放手？\n\n之后它可以读写文件、运行命令、操作浏览器，不再逐次向你确认，可访问当前账户有权限的文件和程序。需要你提供的信息和装系统包仍会问。\n\n选择会保留，从下一次任务生效，可随时改回。`)) return void deps.rerenderPanel?.();
         // 档位会影响下面的工作目录、操作范围与记忆说明：保存成功后整页重绘，提示不会停留在旧档。
         if (await patchBot(bot, { permission: value, confirmPermission: value === "full" })) deps.rerenderPanel?.();
       })));
-    permissionCard.append(row("工作目录", "本机工具从这里开始找资料和保存成果，仍可访问其他有权限的位置。", Object.assign(el("input", "bt-input"), {
+    permissionCard.append(row("工作目录", "助手从这里开始找资料、存成果。", Object.assign(el("input", "bt-input"), {
       value: bot.workspace || "",
       placeholder: "如 C:/work/project",
       onchange: (event) => { void patchBot(bot, { workspace: event.target.value.trim() || null }); },
@@ -764,19 +764,19 @@ export function createPanels({ client, deps }) {
     const chatOnly = permissionOf(bot) === "chat";
     permissionCard.append(row("操作范围", computer
       ? computer.note || "本机和共享电脑两套工具都在。"
-      : "执行任务时，助手可以访问当前账户有权限访问的文件和程序；工作目录不限制访问范围。",
+      : "能访问你这个账户能访问的文件和程序。",
       el("span", "bt-note", chatOnly ? (computer ? "只聊天（电脑只提供桌面）" : "只聊天") : computer ? "本机 + 共享电脑" : "本机账户权限")));
     root.append(section("权限与确认", permissionCard));
 
     const memoryToggle = checkbox(bot.memoryEnabled === true, (checked) => void patchBot(bot, { memoryEnabled: checked }));
     const memoryCard = el("div", "bt-set-card");
     memoryCard.append(row("记忆开关",
-      "开启后这个助手有自己的记忆库，私聊群聊通用，从下次任务生效。第一次开会下载约 2.7GB 的中文嵌入模型和运行库。",
+      "它会记住聊过的事，下次任务生效。第一次开启要下载约 2.7GB。",
       memoryToggle));
     root.append(section("记忆", memoryCard));
 
     const loginCard = el("div", "bt-set-card");
-    loginCard.append(row("登录", "助手提示需要登录时，点这里按原生流程完成。凭据只在原生窗口里输入，不会进入聊天记录。", button("btn ghost", "开始登录", function () {
+    loginCard.append(row("登录", "助手说要登录时点这里。密码不会进聊天记录。", button("btn ghost", "开始登录", function () {
       return busy(this, api(`/api/bots/${encodeURIComponent(bot.id)}/native/command`, { method: "POST", body: { command: "login" } })
         .then(() => { announce("已请求原生登录，请在需要你确认的事项中完成"); toast("已请求原生登录，请在“需要你确认”里完成"); })
         .catch((error) => toast(`登录请求失败：${error.message}`, true)), "请求中…");
@@ -789,7 +789,7 @@ export function createPanels({ client, deps }) {
     const advancedBody = el("div", "ui-disclosure-body");
 
     const budgetCard = el("div", "bt-set-card");
-    budgetCard.append(row("预算 token", "这个助手累计可用的 token 上限；留空表示不设上限。费用、时长和并发限制不受影响。", Object.assign(el("input", "bt-input"), {
+    budgetCard.append(row("预算 token", "累计 token 上限，留空不限。", Object.assign(el("input", "bt-input"), {
       value: bot.budget?.maxTokens ?? "",
       inputmode: "numeric",
       onchange: (event) => {
@@ -861,7 +861,7 @@ export function createPanels({ client, deps }) {
     box.append(kv("原生能力", `${stateLabel}${capability?.evidence ? ` · 依据 ${capability.evidence}` : ""}`));
     if (capability?.reason) box.append(el("div", "bt-note", capability.reason));
     if (capability && capability.state !== "available") {
-      box.append(el("div", "bt-note", "能力未知或不可用时不会接管——接口只暂停 Bot 回合，不会替你开浏览器，也不会伪装成功。"));
+      box.append(el("div", "bt-note", "能力未知或不可用时不会接管——接口只暂停助手回合，不会替你开浏览器，也不会伪装成功。"));
     }
     box.append(kv("运行中", String(!!status.runtimeRunning)));
     box.append(kv("人工接管中", status.paused ? `是${status.takeover?.startedAt ? ` · ${fmtTime(status.takeover.startedAt)}` : ""}` : "否"));
@@ -877,7 +877,7 @@ export function createPanels({ client, deps }) {
     const actions = el("div", "bt-actions");
     if (bot) {
       const takeover = button("btn ghost", "接管", function () {
-        if (!confirm("接管只暂停该 Bot 的新回合；请先在 Bot 会话里跑一个回合执行 eval browser.open({headed:true,persist:true,url}) 打开可见窗口（headed 才看得见，persist 才不被原生冻结），再确认接管。继续？")) return;
+        if (!confirm("接管只暂停该助手的新回合；请先在助手会话里跑一个回合执行 eval browser.open({headed:true,persist:true,url}) 打开可见窗口（headed 才看得见，persist 才不被原生冻结），再确认接管。继续？")) return;
         return busy(this, browserAction(bot, "takeover"), "接管中…");
       });
       if (capability && capability.state !== "available") takeover.disabled = true;
@@ -888,7 +888,7 @@ export function createPanels({ client, deps }) {
     }
     box.append(row(
       "人工接管",
-      "接管期间 Bot 不再受理新回合；释放要求原生 isSettled 且无排队工作，否则保留暂停并回报原因。可见窗口必须先由原生 eval 打开，本接口不新增浏览器引擎。",
+      "接管期间助手不再受理新回合；释放要求原生 isSettled 且无排队工作，否则保留暂停并回报原因。可见窗口必须先由原生 eval 打开，本接口不新增浏览器引擎。",
       actions,
     ));
     return section("浏览器", box);
@@ -951,7 +951,7 @@ export function createPanels({ client, deps }) {
     const verb = action === "takeover" ? "接管" : "释放";
     try {
       await api(`/api/bots/${encodeURIComponent(bot.id)}/browser/${action}`, { method: "POST", body: {} });
-      toast(action === "takeover" ? "已接管：该 Bot 新回合已暂停" : "已释放：原生 settled 已复查通过");
+      toast(action === "takeover" ? "已接管：该助手新回合已暂停" : "已释放：原生 settled 已复查通过");
       deps.rerenderPanel?.();
     } catch (error) {
       const code = error.data?.code ? `（${error.data.code}）` : "";
@@ -1027,7 +1027,7 @@ export function createPanels({ client, deps }) {
       label.append(input, document.createTextNode(bot.name));
       botsBox.append(label);
     }
-    if (!bots.length) botsBox.append(el("div", "bt-empty", "还没有 Bot，先创建一个。"));
+    if (!bots.length) botsBox.append(el("div", "bt-empty", "还没有助手，先创建一个。"));
     const perms = new Set(["read", "run"]);
     const permBox = el("div", "bt-set-card");
     for (const [value, text, hint] of [
@@ -1200,7 +1200,7 @@ export function createPanels({ client, deps }) {
       actions.append(refresh);
       statusArea.append(row(
         "手机入口",
-        "开启后电脑会在本地网络上开一个入口，只接受已配对的手机：看授权 Bot 的会话、派活、处理审批、取回成果，改不了电脑上的设置。不用时随时关掉。",
+        "开启后电脑会在本地网络上开一个入口，只接受已配对的手机：看授权助手的会话、派活、处理审批、取回成果，改不了电脑上的设置。不用时随时关掉。",
         actions,
       ));
       statusArea.append(kv("状态", enabled ? (running ? "已开启，运行中" : "已开启，但没有运行") : "已关闭"));
@@ -1284,13 +1284,13 @@ export function createPanels({ client, deps }) {
         "手机要能访问这个地址：同一个 Wi-Fi 或局域网，或者两台设备都登录同一个 Tailscale 网络。",
         found.length ? addressSelect : el("div", "bt-note", "没有可用的地址：确认电脑已联网，然后点上面的「刷新」。"),
       ));
-      form.append(row("授权 Bot", "手机只能对你勾选的 Bot 读取和派活。", scope.botsBox));
+      form.append(row("授权助手", "手机只能对你勾选的助手读取和派活。", scope.botsBox));
       form.append(row("权限", "读取和运行默认开启；审批让手机能代替你批准原生审批请求，需要单独勾选。", scope.permBox));
       form.append(row("备注", "给这台手机起个名字，以后在设备列表里好认。", scope.labelInput));
       form.append(row("有效期", "过期后二维码与配对码都失效，需要重新生成。", scope.ttl));
       form.append(button("btn primary wide", "生成配对二维码", function () {
         if (!found.length) { toast("还没有可用地址", true); return; }
-        if (!scope.chosen.size) { toast("至少选择一个 Bot", true); return; }
+        if (!scope.chosen.size) { toast("至少选择一个助手", true); return; }
         const address = addressSelect.value || current;
         return busy(this, api("/api/mobile/invitation", {
           method: "POST",
@@ -1588,7 +1588,7 @@ export function createPanels({ client, deps }) {
 
     // 私有技能：只给这个 bot，总是加载。
     const ownBox = el("div", "bt-set-card");
-    if (!own.length) ownBox.append(el("div", "bt-empty", "还没有只给这个 Bot 的技能。"));
+    if (!own.length) ownBox.append(el("div", "bt-empty", "还没有只给这个助手的技能。"));
     for (const skill of own) {
       const line = el("div", "bt-set-row");
       line.append(document.createTextNode(`${skill.name}${skill.description ? ` · ${skill.description}` : ""}`));
@@ -1596,17 +1596,17 @@ export function createPanels({ client, deps }) {
       ownBox.append(line);
     }
     ownBox.append(el("div", "bt-note", privateDir ? `私有技能总是加载，放在 ${privateDir}。` : "私有技能总是加载。"));
-    root.append(section(`只给这个 Bot 的技能（${own.length}）`, ownBox));
+    root.append(section(`只给这个助手的技能（${own.length}）`, ownBox));
 
     // 装技能：从本机的技能目录装，或者直接贴 SKILL.md。
-    const target = select([["library", "装进共享库"], ["bot", `只给 ${bot.name || "这个 Bot"}`]], "library");
+    const target = select([["library", "装进共享库"], ["bot", `只给 ${bot.name || "这个助手"}`]], "library");
     const path = Object.assign(el("input", "bt-input"), { placeholder: "本机技能目录，里面要有 SKILL.md" });
     const content = Object.assign(el("textarea", "bt-textarea"), {
       rows: 5,
       placeholder: "或者直接贴 SKILL.md 的内容。开头的 frontmatter 要写 name 和 description。",
     });
     const form = el("div", "wb-form");
-    form.append(row("装到", "库里和每个 Bot 的私有技能不能重名。", target), row("目录", null, path), row("SKILL.md", null, content));
+    form.append(row("装到", "库里和每个助手的私有技能不能重名。", target), row("目录", null, path), row("SKILL.md", null, content));
     form.append(button("btn primary wide", "装上", function () {
       const body = { target: target.value };
       if (content.value.trim()) body.content = content.value;
@@ -1614,7 +1614,7 @@ export function createPanels({ client, deps }) {
       else { toast("填技能目录，或者贴上 SKILL.md", true); return; }
       return busy(this, api(`/api/bots/${encodeURIComponent(bot.id)}/skills/install`, { method: "POST", body })
         .then((out) => {
-          const where = out.installed?.target === "library" ? "共享库" : (bot.name || "这个 Bot");
+          const where = out.installed?.target === "library" ? "共享库" : (bot.name || "这个助手");
           toast(`已把「${out.installed?.name}」装进${where}，下一条消息起生效`);
           deps.rerenderPanel?.();
         })
@@ -1625,10 +1625,10 @@ export function createPanels({ client, deps }) {
     const nativeBox = el("div", "bt-set-card");
     if (nativeCommands === null) nativeBox.append(el("div", "bt-empty", probeNote
       ? `还没有探测到原生技能来源：${probeNote}。修好后刷新页面重试。`
-      : "还没有探测到原生技能来源：刷新页面重试；Bot 未启动时先让它跑一次会话。"));
+      : "还没有探测到原生技能来源：刷新页面重试；助手未启动时先让它跑一次会话。"));
     else if (!nativeCommands.length) nativeBox.append(el("div", "bt-empty", "原生环境没有提供技能命令。"));
     else {
-      nativeBox.append(el("div", "bt-note", "OMP 原生在这个 Bot 的进程里实际提供的技能。"));
+      nativeBox.append(el("div", "bt-note", "OMP 原生在这个助手的进程里实际提供的技能。"));
       const list = el("details", "wb-raw");
       list.append(el("summary", null, "技能名称"));
       list.append(el("pre", "wb-pre", nativeCommands.join("\n")));
@@ -1638,7 +1638,7 @@ export function createPanels({ client, deps }) {
 
     const detail = el("details", "wb-raw");
     detail.append(el("summary", null, "原生发现细节"));
-    detail.append(kv("原生来源", data.nativeSource || "get_available_commands + Bot 私有 skill 目录"));
+    detail.append(kv("原生来源", data.nativeSource || "get_available_commands + 助手私有 skill 目录"));
     detail.append(el("div", "bt-note", data.note || "真实装载仍由 OMP 原生流程完成。"));
     root.append(detail);
     return root;
@@ -1664,7 +1664,7 @@ export function createPanels({ client, deps }) {
     root.append(section("原生 mcp.json", status));
     // 只聊天档会关掉项目级 MCP 来源，保存成功也不代表会生效。
     if (bot.executionMode === "chat") {
-      root.append(el("div", "bt-note", "这台 Bot 是只聊天档，不加载项目级 MCP 配置：保存的服务要等切到先问我或全部放手后才生效。"));
+      root.append(el("div", "bt-note", "这个助手是只聊天档，不加载项目级 MCP 配置：保存的服务要等切到先问我或全部放手后才生效。"));
     }
 
     const servers = el("div", "bt-set-card");
@@ -1689,7 +1689,7 @@ export function createPanels({ client, deps }) {
     const command = Object.assign(el("input", "bt-input"), { placeholder: "命令，如 npx" });
     const args = Object.assign(el("input", "bt-input"), { placeholder: "参数，空格分隔（可留空）" });
     const url = Object.assign(el("input", "bt-input"), { placeholder: "https://…/mcp" });
-    const secrets = Object.assign(el("textarea", "bt-textarea"), { rows: 3, placeholder: "KEY=VALUE，每行一个（stdio 写入 env，http/sse 写入 headers；密钥只落 Bot 私有目录）" });
+    const secrets = Object.assign(el("textarea", "bt-textarea"), { rows: 3, placeholder: "KEY=VALUE，每行一个（stdio 写入 env，http/sse 写入 headers；密钥只落助手私有目录）" });
     const rowOf = (node) => node.closest(".bt-set-row");
     const sync = () => {
       const stdio = type.value === "stdio";
@@ -1702,7 +1702,7 @@ export function createPanels({ client, deps }) {
     // 行建好后再同步可见性：隐藏行的查找依赖控件已经挂进对应的行。
     type.onchange = sync;
     sync();
-    form.append(el("div", "bt-note", "保存会写入 Bot 私有 .omp/mcp.json（不改全局配置），只覆盖同名的服务；保存后该 Bot 的原生进程会重启以生效。"));
+    form.append(el("div", "bt-note", "保存会写入助手私有 .omp/mcp.json（不改全局配置），只覆盖同名的服务；保存后该助手的原生进程会重启以生效。"));
     form.append(button("btn primary wide", "保存服务", function () {
       const entry = type.value === "stdio" ? { type: "stdio", command: command.value.trim() } : { type: type.value, url: url.value.trim() };
       if (type.value === "stdio" && !command.value.trim()) { toast("stdio 需要命令", true); return; }
@@ -1783,7 +1783,7 @@ export function createPanels({ client, deps }) {
       const line = el("div", "bt-set-row");
       const copy = el("div", "bt-set-copy");
       copy.append(el("div", null, routine.name || routine.id));
-      copy.append(el("div", "bt-set-hint", `${scheduleText(routine.schedule)}${routine.paused ? " · 已暂停" : ""}${routine.nextRunAt ? ` · 下次 ${fmtTime(routine.nextRunAt)}` : ""}${routine.missedPolicy === "record" && routine.missedCount ? ` · 错过 ${routine.missedCount} 次` : ""}${routine.lastStatus ? ` · 上次 ${routine.lastStatus}` : ""}`));
+      copy.append(el("div", "bt-set-hint", `${scheduleText(routine.schedule)}${routine.paused ? " · 已暂停" : ""}${routine.nextRunAt ? ` · 下次 ${fmtWhen(routine.nextRunAt)}` : ""}${routine.missedPolicy === "record" && routine.missedCount ? ` · 错过 ${routine.missedCount} 次` : ""}${routine.lastStatus ? ` · 上次${runStateLabel(routine.lastStatus)}` : ""}`));
       if (routine.lastError) copy.append(el("div", "bt-set-hint", `错误：${routine.lastError}`));
       line.append(copy);
       const actions = el("div", "bt-set-control");
@@ -1810,11 +1810,11 @@ export function createPanels({ client, deps }) {
     const bots = deps.bots();
     const target = select(bots.map((item) => [item.id, item.name]), botId && botId !== "all" ? botId : (bots[0]?.id || ""));
     const name = Object.assign(el("input", "bt-input"), { placeholder: "计划名称，如 每日简报" });
-    const text = Object.assign(el("textarea", "bt-textarea"), { placeholder: "交给 Bot 的任务文本", rows: 3 });
+    const text = Object.assign(el("textarea", "bt-textarea"), { placeholder: "到点要它做什么", rows: 3 });
     const kind = select([["daily", "每天"], ["interval", "固定间隔"], ["once", "一次"]], "daily");
     const time = Object.assign(el("input", "bt-input"), { type: "time", value: "09:00" });
-    const timezone = Object.assign(el("input", "bt-input"), { placeholder: "IANA 时区，如 Asia/Shanghai", value: Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Shanghai" });
-    const interval = Object.assign(el("input", "bt-input"), { type: "number", min: "60000", placeholder: "间隔毫秒（≥60000）" });
+    const timezone = Object.assign(el("input", "bt-input"), { placeholder: "如 Asia/Shanghai", value: Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Shanghai" });
+    const interval = Object.assign(el("input", "bt-input"), { type: "number", min: "1", step: "1", placeholder: "至少 1 分钟" });
     const at = Object.assign(el("input", "bt-input"), { type: "datetime-local" });
     const enable = checkbox(false, () => { });
     const rowOf = (node) => node.closest(".bt-set-row");
@@ -1826,15 +1826,15 @@ export function createPanels({ client, deps }) {
     };
     const form = el("div", "wb-form");
     form.append(
-      row("Bot", null, target),
+      row("助手", null, target),
       row("名称", null, name),
       row("任务", null, text),
-      row("触发", "daily 需要时间与时区；interval 需要毫秒间隔；once 需要将来的时刻。", kind),
-      row("时间", "daily 使用该时刻", time),
-      row("时区", "IANA 时区", timezone),
-      row("间隔毫秒", "interval 使用", interval),
-      row("执行时刻", "once 使用，必须晚于现在", at),
-      row("创建后立即启用", "默认创建为暂停；启用是显式动作。", enable),
+      row("多久一次", null, kind),
+      row("时间", null, time),
+      row("时区", null, timezone),
+      row("每隔几分钟", null, interval),
+      row("执行时刻", "要晚于现在", at),
+      row("创建后立即启用", "不勾就先暂停。", enable),
     );
     // 行建好后再同步可见性：隐藏行的查找依赖控件已经挂进对应的行。
     kind.onchange = sync;
@@ -1845,15 +1845,15 @@ export function createPanels({ client, deps }) {
         if (!/^\d{2}:\d{2}$/.test(time.value)) { toast("请选择每日时间", true); return; }
         schedule = { kind: "daily", time: time.value, timezone: timezone.value.trim() || "UTC" };
       } else if (kind.value === "interval") {
-        const ms = Number(interval.value);
-        if (!(ms >= 60000)) { toast("间隔至少 60000 毫秒", true); return; }
-        schedule = { kind: "interval", intervalMs: ms };
+        const minutes = Number(interval.value);
+        if (!(minutes >= 1)) { toast("间隔至少 1 分钟", true); return; }
+        schedule = { kind: "interval", intervalMs: Math.round(minutes * 60000) };
       } else {
         const atMs = Date.parse(at.value);
         if (!Number.isFinite(atMs) || atMs <= Date.now()) { toast("执行时刻必须晚于现在", true); return; }
         schedule = { kind: "once", at: atMs };
       }
-      if (!name.value.trim() || !text.value.trim() || !target.value) { toast("Bot、名称和任务必填", true); return; }
+      if (!name.value.trim() || !text.value.trim() || !target.value) { toast("助手、名称和任务必填", true); return; }
       return busy(this, api("/api/routines", { method: "POST", body: { botId: target.value, name: name.value.trim(), text: text.value.trim(), schedule, paused: !enable.checked } })
         .then(() => { toast("已创建计划"); deps.rerenderPanel?.(); })
         .catch((error) => toast(`创建失败：${error.message}`, true)), "创建中…");

@@ -902,7 +902,7 @@ function computerShortcut(target) {
   const title = el("div", "wb-shortcut-title", "电脑");
   title.append(svgIcon(["m9 5 7 7-7 7"], "0 0 24 24", { width: "16", height: "16", fill: "none", stroke: "currentColor", "stroke-width": "1.7", "stroke-linecap": "round", "stroke-linejoin": "round" }));
   const copy = el("div", "bt-set-copy");
-  copy.append(title, el("div", "bt-set-hint", "看这位助手的桌面画面，接管鼠标键盘，也可以给它发文字和按键"));
+  copy.append(title, el("div", "bt-set-hint", "看它的桌面，需要时接管"));
   row.append(copy);
   card.append(row);
   return card;
@@ -997,7 +997,7 @@ async function renderSettingsTab(target, tab) {
     });
   }
   // 技能、MCP、记忆放不下四个常用页签，收进「更多设置」，默认关闭。
-  const more = target.kind === "bot" ? disclosure("更多设置", "技能、MCP 和记忆平时用不到，需要时再进来。", "advancedOpen") : null;
+  const more = target.kind === "bot" ? disclosure("更多设置", null, "advancedOpen") : null;
   if (more) {
     for (const [id, label] of advanced) {
       const row = button("bt-set-row", null, () => { state.panelTab = id; void renderSettingsTab(target, id); });
@@ -1019,7 +1019,8 @@ async function renderSettingsTab(target, tab) {
     );
   }
   const body = $("drawer-body");
-  body.replaceChildren(...[tabBar, more?.node, content].filter(Boolean));
+  // 「更多设置」放在设置页底部（删除按钮之前），子页里放在最后方便切换；别的页签不出现。
+  body.replaceChildren(...[tabBar, content, sub ? more?.node : null].filter(Boolean));
   if (back) content.append(back);
   if (refocusTab) tabBar?.querySelector('[aria-selected="true"]')?.focus();
   if (fromDisclosure && back) back.focus();
@@ -1071,6 +1072,7 @@ async function renderSettingsTab(target, tab) {
       })), target);
       upkeep.body.append(reload);
     }
+    if (more) content.append(more.node);
     content.append(upkeep.node);
     const actions = el("div", "field");
     const remove = targetControl(button("btn danger wide", target.kind === "bot" ? "删除此助手" : "删除此群聊", () => {

@@ -130,7 +130,7 @@ function choice(row, key, label, selected, onPick, content) {
 export function avatarEditor(bot, { onSave }) {
   const root = el("div", "omp-avatar-editor");
   if (bot.isMain) {
-    root.append(el("p", "hint", "主助手的形象是固定的，好让你一眼认出它。"));
+    root.append(el("p", "hint", "主助手的形象固定，一眼就能认出。"));
     return root;
   }
   const saved = lookOf(bot);

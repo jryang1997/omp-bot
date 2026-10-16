@@ -34,7 +34,7 @@ export function createAttachmentTray() {
 
   async function upload(file) {
     const owner = botId;
-    if (!botId) { toast("先选择一个 Bot 再添加附件", true); return null; }
+    if (!botId) { toast("先选择一个助手再添加附件", true); return null; }
     if (file.size > MAX_BYTES) { toast(`附件超过 ${fmtSize(MAX_BYTES)} 上限`, true); return null; }
     if (String(file.type || "").startsWith("image/") && imageCheck) {
       const problem = imageCheck();

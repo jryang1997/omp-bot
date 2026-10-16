@@ -707,3 +707,14 @@ button:focus-visible { outline-offset: 2px; }
   .wb-row .wb-run-text { grid-area: text; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .wb-row .wb-run-time { grid-area: time; justify-self: start; }
 }
+
+/* ---- ui 4: 设置抽屉。说明一句话，状态区留白 ---- */
+#drawer-body .wb-computer-state { padding: 14px 16px 4px; gap: 4px; }
+#drawer-body .wb-computer-state .bt-kv { font-size: 13px; }
+#drawer-body .wb-computer-hint { padding: 0 16px 14px; font-size: 13px; line-height: 20px; color: var(--bt-ink-2); }
+#drawer-body .wb-computer-hint:empty { display: none; }
+#drawer-body .wb-computer-errors:empty { display: none; }
+#drawer-body .wb-computer-state + .wb-computer-hint + .wb-computer-errors + .bt-set-row,
+#drawer-body .wb-computer-state + .wb-computer-hint + .wb-computer-errors:empty + .bt-set-row { border-top: .5px solid var(--bt-line); }
+#drawer-body .bt-set-hint { font-size: 12.5px; line-height: 18px; color: var(--bt-ink-3); }
+#drawer-body .ui-intro { color: var(--bt-ink-3); }

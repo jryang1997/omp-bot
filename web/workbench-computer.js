@@ -10,7 +10,7 @@ const STATE_LABELS = {
   error: "出错",
 };
 
-const HOLDER_LABELS = { agent: "Bot 自动控制", human: "你在操作" };
+const HOLDER_LABELS = { agent: "助手在用", human: "你在操作" };
 
 const POLL_MS = 3000;
 const MOVE_MIN_MS = 150;
@@ -100,27 +100,27 @@ export function createComputerView(bot, deps = {}) {
   const canInput = () => !disposed && !!computer && computer.state === "running" && computer.holder === "human";
 
 
-  const stateList = el("div", "wb-kv-list");
-  const stateHint = el("div", "bt-note");
+  const stateList = el("div", "wb-kv-list wb-computer-state");
+  const stateHint = el("div", "bt-note wb-computer-hint");
   const errorBox = el("div", "wb-computer-errors");
 
   const bindButton = button("btn ghost", "绑定电脑", () => void runAction(bindButton, {
-    label: "绑定中…", path: "bind", failure: "绑定失败", success: "已在共享电脑上为本 Bot 开好座席",
+    label: "绑定中…", path: "bind", failure: "绑定失败", success: "已为这位助手开好电脑",
   }));
   const startButton = button("btn ghost", login ? "打开登录屏" : "启动", () => void runAction(startButton, login
     ? { label: "打开中…", path: "open", failure: "登录屏没打开", success: "登录屏已打开：在里面登录网站，好了点「完成」" }
     : { label: "启动中…", path: "start", failure: "启动失败", success: "电脑已启动" }));
   const stopButton = button("btn ghost", login ? "完成" : "停止", () => void runAction(stopButton, login
-    ? { label: "发布中…", path: "done", failure: "登录没有发布", success: "登录已发布：所有 Bot 下次打开浏览器就是登录状态" }
-    : { label: "停止中…", path: "stop", failure: "停止失败", success: "座席已停止（主目录里的文件保留）" }));
+    ? { label: "发布中…", path: "done", failure: "登录没有发布", success: "登录已发布，所有助手下次打开浏览器都是登录状态" }
+    : { label: "停止中…", path: "stop", failure: "停止失败", success: "已停止，文件都还在" }));
   const discardButton = button("btn ghost", "关闭不保存", () => void runAction(discardButton, {
     label: "关闭中…", path: "stop", failure: "关闭失败", success: "登录屏已关闭，这次的登录没有发布",
-    question: "关掉登录屏，这次的登录不发布给 Bot。继续？",
+    question: "关掉登录屏，这次的登录不发布给助手。继续？",
   }));
   discardButton.hidden = true;
   const takeoverButton = button("btn ghost", "接管控制", () => void runAction(takeoverButton, {
     label: "接管中…", path: "takeover", failure: "接管失败", success: "已接管控制，输入会发送到这台电脑",
-    question: "接管后 Bot 的自动输入会立即停止，你在桌面上的点击和按键会直接发送到这台电脑。继续？",
+    question: "接管后助手暂停操作，你的点击和按键直接发到这台电脑。继续？",
   }));
   const releaseButton = button("btn ghost", "归还控制", () => void runAction(releaseButton, {
     label: "归还中…", path: "release", body: () => ({ generation: computer?.generation }), failure: "归还失败",
@@ -161,7 +161,7 @@ export function createComputerView(bot, deps = {}) {
     machineActions.hidden = false;
     fillSelect(cpuSelect, machine.limits.cpus, machine.cpus, "vCPU");
     fillSelect(memorySelect, machine.limits.memoryGb, machine.memoryGb, "GiB 内存");
-    machineNote.textContent = `现在是 ${machine.cpus} vCPU、${machine.memoryGb} GiB 内存、${machine.diskGb} GiB 动态磁盘。改了下次开机生效。`;
+    machineNote.textContent = `现在是 ${machine.cpus} vCPU、${machine.memoryGb} GiB 内存、${machine.diskGb} GiB 磁盘，改了下次开机生效。`;
   }
 
   async function loadMachine() {
@@ -200,7 +200,7 @@ export function createComputerView(bot, deps = {}) {
   let oldItems = [];
   let oldBusy = false;
   const oldBox = el("div", "wb-old");
-  const oldRow = row("旧电脑", "以前每个 Bot 一台的虚拟机。共享电脑开机后，它的 /work 和主目录会复制到这个 Bot 座席的 ~/old-computer/，已有的文件不覆盖，浏览器登录不复制。旧磁盘一直保留，确认不需要了再删。", oldBox);
+  const oldRow = row("旧电脑", "以前的单独电脑。文件会复制到 ~/old-computer/，旧磁盘留着，确认不要了再删。", oldBox);
   oldRow.hidden = true;
 
   function oldText(item) {
@@ -291,16 +291,16 @@ export function createComputerView(bot, deps = {}) {
       stateList,
       stateHint,
       errorBox,
-      row("登录屏", "在这块屏上登录一次网站，点「完成」后所有 Bot 下次打开浏览器都是登录状态。Bot 自己在别的网站上的登录不受影响。只同步 cookie，把登录存在本地存储里的网站同步不了。", powerActions),
+      row("登录屏", "在这里登录网站，点「完成」后所有助手都能用。只同步 cookie。", powerActions),
     );
   } else statusCard.append(
     stateList,
     stateHint,
     errorBox,
-    row("电源", "绑定会在共享电脑上给本 Bot 开一个座席：它自己的 Linux 用户、屏幕和主目录，看不到别的 Bot 的主目录。停止只停这个座席，文件都保留。最后一个座席停掉后共享电脑自动关机。", powerActions),
-    row("控制", "接管后 Bot 的自动输入立即失效，你的鼠标和键盘直接操作这台电脑。每次接管或归还会更换控制代号，旧代号的输入会被拒绝，也不会重放。", controlActions),
-    row("共享电脑规格", "所有 Bot 的座席共用这一台电脑。vCPU 上限是本机核数减 2。", machineBox),
-    row("网站登录", "网站登录所有 Bot 共用。在登录屏上登录一次，Bot 不小心退出了也只要在这里重登一次。", loginButton),
+    row("电源", "这位助手在共享电脑上有自己的用户和主目录。停止后文件都在。", powerActions),
+    row("控制", "接管后由你来操作，助手暂停。", controlActions),
+    row("电脑配置", "所有助手共用这一台。", machineBox),
+    row("网站登录", "所有助手共用，登录一次就行。", loginButton),
     oldRow,
   );
 
@@ -312,7 +312,7 @@ export function createComputerView(bot, deps = {}) {
   pane.setAttribute("role", "group");
   pane.setAttribute("aria-label", `${bot.name} 的电脑桌面：接管后点击与键盘会发送到电脑，按 Ctrl+Alt+Escape 退出键盘输入`);
   const screenImage = el("img", "wb-screen-img");
-  screenImage.alt = login ? "登录屏当前画面" : "Bot 电脑当前桌面";
+  screenImage.alt = login ? "登录屏当前画面" : "助手电脑当前桌面";
   screenImage.draggable = false;
   const screenChip = el("div", "wb-screen-status", "桌面未打开");
   const screenError = el("div", "wb-screen-error");
@@ -326,7 +326,7 @@ export function createComputerView(bot, deps = {}) {
   const desktopActions = el("div", "bt-actions");
   desktopActions.append(desktopButton, zoomButton);
   desktopCard.append(
-    row("桌面", login ? "直接在画面上点击、输入和按键。放大后关闭窗口即回到这里。" : "只读预览随时可看；接管后才能点击、输入和按键。放大后关闭窗口即回到这里。", desktopActions),
+    row("桌面", login ? "直接在画面上点击和打字。" : "接管后才能点击和打字。", desktopActions),
     desktopHost,
     desktopHint,
   );
@@ -359,8 +359,8 @@ export function createComputerView(bot, deps = {}) {
   const inputCard = el("div", "bt-set-card");
   inputCard.append(
     inputHint,
-    row("发送文本", "文字会输入到电脑当前光标位置；中文、长文本和粘贴内容用这里。", textField),
-    row("发送按键", "组合键用 + 连接，例如 ctrl+alt+t、shift+Enter。接管后也可以直接在桌面上按键。", keyField),
+    row("发送文本", "打到光标所在的位置，中文和长文本用这里。", textField),
+    row("发送按键", "组合键用 + 连接，如 ctrl+alt+t。", keyField),
     row("常用按键", "回车、退出、切换焦点。", quickKeys),
   );
 
@@ -372,7 +372,7 @@ export function createComputerView(bot, deps = {}) {
   });
   const artifactCardBox = el("div", "bt-set-card");
   artifactCardBox.append(
-    row("成果", "电脑里发布的文件会登记进该 Bot 的成果库，与运行详情共用同一份记录和同一套预览、下载。", artifactRefresh),
+    row("成果", "电脑里发布的文件会出现在这里和任务详情里。", artifactRefresh),
     artifactList,
     artifactNote,
   );
@@ -382,7 +382,7 @@ export function createComputerView(bot, deps = {}) {
   if (login) readyBody.append(section("登录屏", statusCard), section("实时桌面", desktopCard), section("人工输入", inputCard));
   else readyBody.append(section("电脑", statusCard), loginHost, section("实时桌面", desktopCard), section("人工输入", inputCard), section("成果", artifactCardBox));
   if (!login && bot.executionMode === "chat") {
-    readyBody.prepend(el("div", "wb-note", "该 Bot 现在是「只聊天」模式：绑定电脑不会让它执行电脑任务，模型也不会使用电脑工具；需要它在电脑里干活，请到「权限」里改成「本机改东西先问我」或「全部放手」。人工接管和桌面操作不受此限制。"));
+    readyBody.prepend(el("div", "wb-note", "它现在是「只聊天」，不会用这台电脑。要它在电脑里干活，去「使用权限」改一下。你自己接管不受影响。"));
   }
 
   const pendingBox = el("div", "wb-computer-pending");
@@ -408,17 +408,17 @@ export function createComputerView(bot, deps = {}) {
   function stateHintText(state) {
     if (login) return loginHintText(state);
     if (!computer) return "正在读取电脑状态…";
-    if (!computer.bound) return "还没有绑定电脑。绑定会在共享电脑上给本 Bot 开一个座席，文件都留在它自己的主目录里。";
+    if (!computer.bound) return "还没有绑定电脑。";
     if (state === "starting" || state === "stopping") return "正在切换电源，请稍候…";
     if (state === "running") {
       return canInput()
         ? "你正在操作：点击、滚轮、指针和键盘都会发送到这台电脑。"
-        : "Bot 正在使用这台电脑；现在是只读预览，点「接管控制」才能操作。";
+        : "助手正在用，这里只能看。点「接管控制」由你来操作。";
     }
     if (state === "error") return "电脑出错，可尝试重新启动；下方是服务端返回的错误。";
     return computer.vm?.state === "running"
-      ? "座席已停止，共享电脑还开着（别的 Bot 在用）。主目录里的文件都保留。点「启动」继续。"
-      : "座席已停止，共享电脑已关机。主目录里的文件都保留。点「启动」继续。";
+      ? "已停止，文件都还在。点「启动」继续。"
+      : "已停止，文件都还在。点「启动」继续。";
   }
 
   function paint() {
@@ -446,7 +446,7 @@ export function createComputerView(bot, deps = {}) {
         stateList.append(kv("上次发布", computer.published?.at ? fmtClock(Date.parse(computer.published.at)) : "还没有"));
       } else if (computer.bound) {
         stateList.append(kv("电脑编号", computer.id || "—"));
-        stateList.append(kv("系统", `${computer.os === "linux" ? "Linux" : computer.os || "未知"}${computer.kind === "vm" ? " 共享电脑的座席" : ""}`));
+        stateList.append(kv("系统", `${computer.os === "linux" ? "Linux" : computer.os || "未知"}${computer.kind === "vm" ? "（共享电脑）" : ""}`));
         if (computer.vm) stateList.append(kv("共享电脑", STATE_LABELS[computer.vm.state] || computer.vm.state || "未知"));
         stateList.append(kv("分辨率", computer.display ? `${computer.display.width} × ${computer.display.height}` : "未知"));
         stateList.append(kv("数据", computer.persistent ? "保留（停止后主目录里的文件仍在）" : "不保留"));
@@ -473,7 +473,7 @@ export function createComputerView(bot, deps = {}) {
 
     inputHint.textContent = human
       ? "输入会立即发送到电脑。失去控制（归还或被接管）后，未发送的输入会被丢弃。"
-      : "先点「接管控制」。未接管时这些控件不可用，Bot 的自动操作也不会被打断。";
+      : "先点「接管控制」才能用。";
     textInput.disabled = !human;
     textSend.disabled = !human;
     keyInput.disabled = !human;
@@ -811,7 +811,7 @@ export function createComputerView(bot, deps = {}) {
     if (zoomed || !deps.openModal || disposed) return;
     zoomed = true;
     desktopSlot.classList.add("wb-screen-zoomed");
-    deps.openModal(login ? "登录屏" : "Bot 电脑桌面", desktopSlot, () => {
+    deps.openModal(login ? "登录屏" : "助手电脑桌面", desktopSlot, () => {
       zoomed = false;
       desktopSlot.classList.remove("wb-screen-zoomed");
       if (!disposed) {
