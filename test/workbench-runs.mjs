@@ -119,4 +119,38 @@ const event = (client, seq, value) => client.handleEvent({ type: 'run_updated', 
   }
 }
 
-console.log('Workbench replay/snapshot and reconnect regressions 6/6 passed.');
+// 头像状态：等审批 alerting、工具 working、其余 thinking、出错 sad、刚完成 happy 再回 idle；重放的旧事件不算刚发生。
+{
+  const ended = [];
+  const client = createRunClient({ onRunEnded: (value) => ended.push(value.id) });
+  const face = () => client.avatarState(target.id).face;
+  assert.deepEqual(client.avatarState(target.id), { face: 'idle', busy: false, moving: false, until: 0 });
+  client.handleEvent({ type: 'hello', lastSeq: 5 });
+  event(client, 4, run('old', 'completed'));
+  assert.equal(face(), 'idle', '重放的完成不开心');
+  assert.equal(client.avatarState(target.id).moving, false, '重放的事件不让头像动');
+  assert.deepEqual(ended, [], '重放的完成不记未读');
+  event(client, 6, { ...run('r1', 'running'), createdAt: 10 });
+  assert.equal(face(), 'thinking');
+  assert.equal(client.avatarState(target.id).moving, true);
+  client.handleEvent({ type: 'native_event', seq: 7, runId: 'r1', event: { type: 'tool_execution_start', toolCallId: 't1', toolName: 'bash' } });
+  assert.equal(face(), 'working');
+  client.handleEvent({ type: 'native_event', seq: 8, runId: 'r1', event: { type: 'tool_execution_end', toolCallId: 't1', toolName: 'bash' } });
+  assert.equal(face(), 'thinking', '工具结束回到 thinking');
+  event(client, 9, { ...run('r1', 'waiting_approval'), createdAt: 10 });
+  assert.equal(face(), 'alerting');
+  event(client, 10, { ...run('r1', 'completed'), createdAt: 10 });
+  assert.equal(face(), 'happy');
+  assert.deepEqual(ended, ['r1']);
+  const later = client.avatarState(target.id, Date.now() + 10_000);
+  assert.deepEqual([later.face, later.moving], ['idle', false], '开心一下再回 idle，过了窗口停下');
+  event(client, 11, { ...run('r2', 'running'), createdAt: 20 });
+  event(client, 12, { ...run('r2', 'failed'), createdAt: 20 });
+  assert.equal(face(), 'sad');
+  assert.equal(client.avatarState(target.id, Date.now() + 10_000).face, 'sad', '出错一直 sad 到下一次运行');
+  event(client, 13, { ...run('r3', 'running'), createdAt: 30 });
+  event(client, 14, { ...run('r3', 'cancelled'), createdAt: 30 });
+  assert.equal(face(), 'idle', '取消不算出错');
+}
+
+console.log('Workbench replay/snapshot, reconnect and avatar state regressions 7/7 passed.');

@@ -50,6 +50,109 @@ export function computerIdFor(botId) {
   return `pc_${createHash("sha256").update(id).digest("hex").slice(0, 24)}`;
 }
 
+// ---- 头像 ----
+// 吉祥物的取值和 web/vendor/mascot/omp-mascot.js 导出的常量一致（test/unit.mjs 对照检查）。
+// 浏览器文件里定义了自定义元素，服务端不能直接导入，所以这里列一份。
+
+export const MASCOT_BODY_IDS = ["cursor", "blob", "circle", "squircle", "capsule", "drop", "shield", "hexagon", "diamond", "star"];
+/** 新建 bot 和没有头像字段的老 bot 都用这个身体。 */
+export const DEFAULT_MASCOT_BODY = "cursor";
+export const MASCOT_COLOR_IDS = ["green", "blue", "red", "orange", "purple", "cyan", "pink", "yellow", "teal", "coral"];
+export const MASCOT_EXPRESSIONS = ["idle", "happy", "curious", "drowsy", "working", "thinking", "listening", "sleeping", "suspicious", "proud"];
+export const AVATAR_CROPS = ["mascot", "circle", "rounded", "square"];
+export const AVATAR_ZOOM_MIN = 1;
+export const AVATAR_ZOOM_MAX = 3;
+/** Main Bot 的形象固定：star 身体加专用蓝色，这个颜色不在 10 色里，别的 bot 用不了。 */
+export const MAIN_MASCOT_BODY = "star";
+export const MAIN_MASCOT_COLOR = "#4D6BFE";
+/** 上传的头像只能是附件接口的预览地址。附件本身是不是图片、属于谁，由 orchestrator 查附件登记。 */
+export const AVATAR_URL_PATTERN = /^\/api\/attachments\/(att_[a-z0-9_]{1,64})\/preview$/;
+const AVATAR_KEYS = ["body", "color", "expression", "crop", "url", "zoom", "focusX", "focusY"];
+
+/** 按 id 确定性挑颜色：FNV-1a 取模，同一个 id 永远同一个颜色。 */
+export function mascotColorFor(id) {
+  let h = 0x811c9dc5;
+  for (const ch of String(id ?? "")) {
+    h ^= ch.codePointAt(0);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return MASCOT_COLOR_IDS[h % MASCOT_COLOR_IDS.length];
+}
+
+function blankAvatar(color, body) {
+  return { body, color, expression: null, crop: "mascot", url: null, zoom: 1, focusX: 0.5, focusY: 0.5 };
+}
+
+/** 一个 bot 的默认形象。Main Bot 永远是固定形象。 */
+export function defaultAvatar({ id, isMain = false } = {}) {
+  return isMain ? blankAvatar(MAIN_MASCOT_COLOR, MAIN_MASCOT_BODY) : blankAvatar(mascotColorFor(id), DEFAULT_MASCOT_BODY);
+}
+
+const inRange = (v, lo, hi) => typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi;
+const round = (v, digits) => Math.round(v * 10 ** digits) / 10 ** digits;
+
+/**
+ * 把存下来的头像补齐成当前形状。宽松：不认识的取值换成默认值，不抛错。
+ * 校验用户输入走 validateAvatarPatch。
+ */
+export function normalizeAvatar(raw, { id, isMain = false } = {}) {
+  const base = defaultAvatar({ id, isMain });
+  if (isMain || !raw || typeof raw !== "object" || Array.isArray(raw)) return base;
+  const url = typeof raw.url === "string" && AVATAR_URL_PATTERN.test(raw.url) ? raw.url : null;
+  const crop = AVATAR_CROPS.includes(raw.crop) && (raw.crop === "mascot" || url) ? raw.crop : "mascot";
+  return {
+    body: MASCOT_BODY_IDS.includes(raw.body) ? raw.body : base.body,
+    color: MASCOT_COLOR_IDS.includes(raw.color) ? raw.color : base.color,
+    expression: MASCOT_EXPRESSIONS.includes(raw.expression) ? raw.expression : null,
+    crop,
+    url,
+    zoom: inRange(raw.zoom, AVATAR_ZOOM_MIN, AVATAR_ZOOM_MAX) ? round(raw.zoom, 2) : 1,
+    focusX: inRange(raw.focusX, 0, 1) ? round(raw.focusX, 3) : 0.5,
+    focusY: inRange(raw.focusY, 0, 1) ? round(raw.focusY, 3) : 0.5,
+  };
+}
+
+function avatarError(message, code = "avatar_invalid") {
+  const e = new Error(message);
+  e.status = 400;
+  e.code = code;
+  return e;
+}
+
+/**
+ * 严格校验接口传来的头像改动，返回合并后的完整头像。
+ * 拒绝改 Main Bot 的形象、拒绝别的 bot 用 Main Bot 的颜色、拒绝非附件地址的图片。
+ * @param {unknown} patch 只含要改的字段
+ * @param {{id?:string, isMain?:boolean, current?:object}} bot
+ */
+export function validateAvatarPatch(patch, { id, isMain = false, current = null } = {}) {
+  if (isMain) throw avatarError("主助手的形象是固定的，不能改", "avatar_main_fixed");
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) throw avatarError("avatar 必须是对象");
+  for (const key of Object.keys(patch)) {
+    if (!AVATAR_KEYS.includes(key)) throw avatarError(`avatar 不认识的字段：${key}`);
+  }
+  const next = { ...normalizeAvatar(current, { id }), ...patch };
+  if (!MASCOT_BODY_IDS.includes(next.body)) throw avatarError(`未知身体：${next.body}`);
+  if (typeof next.color === "string" && next.color.toLowerCase() === MAIN_MASCOT_COLOR.toLowerCase()) {
+    throw avatarError("这个颜色是主助手专用的，换一个", "avatar_color_reserved");
+  }
+  if (!MASCOT_COLOR_IDS.includes(next.color)) throw avatarError(`未知颜色：${next.color}，可选 ${MASCOT_COLOR_IDS.join("、")}`);
+  if (next.expression !== null && !MASCOT_EXPRESSIONS.includes(next.expression)) throw avatarError(`未知表情：${next.expression}`);
+  if (!AVATAR_CROPS.includes(next.crop)) throw avatarError(`未知裁切方式：${next.crop}`);
+  if (next.url !== null && (typeof next.url !== "string" || !AVATAR_URL_PATTERN.test(next.url))) {
+    throw avatarError("头像图片只能用上传到本应用的附件", "avatar_url_invalid");
+  }
+  if (next.crop !== "mascot" && !next.url) throw avatarError("先上传一张图片，再选裁切方式");
+  if (!inRange(next.zoom, AVATAR_ZOOM_MIN, AVATAR_ZOOM_MAX)) throw avatarError(`缩放要在 ${AVATAR_ZOOM_MIN} 到 ${AVATAR_ZOOM_MAX} 倍之间`);
+  if (!inRange(next.focusX, 0, 1) || !inRange(next.focusY, 0, 1)) throw avatarError("焦点要在 0 到 1 之间");
+  return normalizeAvatar(next, { id });
+}
+
+/** 头像地址指向的附件 id；不是附件地址时返回 null。 */
+export function avatarAttachmentId(url) {
+  return typeof url === "string" ? (AVATAR_URL_PATTERN.exec(url)?.[1] ?? null) : null;
+}
+
 /**
  * 旧的执行档乘审批档归到三档。chat 归只聊天，审批档 yolo 归全部放手，其余归先问我。
  * @param {{executionMode?:string, approvalMode?:string}} modes
@@ -94,6 +197,7 @@ export function makeBot({
   skills = null,
   budget = null,
   computer = null,
+  avatar = null,
 } = {}) {
   if (!id) throw new Error("bot 需要 id");
   if (!name) throw new Error("bot 需要 name");
@@ -117,6 +221,7 @@ export function makeBot({
     skills: skills === null ? null : [...skills],
     budget: normalizedBudget,
     computer: normalizeComputer(computer),
+    avatar: normalizeAvatar(avatar, { id, isMain }),
     createdAt: Date.now(),
   };
 }
@@ -304,6 +409,7 @@ export function normalizeBot(raw) {
       skills: raw.skills ?? null,
       budget,
       computer: raw.computer ?? null,
+      avatar: raw.avatar ?? null,
     });
     return budgetInvalid ? { ...bot, budgetInvalid } : bot;
   } catch {

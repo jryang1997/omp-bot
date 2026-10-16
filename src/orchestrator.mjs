@@ -37,6 +37,8 @@ import {
   permissionModes,
   sceneTag,
   senderOf,
+  validateAvatarPatch,
+  avatarAttachmentId,
 } from "./domain.mjs";
 import {
   MAX_HOPS,
@@ -87,6 +89,9 @@ const LIST_BOTS_SCHEMA = { type: "object", properties: {}, additionalProperties:
 
 /** 原生审批/提问里属于「授权」语义的方法（其余是信息输入）。 */
 const AUTHORIZATION_METHODS = new Set(["select", "confirm"]);
+
+/** 头像图片允许的附件类型。 */
+const AVATAR_MIMES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
 function httpErr(status, message, code) {
   const e = new Error(message);
@@ -302,6 +307,7 @@ export class Orchestrator {
       memoryEnabled: input.memoryEnabled ?? false,
       skills: input.skills ?? null,
       budget: input.budget ?? null,
+      avatar: input.avatar === undefined ? null : this._checkAvatar(input.avatar, { id, isMain: !!input.isMain }),
     });
     this.store.putBot(bot);
     this.team.writeIdentity(bot);
@@ -312,6 +318,28 @@ export class Orchestrator {
 
   getBot(id) {
     return this._syncIdentity(normalizeBot(this.store.getBot(id)));
+  }
+
+  /**
+   * 校验接口传来的头像改动，返回合并后的头像。形状规则在 validateAvatarPatch；
+   * 新换的图片还要查附件登记：必须是这个 bot 自己上传的 PNG、JPEG、GIF 或 WebP。
+   * 没换图片时不再查，附件后来被删了也不挡别的改动，界面会退回吉祥物。
+   */
+  _checkAvatar(patch, { id, isMain = false, current = null }) {
+    let avatar;
+    try {
+      avatar = validateAvatarPatch(patch, { id, isMain, current });
+    } catch (e) {
+      throw httpErr(e.status ?? 400, e.message, e.code ?? "avatar_invalid");
+    }
+    const attachmentId = avatarAttachmentId(avatar.url);
+    if (attachmentId && avatar.url !== current?.url) {
+      const rec = this.features?.attachments?.get?.(attachmentId);
+      if (!rec) throw httpErr(400, "这张图片不在附件里，重新上传一次", "avatar_url_invalid");
+      if (rec.botId !== id) throw httpErr(400, "这张图片是别的助手的附件，给这个助手重新上传", "avatar_url_invalid");
+      if (!AVATAR_MIMES.has(rec.mime)) throw httpErr(400, "头像只支持 PNG、JPEG、GIF 和 WebP 图片", "avatar_url_invalid");
+    }
+    return avatar;
   }
 
   listBots() {
@@ -417,10 +445,13 @@ export class Orchestrator {
     // 档位只经 resolvePermission 写入：旧字段和三档都归一成一种组合，升到全部放手要确认。
     patch = { ...patch, ...resolvePermission(patch, bot) };
     if (patch.budget !== undefined) normalizeBudget(patch.budget, "bot.budget");
+    if (patch.avatar !== undefined) {
+      patch = { ...patch, avatar: this._checkAvatar(patch.avatar, { id, isMain: patch.isMain ?? bot.isMain, current: bot.avatar }) };
+    }
     const next = { ...bot };
     for (const k of [
       "name", "role", "instructions", "model", "thinking", "isMain",
-      "executionMode", "approvalMode", "workspace", "memoryEnabled", "skills", "budget", "computer",
+      "executionMode", "approvalMode", "workspace", "memoryEnabled", "skills", "budget", "computer", "avatar",
     ]) {
       if (patch[k] !== undefined) next[k] = patch[k];
     }

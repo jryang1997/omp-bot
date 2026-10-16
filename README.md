@@ -4,7 +4,7 @@
 
 后端使用 Node ESM。每个 Bot scope 使用一个 `omp --mode rpc` 子进程。Node 编排层负责团队、运行台账、原生审批接入和群聊回合，模型执行仍由 OMP 负责。
 
-编排协议和头像组件来自 [DeepSeek-Bot](https://github.com/FeiZhuLulu/DeepSeek-Bot)。GUI 沿用其基础组件并重构布局、视觉和设置层次，适配本项目的 HTTP API 和 SSE。后端仍使用 omp 原生的会话续接与压缩。复制范围、固定版本和许可见 [前端来源说明](web/vendor/README.md)。
+编排协议来自 [DeepSeek-Bot](https://github.com/Fei2411/DeepSeek-Bot)。GUI 沿用其基础组件并重构布局、视觉和设置层次，适配本项目的 HTTP API 和 SSE。头像是吉祥物，可以选身体、颜色和表情，也可以换成上传的图片。后端仍使用 omp 原生的会话续接与压缩。复制范围、固定版本和许可见 [前端来源说明](web/vendor/README.md)。
 
 ## 它和 DS-Bot 的差别
 
@@ -294,9 +294,9 @@ node probe-isolation.mjs # 判决实验：证明 overlay 关掉了记忆后端�
 
 ## 致谢
 
-- [DeepSeek-Bot](https://github.com/FeiZhuLulu/DeepSeek-Bot)：编排协议的设计来源，以及本项目实际移植的 GUI 样式、头像和组件结构。复制源码保留 Apache-2.0 许可与署名。
+- [DeepSeek-Bot](https://github.com/Fei2411/DeepSeek-Bot)：编排协议的设计来源，以及本项目实际移植的 GUI 样式和组件结构。复制源码保留 Apache-2.0 许可与署名。
 - [Hermes Bot Mode](https://github.com/NousResearch/Hermes-Bot-Mode)：bot=隔离 profile、每成员每群一会话、带署名的 bot 间消息格式。
-- [OpenMausBot](https://github.com/milind-soni/OpenMausBot)：群聊轮次与 @mention 中继。
+- [OpenMausBot](https://github.com/milind-soni/OpenMausBot)：群聊轮次与 @mention 中继，以及头像吉祥物的引擎、身体轮廓和表情数据（Apache-2.0，固定 commit 和改动见 [web/vendor/mascot/NOTICE](web/vendor/mascot/NOTICE)）。吉祥物形象是 Supamaus Software Private Limited 的商标。
 - [oh-my-pi / omp](https://github.com/can1357/oh-my-pi)：宿主 harness，提供 RPC 模式、host tool 回调、会话续接与原生压缩。
 
 ## License

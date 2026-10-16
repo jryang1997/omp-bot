@@ -1,13 +1,14 @@
 /*
  * omp_bot browser UI.
- * Sidebar tile/row markup, transcript markup, character marks, cluster geometry,
- * and the copy icon are adapted from FeiZhuLulu/DeepSeek-Bot, Apache-2.0.
+ * Sidebar tile/row markup, transcript markup, cluster geometry,
+ * and the copy icon are adapted from Fei2411/DeepSeek-Bot, Apache-2.0.
  * Source SHA bdc5fda64e2ea1e83a4d146440072a2413025df4.
  * Modified for native DOM, omp_bot HTTP/SSE endpoints, and accessible local forms.
  * See vendor/ds-bot/LICENSE and vendor/ds-bot/NOTICE.
+ * Bot avatars come from workbench-avatar.js; see vendor/mascot/NOTICE.
  */
-import { MAIN_LOOK, lookOf, shapeOf, MASK_ID, nextMarkSerial, characterMarkup } from "./vendor/ds-bot/characters.js";
 import { inkText } from "./vendor/ds-bot/inks.js";
+import { avatarNode, updateAvatar, colorOf, avatarEditor } from "./workbench-avatar.js";
 import {
   $, el, button, toast, announce, api, bootstrapAuth, markdownFragment, runStateLabel, trapTab, svgIcon, BOT_PERMISSION_LABELS, permissionOf,
 } from "./workbench-core.js";
@@ -28,6 +29,8 @@ const state = {
   saving: new Set(),
   roomActivity: new Set(),
   roomEvents: Object.create(null),
+  unread: new Set(),
+  avatarTimer: 0,
   search: "",
   revision: 0,
   refreshRequested: 0,
@@ -42,6 +45,7 @@ const state = {
   panelRequest: 0,
   advancedOpen: false,
   upkeepOpen: false,
+  avatarOpen: false,
   announcedAttention: 0,
   activity: null,
   runs: null,
@@ -61,29 +65,44 @@ const conversationBusy = (target) => liveRuns(target).length > 0
   || state.pending.has(keyOf(target))
   || (target.kind === "room" && state.roomActivity.has(target.id));
 
+/**
+ * 头像的运行状态。工作中、有未读、刚发生事件的头像才动，其余静止。
+ * 没有运行客户端时（启动早期）一律静止的 idle。
+ */
+function avatarActivity(botId) {
+  const live = state.runs?.avatarState(botId) ?? { face: "idle", moving: false, until: 0 };
+  return { ...live, moving: live.moving || state.unread.has(keyOf({ kind: "bot", id: botId })) };
+}
+
+/** live 的头像登记 data-avatar-bot，之后由 syncAvatars 原地换表情、动或停。 */
 function botMark(bot, size = 36, working = false, live = true) {
-  const look = bot?.isMain ? MAIN_LOOK : lookOf(bot);
-  const mark = el("span", "bt-mark");
-  mark.dataset.shape = look.shape;
-  mark.dataset.state = working ? "working" : "idle";
-  if (live) mark.dataset.live = "";
-  mark.setAttribute("aria-hidden", "true");
-  mark.style.width = `${size}px`;
-  mark.style.height = `${size}px`;
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  const box = shapeOf(look.shape).size;
-  svg.setAttribute("viewBox", `0 0 ${box} ${box}`);
-  svg.setAttribute("aria-hidden", "true");
-  svg.setAttribute("focusable", "false");
-  svg.innerHTML = characterMarkup(look.shape, look.color).replaceAll(MASK_ID, `omp-mark-${nextMarkSerial()}`);
-  mark.append(svg);
-  if (live) {
-    const wrapper = el("span", "bt-mark");
-    Object.assign(wrapper.style, { width: `${size}px`, height: `${size}px` });
-    wrapper.append(mark);
-    return wrapper;
+  if (!bot) return avatarNode(null, { size });
+  if (!live) return avatarNode(bot, { size, face: working ? "working" : "idle" });
+  const { face, moving } = avatarActivity(bot.id);
+  const node = avatarNode(bot, { size, face, animate: moving });
+  node.dataset.avatarBot = bot.id;
+  return node;
+}
+
+/** 按当前运行状态更新页面上所有 live 头像；开心和「刚发生」的窗口到点后再来一次，让头像停下。 */
+function syncAvatars() {
+  clearTimeout(state.avatarTimer);
+  const now = Date.now();
+  let next = Infinity;
+  const seen = new Map();
+  for (const node of document.querySelectorAll("[data-avatar-bot]")) {
+    const id = node.dataset.avatarBot;
+    const bot = botById(id);
+    if (!bot) continue;
+    if (!seen.has(id)) seen.set(id, avatarActivity(id));
+    const activity = seen.get(id);
+    if (activity.until > now) next = Math.min(next, activity.until);
+    // 群头像里的座位：群在开会或有未读时一起动。
+    const room = node.closest("[data-avatar-room]")?.dataset.avatarRoom;
+    const roomMoving = !!room && (state.roomActivity.has(room) || state.unread.has(keyOf({ kind: "room", id: room })));
+    updateAvatar(node, bot, { face: activity.face, animate: activity.moving || roomMoving });
   }
-  return mark;
+  if (next !== Infinity) state.avatarTimer = setTimeout(syncAvatars, next - now + 50);
 }
 
 // Adapted from mark.js clusterSeats and RoomAvatar.
@@ -103,6 +122,7 @@ function roomAvatar(room, size = 36) {
     seats = [[0, 0, half], [half, 0, half], [0, half, half], [half, half, half]];
   }
   const cluster = el("span", "bt-cluster");
+  cluster.dataset.avatarRoom = room.id;
   cluster.setAttribute("aria-hidden", "true");
   cluster.style.width = `${size}px`;
   cluster.style.height = `${size}px`;
@@ -130,7 +150,7 @@ function roomAvatar(room, size = 36) {
 
 function avatar(target, size) {
   const item = itemOf(target);
-  return target.kind === "bot" ? botMark(item, size, conversationBusy(target)) : roomAvatar(item, size);
+  return target.kind === "bot" ? botMark(item, size) : roomAvatar(item, size);
 }
 
 async function loadAll() {
@@ -188,12 +208,14 @@ function renderSidebar() {
     const target = { kind: "bot", id: bot.id };
     const row = button("bt-row", null, () => select("bot", bot.id));
     row.dataset.botId = bot.id;
-    row.setAttribute("aria-label", `${bot.name}${bot.isMain ? "，主助手" : ""}${conversationBusy(target) ? "，处理中" : ""}`);
+    const unread = state.unread.has(keyOf(target));
+    row.setAttribute("aria-label", `${bot.name}${bot.isMain ? "，主助手" : ""}${conversationBusy(target) ? "，处理中" : ""}${unread ? "，有新消息" : ""}`);
     if (isSelected(target)) row.setAttribute("aria-current", "page");
     row.append(avatar(target, 36));
     const body = el("span", "bt-row-body");
     const name = el("span", "bt-row-name");
     name.append(el("span", "bt-row-title", bot.name));
+    if (unread) name.append(el("span", "wb-unread"));
     body.append(name);
     const messages = state.chats[bot.id];
     const status = state.runs?.statusText(target);
@@ -207,12 +229,14 @@ function renderSidebar() {
     const target = { kind: "room", id: room.id };
     const row = button("bt-row", null, () => select("room", room.id));
     row.dataset.roomId = room.id;
-    row.setAttribute("aria-label", room.name);
+    const unread = state.unread.has(keyOf(target));
+    row.setAttribute("aria-label", `${room.name}${unread ? "，有新消息" : ""}`);
     if (isSelected(target)) row.setAttribute("aria-current", "page");
     row.append(avatar(target, 36));
     const body = el("span", "bt-row-body");
     const name = el("span", "bt-row-name");
     name.append(el("span", "bt-row-title", room.name));
+    if (unread) name.append(el("span", "wb-unread"));
     body.append(name);
     const preview = state.runs?.statusText(target)
       || (conversationBusy(target) ? "群聊回合进行中…" : room.log?.at(-1)?.text || `${room.members.length} 位助手 · ${room.mode === "everyone" ? "轮流发言" : "协调助手代答"}`);
@@ -234,6 +258,7 @@ function renderSidebar() {
   if (state.view === "usage") $("btn-usage").setAttribute("aria-current", "page");
   $("btn-activity").toggleAttribute("aria-current", state.view === "activity");
   if (state.view === "activity") $("btn-activity").setAttribute("aria-current", "page");
+  syncAvatars();
 }
 
 function select(kind, id) {
@@ -242,6 +267,7 @@ function select(kind, id) {
   if (state.sel) state.drafts[keyOf(state.sel)] = $("input").value;
   state.sel = target;
   state.view = "team";
+  state.unread.delete(keyOf(target));
   const fromSidebar = document.body.classList.contains("sidebar-open");
   closeDrawer(false);
   closeSidebar();
@@ -293,7 +319,7 @@ function renderSelected(scroll = false) {
     return;
   }
   $("head-name").textContent = item.name;
-  $("head-avatar").replaceChildren(avatar(target, 24));
+  $("head-avatar").replaceChildren(avatar(target, 32));
   if (target.kind === "bot") {
     const status = state.runs?.statusText(target);
     $("head-sub").textContent = [item.isMain ? "主助手" : "", item.role, status].filter(Boolean).join(" · ") || "助手";
@@ -342,7 +368,7 @@ function messageNode(message, bot, room) {
   const error = message.role === "error" || message.kind === "error";
   const row = el("div", "bt-group-msg" + (error ? " error" : ""));
   const name = el("span", "bt-group-name", error ? `${message.fromName ? `${message.fromName} · ` : ""}错误` : message.fromName || bot?.name || "助手");
-  if (!error) name.style.color = inkText(bot?.isMain ? MAIN_LOOK.color : lookOf(bot).color);
+  if (!error) name.style.color = inkText(colorOf(bot));
   if (room?.adminId && room.adminId === bot?.id) name.append(el("span", "bt-group-role", " 协调助手"));
   row.append(name);
   const stack = el("div", "bt-astack");
@@ -627,6 +653,7 @@ function handleEvent(event) {
       return;
     }
     if (event.type === "room_bot_post") {
+      if (!isSelected(target)) state.unread.add(keyOf(target));
       const bot = room.members.map(botById).find((bot) => bot?.name === event.bot);
       (room.log ||= []).push({ kind: "bot", from: bot?.id || event.bot, fromName: event.bot, text: event.text, at: Date.now() });
     } else {
@@ -660,6 +687,7 @@ function handleEvent(event) {
   } else if (event.type === "exchange_request") {
     toast(`${event.from} → ${event.to}（委派中）`);
   } else if (event.type === "bot_to_user" && !state.pending.has(keyOf({ kind: "bot", id: event.botId }))) {
+    if (!isSelected({ kind: "bot", id: event.botId })) state.unread.add(keyOf({ kind: "bot", id: event.botId }));
     void loadChat(event.botId).catch((error) => toast(error.message, true));
   }
   syncBusy();
@@ -850,6 +878,23 @@ function detailProfile(target) {
   return profile;
 }
 
+/** 形象：主助手固定，其他助手在折叠区里选身体、颜色、表情或换成图片。 */
+function avatarSection(target) {
+  const bot = itemOf(target);
+  if (bot.isMain) return avatarEditor(bot, {});
+  const section = disclosure("形象", "选身体、颜色和表情，也可以换成一张图片。", "avatarOpen");
+  section.body.append(avatarEditor(bot, {
+    onSave: async (data) => {
+      await api(`/api/bots/${encodeURIComponent(target.id)}`, { method: "PATCH", body: data });
+      state.revision += 1;
+      await loadAll();
+      void renderSettingsTab(target, "detail");
+      toast("形象已保存");
+    },
+  }));
+  return section.node;
+}
+
 /** 电脑入口：页签容易看漏，详情页给一个明确的跳转。 */
 function computerShortcut(target) {
   const card = el("div", "bt-set-card wb-shortcut");
@@ -980,7 +1025,7 @@ async function renderSettingsTab(target, tab) {
   if (fromDisclosure && back) back.focus();
   if (tab === "detail") {
     content.append(detailProfile(target));
-    if (target.kind === "bot") content.append(computerShortcut(target));
+    if (target.kind === "bot") content.append(avatarSection(target), computerShortcut(target));
     const save = async (data) => {
       await api(`/api/${target.kind === "bot" ? "bots" : "rooms"}/${encodeURIComponent(target.id)}`, { method: "PATCH", body: data });
       state.revision += 1;
@@ -1335,6 +1380,13 @@ function createWorkbench() {
       updateApprovalBadge();
     },
     onRunFinished: finishRun,
+    // 私聊完成时用户没在看这个会话：记一条未读，侧边栏头像在打开前一直动。
+    onRunEnded: (run) => {
+      const target = { kind: "bot", id: run.botId };
+      if (run.state !== "completed" || !run.botId || run.roomId || run.kind === "delegation" || isSelected(target)) return;
+      state.unread.add(keyOf(target));
+      renderSidebar();
+    },
     onApprovalsChanged: () => {
       renderDock();
       updateApprovalBadge();
@@ -1351,6 +1403,7 @@ function createWorkbench() {
   });
   state.runs.on((change) => {
     if (change === "run" && state.view === "activity") state.activity?.repaint?.();
+    if (change === "run" || change === "tool") syncAvatars();
   });
   state.dock = createApprovalDock({ client: state.runs });
   state.panels = createPanels({

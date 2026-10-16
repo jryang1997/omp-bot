@@ -1,0 +1,25 @@
+omp-mascot.js（吉祥物头像）
+
+本目录的 omp-mascot.js 包含以下项目的代码，按 Apache License 2.0 使用，许可全文见同目录 LICENSE。
+
+  来源：https://github.com/milind-soni/OpenMausBot
+  提交：330b098b7b59a9f066ae6cd013fb3b21ecf78956
+  取用范围：src/components/CursorAvatar.tsx 的运行时引擎（去掉 React 组件）、
+            src/components/cursor-face-data.ts 的表情几何、
+            shared/mascot-bodies.ts 生成好的身体轮廓（去掉 zod 校验）、
+            src/lib/mascot.ts 的可固定表情列表。
+  改动：引擎包成原生自定义元素 <omp-mascot>，所有实例共用一个动画循环，
+        滚出视口和暂停的实例不画，加了帧率上限。改动写在 scripts/mascot/element.ts。
+
+Made with Blob Studio.
+
+吉祥物形象是 Supamaus Software Private Limited 的商标。Apache-2.0 不授予商标权。
+
+上游 NOTICE 中与本文件相关的部分：
+
+OpenMausBot
+Copyright 2026 Milind Soni and OpenMausBot contributors
+
+OpenMausBot was relicensed from the MIT License to the Apache License,
+Version 2.0, with the consent of all contributors whose copyright was
+incorporated before the transition.

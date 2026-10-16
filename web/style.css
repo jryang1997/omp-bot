@@ -552,6 +552,30 @@ button:focus-visible { outline-offset: 2px; }
 @media (prefers-reduced-transparency: reduce) {
   #mobile-head { background: var(--bt-sidebar); backdrop-filter: none; }
 }
+/* 头像：吉祥物或裁切好的图片（workbench-avatar.js） */
+.omp-avatar { display: inline-flex; align-items: center; justify-content: center; flex: none; position: relative; line-height: 0; }
+.omp-avatar > omp-mascot { display: block; }
+.omp-avatar-pic { display: block; width: 100%; height: 100%; overflow: hidden; background: var(--bt-bubble); }
+.omp-avatar-pic > img { display: block; width: 100%; height: 100%; max-width: none; object-fit: cover; user-select: none; -webkit-user-drag: none; }
+.wb-unread { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--bt-accent); }
+.omp-avatar-editor { display: flex; flex-direction: column; gap: 14px; }
+.omp-avatar-editor > .hint { margin: 0 0 8px; text-align: center; }
+.omp-avatar-stage { align-self: center; width: 136px; height: 136px; display: grid; place-items: center; border-radius: 24px; background: var(--bt-bubble); touch-action: none; }
+.omp-avatar-stage.is-picture { cursor: grab; }
+.omp-avatar-stage.is-picture:active { cursor: grabbing; }
+.omp-avatar-stage:focus-visible { outline: 2px solid var(--bt-accent); outline-offset: 2px; }
+.omp-avatar-legend { display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; }
+.omp-avatar-choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.omp-avatar-choice { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; padding: 4px; border: 1px solid var(--bt-line); border-radius: 12px; background: var(--bt-card); color: var(--bt-ink); font: inherit; cursor: pointer; }
+.omp-avatar-choice:hover:not(:disabled) { background: var(--bt-hover); }
+.omp-avatar-choice[aria-pressed="true"] { border-color: var(--bt-accent); background: var(--bt-active); box-shadow: inset 0 0 0 1px var(--bt-accent); }
+.omp-avatar-choice:disabled { opacity: .45; cursor: not-allowed; }
+.omp-avatar-choice.omp-avatar-text, .omp-avatar-auto { padding: 4px 12px; font-size: 13px; line-height: 20px; }
+.omp-avatar-swatch { display: block; width: 28px; height: 28px; border-radius: 50%; }
+.omp-avatar-zoom { display: flex; align-items: center; gap: 10px; }
+.omp-avatar-zoom > input { flex: 1; min-width: 0; }
+.omp-avatar-zoom-value { min-width: 40px; font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
+.omp-avatar-actions { display: flex; justify-content: flex-end; gap: 8px; }
 @media (prefers-reduced-motion: reduce) {
   #drawer, #modal, #new-menu, #empty-state, .toast, button { animation: none; transition: none; }
   button:active:not(:disabled) { transform: none; }

@@ -89,6 +89,7 @@ const BOT_FIELDS = [
   "memoryEnabled",
   "skills",
   "budget",
+  "avatar",
 ];
 
 // 原生命令白名单与 Orchestrator 共用同一常量：API 层只做形状校验（不接受路径/参数/空格），

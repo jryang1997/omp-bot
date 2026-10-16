@@ -71,8 +71,9 @@ try {
     ["/style.css", "text/css"],
     ["/app.js", "text/javascript"],
     ["/vendor/ds-bot/ui.css", "text/css"],
-    ["/vendor/ds-bot/characters.js", "text/javascript"],
     ["/vendor/ds-bot/inks.js", "text/javascript"],
+    ["/vendor/mascot/omp-mascot.js", "text/javascript"],
+    ["/workbench-avatar.js", "text/javascript"],
     ["/vendor/marked/marked.esm.js", "text/javascript"],
     ["/vendor/dompurify/purify.es.js", "text/javascript"],
   ]) {

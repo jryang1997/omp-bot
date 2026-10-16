@@ -437,6 +437,19 @@ try {
   const backToChat = await api(`/api/bots/${bot.id}`, { method: "PATCH", body: { permission: "chat" } });
   check("permission=chat 生效", backToChat.status === 200 && backToChat.data.bot.executionMode === "chat");
 
+  // ---- 头像：接口直接校验，Main Bot 固定，主助手颜色专用，图片只能是附件 ----
+  const lead = (await api("/api/bots", { method: "POST", body: { name: "AvatarMain", isMain: true } })).data.bot;
+  check("Main Bot 默认 star 加专用蓝", lead?.avatar?.body === "star" && lead.avatar.color === "#4D6BFE", JSON.stringify(lead?.avatar));
+  const mainLocked = await api(`/api/bots/${lead.id}`, { method: "PATCH", body: { avatar: { body: "blob" } } });
+  check("改 Main Bot 形象 400", mainLocked.status === 400 && mainLocked.data?.code === "avatar_main_fixed", JSON.stringify(mainLocked.data));
+  const reserved = await api(`/api/bots/${bot.id}`, { method: "PATCH", body: { avatar: { color: "#4D6BFE" } } });
+  check("别的 bot 用主助手颜色 400", reserved.status === 400 && reserved.data?.code === "avatar_color_reserved", JSON.stringify(reserved.data));
+  const outside = await api(`/api/bots/${bot.id}`, { method: "PATCH", body: { avatar: { url: "https://example.com/x.png", crop: "circle" } } });
+  check("外部图片地址 400", outside.status === 400 && outside.data?.code === "avatar_url_invalid", JSON.stringify(outside.data));
+  const restyled = await api(`/api/bots/${bot.id}`, { method: "PATCH", body: { avatar: { body: "shield", color: "coral" } } });
+  const listed = (await api("/api/bots")).data.bots?.find((b) => b.id === bot.id);
+  check("合法头像改动保存并出现在花名册", restyled.status === 200 && listed?.avatar?.body === "shield" && listed.avatar.color === "coral", JSON.stringify(listed?.avatar));
+
   // ---- 原生导出/会话入口：未知 bot 不触发原生调用 ----
   check("session/export 未知 bot 404", (await api("/api/bots/nope/session/export")).status === 404);
   check("session/new 未知 bot 404", (await api("/api/bots/nope/session/new", { method: "POST", body: {} })).status === 404);

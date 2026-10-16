@@ -7,6 +7,10 @@ import { el, button, svgIcon, toast, announce, api, renderMarkdown, runStateLabe
 import { parseNativeFrame, mergeChildStats, childStatBits, childStatusRank } from "./workbench-native.js";
 
 const ATTENTION = new Set(["waiting_input", "waiting_approval"]);
+/** 头像表情：刚完成时开心一下的时长，以及「刚发生事件」让头像动起来的时长。 */
+export const HAPPY_MS = 3000;
+export const RECENT_MS = 4000;
+const SAD = new Set(["failed", "interrupted", "reconciliation_required"]);
 const TERMINAL = new Set(["completed", "failed", "cancelled", "interrupted", "reconciliation_required"]);
 const CONVERSATION_EVENTS = new Set([
   "room_bot_post", "room_bot_pass", "room_turn_error", "room_round_start", "room_round_end", "room_user_post",
@@ -366,8 +370,13 @@ export function createRunClient(deps) {
   const runSequences = new Map();
   const live = new Map();
   const approvals = new Map();
+  // 头像用：每个 Run 正在跑的工具、本页亲眼看到它完成的时间、每个 bot 最近一次状态变化的时间。
+  const toolsActive = new Map();
+  const finishedAt = new Map();
+  const changedAt = new Map();
   let lastSeq = 0;
   let seqCursor = 0;
+  let replayUntil = 0;
   const listeners = new Set();
   const request = deps.request ?? api;
 
@@ -392,9 +401,24 @@ export function createRunClient(deps) {
     return node;
   };
 
+  function trackTool(runId, parsed) {
+    if (parsed.kind !== "tool" || !parsed.id || TERMINAL.has(runs.get(runId)?.state)) return;
+    const active = toolsActive.get(runId) ?? new Set();
+    const before = active.size;
+    if (parsed.phase === "end") active.delete(parsed.id);
+    else active.add(parsed.id);
+    toolsActive.set(runId, active);
+    if (!before !== !active.size) {
+      const botId = runs.get(runId)?.botId;
+      if (botId) changedAt.set(botId, Date.now());
+      notify("tool");
+    }
+  }
+
   function handleNative(runId, frame) {
     const parsed = parseNativeFrame(frame);
     if (!parsed) return;
+    trackTool(runId, parsed);
     const node = live.get(runId);
     if (!node) return;
     node.pinned = node.atBottom();
@@ -417,11 +441,23 @@ export function createRunClient(deps) {
     notify("approval");
   }
 
-  function applyRun(run) {
+  function applyRun(run, { replay = false } = {}) {
     if (!run || !run.id) return;
     const known = runs.get(run.id);
     const wasTerminal = known?.state;
     record(run);
+    if (run.state && run.state !== known?.state) {
+      const merged = runs.get(run.id);
+      // 连上时服务端重放的旧事件不算「刚发生」，不然一打开页面所有 bot 都在开心、都有未读。
+      const fresh = !replay;
+      if (merged.botId && fresh) changedAt.set(merged.botId, Date.now());
+      if (TERMINAL.has(run.state)) {
+        toolsActive.delete(run.id);
+        if (run.state === "completed" && fresh) finishedAt.set(run.id, Date.now());
+        // 不管界面有没有在看这个会话都通知一次，未读标记靠它。
+        if (fresh) deps.onRunEnded?.(merged);
+      }
+    }
     const node = live.get(run.id);
     if (node) {
       node.run = runs.get(run.id);
@@ -450,10 +486,14 @@ export function createRunClient(deps) {
       lastSeq = event.seq;
     }
     switch (event.type) {
+      case "hello":
+        // 服务端先发 hello 再重放 lastSeq 以前的事件，这些都是旧事。
+        if (Number.isInteger(event.lastSeq)) replayUntil = event.lastSeq;
+        break;
       case "run_created":
       case "run_updated":
       case "run_finished":
-        applyRun(event.run);
+        applyRun(event.run, { replay: Number.isInteger(event.seq) && event.seq <= replayUntil });
         break;
       case "native_event":
         if (event.runId) handleNative(event.runId, event.event);
@@ -614,6 +654,30 @@ export function createRunClient(deps) {
     }
   }
 
+  /**
+   * 一个 bot 的头像状态：等审批 alerting、调用工具 working、其余进行中 thinking；
+   * 不在工作时，最近一个 Run 出错 sad，刚完成 happy 一下再回 idle。
+   * moving 只看是否工作中和最近有没有事件，未读由界面另外算。
+   */
+  function avatarState(botId, now = Date.now()) {
+    const mine = [...runs.values()].filter((run) => run.botId === botId);
+    const active = mine.filter((run) => isLiveRun(run.state));
+    let face = "idle";
+    let until = 0;
+    if (active.some((run) => ATTENTION.has(run.state))) face = "alerting";
+    else if (active.some((run) => toolsActive.get(run.id)?.size)) face = "working";
+    else if (active.length) face = "thinking";
+    else {
+      const last = mine.reduce((best, run) => (!best || (run.createdAt ?? 0) >= (best.createdAt ?? 0) ? run : best), null);
+      const done = last ? finishedAt.get(last.id) : 0;
+      if (last && SAD.has(last.state)) face = "sad";
+      else if (last?.state === "completed" && done && now - done < HAPPY_MS) { face = "happy"; until = done + HAPPY_MS; }
+    }
+    const recent = (changedAt.get(botId) ?? 0) + RECENT_MS;
+    if (recent > now) until = Math.max(until, recent);
+    return { face, busy: active.length > 0, moving: active.length > 0 || recent > now, until };
+  }
+
   function statusText(target) {
     const active = activeFor(target);
     if (!active.length) return "";
@@ -667,7 +731,7 @@ export function createRunClient(deps) {
 
   return {
     on, connect, handleEvent, restore, start, cancel, steer, respond, note,
-    record, applyRun, upsertApproval, pending, runsFor, activeFor, transcriptRuns, appendLive, statusText,
+    record, applyRun, upsertApproval, pending, runsFor, activeFor, transcriptRuns, appendLive, statusText, avatarState,
     all: () => [...runs.values()],
     get: (id) => runs.get(id) || null,
     get lastSeq() { return lastSeq; },

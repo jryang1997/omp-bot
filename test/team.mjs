@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { existsSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { makeBot, makeRoom, normalizeBot, permissionOf, permissionModes, roomPrompt, sceneTag, senderOf } from "../src/domain.mjs";
+import { DEFAULT_MASCOT_BODY, MAIN_MASCOT_COLOR, MASCOT_BODY_IDS, MASCOT_COLOR_IDS, MASCOT_EXPRESSIONS, makeBot, makeRoom, mascotColorFor, normalizeBot, permissionOf, permissionModes, roomPrompt, sceneTag, senderOf } from "../src/domain.mjs";
 import { writePersonaFiles, personaText } from "../src/persona.mjs";
 import { BotRuntime } from "../src/bot.mjs";
 import { Computers } from "../src/features/computers.mjs";
@@ -599,6 +599,92 @@ test("04 消息第一行标场景和发送者", () => {
   const prompt = roomPrompt({ room, members: [{ id: "bot_a", name: "A" }], self: { id: "bot_a", name: "A" }, turnNumber: 1 });
   assert.equal(prompt.split("\n")[0], "[群聊，产品群]");
   assert.ok(personaText().includes("[私聊，用户]"), "bot 知道标签的含义");
+});
+
+// ---------------- 11 吉祥物头像 ----------------
+const PNG_1PX = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+test("11 打包文件导出的取值和花名册校验用的一致", async () => {
+  // 打包文件定义了自定义元素，在 node 里给它一个最小的浏览器外壳就能导入。
+  const saved = { HTMLElement: globalThis.HTMLElement, customElements: globalThis.customElements };
+  globalThis.HTMLElement ??= class {};
+  globalThis.customElements ??= { get: () => undefined, define: () => {} };
+  try {
+    const m = await import("../web/vendor/mascot/omp-mascot.js");
+    assert.deepEqual([...m.MASCOT_BODY_IDS], MASCOT_BODY_IDS);
+    assert.equal(m.DEFAULT_MASCOT_BODY, DEFAULT_MASCOT_BODY);
+    assert.deepEqual([...m.MASCOT_COLOR_IDS], MASCOT_COLOR_IDS);
+    assert.deepEqual([...m.MASCOT_EXPRESSIONS], MASCOT_EXPRESSIONS);
+    assert.ok(!Object.values(m.MASCOT_COLORS).map((c) => c.toLowerCase()).includes(MAIN_MASCOT_COLOR.toLowerCase()), "主助手颜色不在 10 色里");
+    for (const s of ["idle", "thinking", "working", "alerting", "sad", "happy", ...MASCOT_EXPRESSIONS]) assert.ok(m.CURSOR_STATES.includes(s), s);
+  } finally {
+    if (saved.HTMLElement === undefined) delete globalThis.HTMLElement;
+    if (saved.customElements === undefined) delete globalThis.customElements;
+  }
+  const notice = readFileSync(new URL("../web/vendor/mascot/NOTICE", import.meta.url), "utf8");
+  const script = readFileSync(new URL("../scripts/build-mascot.mjs", import.meta.url), "utf8");
+  const commit = script.match(/UPSTREAM_COMMIT = "([0-9a-f]{40})"/)[1];
+  assert.ok(notice.includes(commit) && notice.includes("Apache") && notice.includes("Made with Blob Studio"));
+  assert.ok(readFileSync(new URL("../web/vendor/mascot/omp-mascot.js", import.meta.url), "utf8").includes(commit));
+  assert.ok(readFileSync(new URL("../web/vendor/mascot/LICENSE", import.meta.url), "utf8").includes("Apache License"));
+});
+test("11 老 bot 按 id 拿到固定颜色和 cursor 身体，Main Bot 固定 star 和专用蓝", () => {
+  const old = normalizeBot({ id: "bot_old_1", name: "老甲" });
+  assert.deepEqual(old.avatar, { body: "cursor", color: mascotColorFor("bot_old_1"), expression: null, crop: "mascot", url: null, zoom: 1, focusX: 0.5, focusY: 0.5 });
+  assert.deepEqual(normalizeBot({ id: "bot_old_1", name: "老甲" }).avatar, old.avatar, "同一个 id 每次一样");
+  const spread = new Set(Array.from({ length: 60 }, (_, i) => mascotColorFor(`bot_${i.toString(36)}_x`)));
+  assert.ok(spread.size >= 8, `颜色要散开，实际 ${spread.size} 种`);
+  const main = normalizeBot({ id: "bot_m", name: "主", isMain: true, avatar: { body: "blob", color: "red" } });
+  assert.deepEqual([main.avatar.body, main.avatar.color, main.avatar.crop], ["star", MAIN_MASCOT_COLOR, "mascot"]);
+  // 存坏的取值退回默认，不让整条记录消失
+  const dirty = normalizeBot({ id: "bot_d", name: "脏", avatar: { body: "cube", color: MAIN_MASCOT_COLOR, crop: "circle", url: "https://x.test/a.png", zoom: 9 } });
+  assert.deepEqual([dirty.avatar.body, dirty.avatar.color, dirty.avatar.crop, dirty.avatar.url, dirty.avatar.zoom], ["cursor", mascotColorFor("bot_d"), "mascot", null, 1]);
+});
+test("11 接口拒绝改 Main Bot 形象、拒绝用主助手颜色、拒绝非附件地址的图片", async () => {
+  const home = tmp("ompbot-avatar-");
+  try {
+    await withOrch(home, async (orch) => {
+      const main = orch.addBot({ name: "主", isMain: true });
+      const bot = orch.addBot({ name: "甲" });
+      const other = orch.addBot({ name: "乙" });
+      const code = (fn) => { try { fn(); } catch (e) { return `${e.status} ${e.code}`; } return "ok"; };
+      assert.equal(code(() => orch.updateBot(main.id, { avatar: { color: "red" } })), "400 avatar_main_fixed");
+      assert.equal(code(() => orch.updateBot(main.id, { avatar: {} })), "400 avatar_main_fixed");
+      assert.equal(code(() => orch.addBot({ name: "又一个主", isMain: true, avatar: { body: "blob" } })), "400 avatar_main_fixed");
+      assert.equal(code(() => orch.updateBot(bot.id, { isMain: true, avatar: { body: "blob" } })), "400 avatar_main_fixed");
+      assert.equal(orch.updateBot(main.id, { role: "主持" }).avatar.color, MAIN_MASCOT_COLOR, "改别的字段不受影响");
+      for (const color of [MAIN_MASCOT_COLOR, MAIN_MASCOT_COLOR.toLowerCase()]) {
+        assert.equal(code(() => orch.updateBot(bot.id, { avatar: { color } })), "400 avatar_color_reserved");
+      }
+      assert.equal(code(() => orch.addBot({ name: "丙", avatar: { color: MAIN_MASCOT_COLOR } })), "400 avatar_color_reserved");
+      assert.equal(code(() => orch.updateBot(bot.id, { avatar: { color: "#123456" } })), "400 avatar_invalid");
+      assert.equal(code(() => orch.updateBot(bot.id, { avatar: { body: "cube" } })), "400 avatar_invalid");
+      assert.equal(code(() => orch.updateBot(bot.id, { avatar: { expression: "angry" } })), "400 avatar_invalid");
+      assert.equal(code(() => orch.updateBot(bot.id, { avatar: { zoom: 3.5 } })), "400 avatar_invalid");
+      assert.equal(code(() => orch.updateBot(bot.id, { avatar: { owner: "x" } })), "400 avatar_invalid");
+      assert.equal(code(() => orch.updateBot(bot.id, { avatar: { crop: "circle" } })), "400 avatar_invalid", "没图片不能选图片裁切");
+      const att = (owner, filename, mime, data) => orch.features.attachments.create({ botId: owner, filename, mime, dataBase64: data });
+      const mine = att(bot.id, "me.png", "image/png", PNG_1PX);
+      const theirs = att(other.id, "them.png", "image/png", PNG_1PX);
+      const doc = att(bot.id, "notes.txt", "text/plain", Buffer.from("hello").toString("base64"));
+      const preview = (rec) => `/api/attachments/${rec.id}/preview`;
+      for (const url of [
+        "https://example.com/a.png", "data:image/png;base64,AAAA", "/api/attachments/att_nope_1/preview",
+        `/api/attachments/${mine.id}/download`, `/api/attachments/${mine.id}/preview?x=1`, preview(theirs), preview(doc),
+      ]) {
+        assert.equal(code(() => orch.updateBot(bot.id, { avatar: { url, crop: "circle" } })), "400 avatar_url_invalid", url);
+      }
+      const set = orch.updateBot(bot.id, { avatar: { url: preview(mine), crop: "rounded", zoom: 2, focusX: 0.25, focusY: 0.75 } });
+      assert.deepEqual([set.avatar.crop, set.avatar.url, set.avatar.zoom, set.avatar.focusX], ["rounded", preview(mine), 2, 0.25]);
+      const look = orch.updateBot(bot.id, { avatar: { body: "drop", color: "teal", expression: "proud" } });
+      assert.deepEqual([look.avatar.body, look.avatar.color, look.avatar.expression, look.avatar.url], ["drop", "teal", "proud", preview(mine)], "部分改动合并进现有头像");
+      assert.equal(orch.getBot(bot.id).avatar.body, "drop", "存进花名册");
+      assert.equal(orch.updateBot(bot.id, { avatar: { expression: null, crop: "mascot", url: null } }).avatar.expression, null);
+      assert.equal(code(() => orch.addBot({ name: "丁", avatar: { url: preview(mine), crop: "circle" } })), "400 avatar_url_invalid", "新 bot 还没有自己的附件");
+      assert.equal(orch.addBot({ name: "戊", avatar: { body: "hexagon", color: "pink" } }).avatar.body, "hexagon");
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 for (const run of pending) await run();
