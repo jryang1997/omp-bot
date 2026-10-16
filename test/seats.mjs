@@ -13,6 +13,7 @@ import { guestPath, seatShareRoots, shPath } from "../src/features/computers.mjs
 import { FileShare, WORKSPACE_USER, probePort } from "../src/file-share.mjs";
 import { teamPaths, teamRoot } from "../src/team.mjs";
 import { startServer } from "../src/server.mjs";
+import { computerIdFor } from "../src/domain.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -90,6 +91,7 @@ class FakeVm {
       return ok(`${sha(this.files.get(m[3]))}\n`);
     }
     if (/^mkdir -p '[^']+'$/.test(command)) return ok();
+    if (command === "install -d -m 0700 -o root -g root /var/tmp/omp-old") return ok();
     if (command.startsWith("exec /usr/bin/python3 /usr/local/lib/omp-bot/omp-login-sync publish ")) {
       this.publishes = (this.publishes ?? 0) + 1;
       if (this.failPublish) return { exitCode: 2, stdout: "", stderr: this.failPublish };
@@ -111,6 +113,15 @@ class FakeVm {
     }
     if (sub === "count") return ok(`${this.seats.size}\n`);
     if (sub === "install-packages") return ok(`installed ${rest.join(" ")}\n`);
+    if (sub === "import-old") {
+      const [user, work, home] = rest;
+      if (!this.seats.has(user)) return { exitCode: 2, stdout: "", stderr: `座席用户不存在：${user}` };
+      if (!this.files.has(work) || !this.files.has(home)) return { exitCode: 2, stdout: "", stderr: "旧电脑的包不对" };
+      this.imports.push({ user, work: String(this.files.get(work)), home: String(this.files.get(home)) });
+      this.files.delete(work);
+      this.files.delete(home);
+      return ok(`dest=/home/${user}/old-computer\nfiles=3\n`);
+    }
     return { exitCode: 2, stdout: "", stderr: `unknown ${sub}` };
   }
   seatDesk(port, token) {
@@ -140,6 +151,39 @@ class FakeVm {
   }
   async seatHealthy(port) {
     return this.state === "running" && [...this.seats.values()].some((s) => s.port === port);
+  }
+  // 旧的每 bot 电脑：id → { running, failExport }
+  old = new Map();
+  imports = [];
+  oldComputers() {
+    const vm = this;
+    const need = (id) => {
+      const m = vm.old.get(id);
+      if (!m) throw Object.assign(new Error(`no old ${id}`), { code: "computer_not_created" });
+      return m;
+    };
+    return {
+      list: () => [...vm.old.keys()].sort(),
+      start: async (id) => { need(id).running = true; vm.events.push(`old start ${id}`); },
+      stop: async (id) => { need(id).running = false; vm.events.push(`old stop ${id}`); },
+      run: async (id, opts) => {
+        const m = need(id);
+        vm.events.push(`old run ${id}`);
+        if (!m.running) throw new Error("old not running");
+        assert.match(opts.command, /pack "\$d\/home\.tgz" --exclude=\.\/\.cache --exclude=\.\/\.config\/chromium /);
+        assert.match(opts.command, /--ignore-failed-read/);
+        if (m.failExport) return { exitCode: 2, stdout: "", stderr: m.failExport };
+        return { exitCode: 0, stdout: "", stderr: "" };
+      },
+      downloadFile: async (id, { path, localPath }) => {
+        assert.ok(need(id).running, "取回时旧电脑开着");
+        const data = `${id}:${path.split("/").pop()}`;
+        writeFileSync(localPath, data);
+        vm.events.push(`old download ${id} ${path.split("/").pop()}`);
+        return { bytes: data.length };
+      },
+      remove: async (id) => { need(id); vm.events.push(`old remove ${id}`); vm.old.delete(id); },
+    };
   }
 }
 
@@ -637,6 +681,156 @@ test("09 登录屏接口：打开、输入要带当前代号、完成记下发�
     assert.equal((await res.json()).code, "computer_login_unsupported");
   } finally {
     await bare.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// ---------------- 10 旧电脑 ----------------
+const settle = async (seats) => {
+  // 只等，不自己调 migrateOld：要验证的是后台自己跑起来
+  for (let i = 0; i < 300 && seats.oldComputers().some((x) => x.state === "copying" || x.state === "pending"); i += 1) await sleep(10);
+};
+
+test("10 旧电脑依次复制：开旧电脑、打包、取回、关旧电脑，开座席、解进 ~/old-computer，原来没开的座席再关上；已完成的跳过", async () => {
+  const home = tmp("ompbot-old-copy-");
+  try {
+    const vm = new FakeVm();
+    vm.createDelay = 1;
+    vm.old.set("pc_a", { running: false });
+    vm.old.set("pc_b", { running: false });
+    const seats = seated(home, vm);
+    assert.deepEqual(seats.oldComputers().map((x) => [x.id, x.state]), [["pc_a", "pending"], ["pc_b", "pending"]]);
+    const items = await seats.migrateOld();
+    assert.deepEqual(items.map((x) => [x.id, x.state, x.files]), [["pc_a", "done", 3], ["pc_b", "done", 3]]);
+    assert.ok(items.every((x) => typeof x.copiedAt === "string" && x.bytes > 0));
+    const ev = vm.events.filter((e) => /^old |import-old|omp-seat (up|down) /.test(e)).map((e) => e.replace(/^mgmt exec \S+ /, "").replace(/^(import-old \S+) .*$/, "$1"));
+    const a = seatUser("pc_a");
+    assert.deepEqual(ev.slice(0, 8), [
+      "old start pc_a", "old run pc_a", "old download pc_a work.tgz", "old download pc_a home.tgz", "old stop pc_a",
+      `up ${a} ${ev[5].split(" ")[2]} ${ev[5].split(" ")[3]}`, `import-old ${a}`, `down ${a}`,
+    ]);
+    assert.ok(ev.indexOf("old start pc_b") > ev.indexOf(`down ${a}`), "一台一台来");
+    assert.deepEqual(vm.imports.map((x) => [x.user, x.work, x.home]), [[a, "pc_a:work.tgz", "pc_a:home.tgz"], [seatUser("pc_b"), "pc_b:work.tgz", "pc_b:home.tgz"]]);
+    assert.equal(vm.seats.size, 0, "原来没开的座席复制完又关上");
+    assert.ok([...vm.files.keys()].every((k) => !k.startsWith("/var/tmp/omp-old/")), "共享电脑里的包解完就删");
+    assert.equal(statSync(join(home, "computers", "old-computers.json")).mode & 0o777, 0o600);
+    // 再跑一遍什么都不做
+    const before = vm.events.length;
+    await seats.migrateOld();
+    assert.equal(vm.events.slice(before).filter((e) => e.startsWith("old ")).length, 0, "已完成的跳过");
+    // 座席本来开着：复制完不关
+    vm.old.set("pc_c", { running: false });
+    await seats.start("pc_c");
+    await settle(seats);
+    assert.equal(seats.oldComputers().find((x) => x.id === "pc_c").state, "done", "座席开机后自动开始复制");
+    assert.equal((await seats.status("pc_c")).state, "running", "原来开着的座席复制完还开着");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("10 出错的要重试才再来，没有助手的旧电脑不复制，删旧电脑先关机、复制中不删", async () => {
+  const home = tmp("ompbot-old-err-");
+  try {
+    const vm = new FakeVm();
+    vm.createDelay = 1;
+    vm.old.set("pc_a", { running: false, failExport: "tar: /work: Permission denied" });
+    vm.old.set("pc_b", { running: false });
+    vm.old.set("pc_gone", { running: false });
+    const seats = new SeatBackend({ home, vm, botIdFor: (id) => (id === "pc_gone" ? null : `bot-${id}`) });
+    let items = await seats.migrateOld();
+    const a = items.find((x) => x.id === "pc_a");
+    assert.equal(a.state, "error");
+    assert.match(a.error.message, /^打包：旧电脑打包失败（退出码 2）：tar: \/work: Permission denied/);
+    assert.equal(vm.old.get("pc_a").running, false, "出错也把旧电脑关上");
+    assert.equal(items.find((x) => x.id === "pc_b").state, "done", "一台出错不挡后面的");
+    assert.deepEqual([items.find((x) => x.id === "pc_gone").state, items.find((x) => x.id === "pc_gone").botId], ["orphan", null]);
+    assert.ok(!vm.events.includes("old start pc_gone"), "没有助手的旧电脑不开机");
+    // 开座席不会自动重试出错的
+    const n = vm.events.filter((e) => e === "old start pc_a").length;
+    await seats.start("pc_b");
+    await seats.migrateOld();
+    assert.equal(vm.events.filter((e) => e === "old start pc_a").length, n);
+    vm.old.get("pc_a").failExport = null;
+    items = await seats.retryOld("pc_a");
+    assert.equal(items.find((x) => x.id === "pc_a").state, "done");
+    // 删除：复制中不删
+    vm.old.set("pc_slow", { running: false });
+    const slow = vm.oldComputers();
+    const realRun = slow.run;
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    vm.oldComputers = () => ({ ...slow, run: async (id, o) => { if (id === "pc_slow") await gate; return realRun(id, o); } });
+    const running = seats.migrateOld();
+    for (let i = 0; i < 100 && seats.oldComputers().find((x) => x.id === "pc_slow")?.step !== "打包"; i += 1) await sleep(5);
+    assert.equal(seats.oldComputers().find((x) => x.id === "pc_slow").state, "copying");
+    assert.equal(seats.oldComputers().find((x) => x.id === "pc_slow").step, "打包");
+    await assert.rejects(seats.removeOld("pc_slow"), (e) => e.code === "computer_stop_failed");
+    release();
+    await running;
+    items = await seats.removeOld("pc_gone");
+    assert.ok(vm.events.includes("old remove pc_gone"));
+    assert.deepEqual(items.map((x) => x.id), ["pc_a", "pc_b", "pc_slow"]);
+    await assert.rejects(seats.removeOld("pc_gone"), (e) => e.code === "computer_not_created");
+    await seats.removeOld("pc_a");
+    assert.equal(JSON.parse(readFileSync(join(home, "computers", "old-computers.json"), "utf8")).items.pc_a, undefined, "删了也清掉进度");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("10 旧电脑接口：列出带助手名，重试和删除，删除必须带 confirm", async () => {
+  const home = tmp("ompbot-old-http-");
+  mkdirSync(home, { recursive: true });
+  const vm = new FakeVm();
+  vm.createDelay = 1;
+  let orch = null;
+  const botIdFor = (cid) => orch?.listBots().find((b) => computerIdFor(b.id) === cid)?.id ?? null;
+  const backend = new SeatBackend({ home, vm, botIdFor });
+  const server = await startServer({ home, port: 0, computerBackend: backend, bin: join(home, "no-model-binary") });
+  orch = server.orch;
+  const bot = orch.addBot({ name: "阿码", role: "写代码" });
+  const cid = computerIdFor(bot.id);
+  vm.old.set(cid, { running: false, failExport: "boom" });
+  vm.old.set("pc_gone", { running: false });
+  const call = async (method, path, body) => {
+    const res = await fetch(`${server.url}/api/computer/old${path}`, {
+      method,
+      headers: { Authorization: `Bearer ${server.token}`, "Content-Type": "application/json" },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    return { status: res.status, data: await res.json() };
+  };
+  try {
+    let r = await call("GET", "");
+    assert.equal(r.status, 200);
+    const mine = r.data.items.find((x) => x.id === cid);
+    assert.deepEqual([mine.state, mine.botId, mine.botName], ["pending", bot.id, "阿码"]);
+    assert.deepEqual([r.data.items.find((x) => x.id === "pc_gone").state], ["orphan"]);
+    await backend.migrateOld();
+    r = await call("GET", "");
+    assert.equal(r.data.items.find((x) => x.id === cid).state, "error");
+    vm.old.get(cid).failExport = null;
+    r = await call("POST", `/${cid}/copy`);
+    assert.equal(r.status, 200);
+    await settle(backend);
+    r = await call("GET", "");
+    assert.equal(r.data.items.find((x) => x.id === cid).state, "done");
+    r = await call("POST", `/${cid}/copy`);
+    assert.deepEqual([r.status, r.data.code], [409, "computer_old_done"]);
+    r = await call("POST", "/pc_gone/copy");
+    assert.deepEqual([r.status, r.data.code], [409, "computer_old_orphan"]);
+    r = await call("POST", `/${cid}/delete`, {});
+    assert.deepEqual([r.status, r.data.code], [400, "confirm_required"]);
+    assert.ok(vm.old.has(cid), "没确认不删");
+    r = await call("POST", `/${cid}/delete`, { confirm: true });
+    assert.equal(r.status, 200);
+    assert.ok(!vm.old.has(cid));
+    assert.deepEqual(r.data.items.map((x) => x.id), ["pc_gone"]);
+    r = await call("POST", "/nope/delete", { confirm: true });
+    assert.deepEqual([r.status, r.data.code], [404, "computer_old_not_found"]);
+  } finally {
+    await server.close();
     rmSync(home, { recursive: true, force: true });
   }
 });

@@ -7,6 +7,9 @@
 #   omp-seat status <用户> [端口]        打印座席状态，一行一个 key=value。
 #   omp-seat count                       打印正在运行的座席数。
 #   omp-seat install-packages <包名>...  用 apt 装系统包。
+#   omp-seat import-old <用户> <work.tgz> <home.tgz>
+#                                        把旧电脑打包的 /work 和主目录解到这个用户的 ~/old-computer/work 和 home，
+#                                        已有的文件不覆盖。两个包必须在 /var/tmp/omp-old 下，解完删掉。
 #
 # 每个座席是一个 Linux 用户，加入 team 组，主目录 0700，没有 sudo。
 # 屏幕只认这个用户自己的 X cookie。spacesd 用宿主生成的令牌，令牌文件只有这个用户能读，加 --quic-port 0。
@@ -337,6 +340,30 @@ cmd_install_packages() {
   apt-get install -y -q --no-install-recommends "$@"
 }
 
+OLD_INBOX=/var/tmp/omp-old
+
+cmd_import_old() {
+  [ $# -eq 3 ] || die "用法：omp-seat import-old <用户> <work.tgz> <home.tgz>"
+  local user="$1" work="$2" homepack="$3" f
+  check_user "$user"
+  user_exists "$user" || die "座席用户不存在：$user"
+  for f in "$work" "$homepack"; do
+    [[ "$f" =~ ^/var/tmp/omp-old/[A-Za-z0-9_-]+\.tgz$ ]] && [ -f "$f" ] && [ ! -L "$f" ] || die "旧电脑的包不对：$f"
+  done
+  local home dest; home="$(home_of "$user")"
+  dest="$home/old-computer"
+  # 以座席用户身份建目录、解包：文件归它自己，包里的链接也只能落在它能写的地方
+  [ ! -L "$dest" ] || die "$dest 是符号链接，不解"
+  as_user "$user" mkdir -p "$dest/work" "$dest/home"
+  as_user "$user" chmod 0700 "$dest"
+  # 包由 root 打开从标准输入喂进去，座席用户读不到 /var/tmp/omp-old
+  as_user "$user" tar -xzf - -C "$dest/work" --skip-old-files --strip-components=1 < "$work"
+  as_user "$user" tar -xzf - -C "$dest/home" --skip-old-files < "$homepack"
+  rm -f "$work" "$homepack"
+  echo "dest=$dest"
+  echo "files=$(as_user "$user" find "$dest" -type f | wc -l)"
+}
+
 [ "$(id -u)" = 0 ] || die "omp-seat 要以 root 运行（经管理通道调用）"
 cmd="${1:-}"; [ $# -gt 0 ] && shift
 case "$cmd" in
@@ -345,5 +372,6 @@ case "$cmd" in
   status) cmd_status "$@" ;;
   count) cmd_count "$@" ;;
   install-packages) cmd_install_packages "$@" ;;
-  *) die "未知子命令：${cmd:-（空）}。可用 up、down、status、count、install-packages" ;;
+  import-old) cmd_import_old "$@" ;;
+  *) die "未知子命令：${cmd:-（空）}。可用 up、down、status、count、install-packages、import-old" ;;
 esac

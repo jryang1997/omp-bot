@@ -17,6 +17,8 @@
 //   seatHealthy(guestPort) → boolean     这个座席的 spacesd 是否应答 /health
 //   seatListen                           可选，座席 spacesd 的监听地址，不给就用客机脚本的默认值
 //   shareHost                            可选，客机连回宿主 SFTP 服务的地址，不给就用客机脚本的默认值 10.0.2.2
+//   oldComputers()                       可选，旧的每 bot 电脑：{ list, start, stop, run, downloadFile, remove }，
+//                                        参数同 ComputerBackend，电脑 id 就是 bot 现在的座席 id
 //
 // share 是可选的共享目录提供者（生产用 SeatShare 包 FileShare）：
 //   forSeat(computerId) → { host?, port, knownHosts, workspaceKey, user, key } 或 null（不挂）
@@ -115,6 +117,18 @@ export const BROWSER_QUIT = [
   'echo "浏览器 35 秒内没有关掉" >&2; exit 1',
 ].join('\n');
 const LOGIN_BROWSER_CLOSE = BROWSER_QUIT;
+// 旧电脑里以 cua 运行：打包 /work 和主目录（不带缓存和浏览器 profile，登录到登录屏重登一次），读不到的文件跳过
+export const OLD_EXPORT_DIR = '/tmp/omp-old-export';
+export const OLD_EXPORT = [
+  'set -e',
+  `d=${OLD_EXPORT_DIR}; rm -rf "$d"; mkdir -p "$d"`,
+  'pack() { out="$1"; shift; tar -czf "$out" --ignore-failed-read --warning=no-file-changed "$@" || [ $? -eq 1 ]; }',
+  'if [ -d /work ]; then pack "$d/work.tgz" -C / work; else tar -czf "$d/work.tgz" -T /dev/null; fi',
+  'pack "$d/home.tgz" --exclude=./.cache --exclude=./.config/chromium --exclude=./.config/google-chrome -C "$HOME" .',
+  'stat -c "%n %s" "$d/work.tgz" "$d/home.tgz"',
+].join('\n');
+export const OLD_INBOX = '/var/tmp/omp-old';
+const OLD_TIMEOUT_MS = 30 * 60_000;
 const OUTPUT_TAIL = 1_500;
 
 function fail(code, message) {
@@ -261,6 +275,11 @@ export class SeatBackend {
   #guestFiles = null;
   #seq = 0;
   #share;
+  #botIdFor;
+  #oldFile;
+  #oldRun = null;
+  #oldBusy = null;
+  #oldStep = null;
 
   /**
    * @param {object} opts
@@ -268,15 +287,18 @@ export class SeatBackend {
    * @param {object} opts.vm 共享虚拟机接口，见文件开头
    * @param {Function|object} [opts.machine] 共享电脑规格，或返回规格的函数（每次开机前读）
    * @param {object} [opts.share] 共享目录提供者，见文件开头；不给就不挂共享目录
+   * @param {Function} [opts.botIdFor] 电脑 id 对应的 bot id，没有对应 bot 时返回 null；不给就当每台都有
    */
-  constructor({ home, vm, machine = null, share = null } = {}) {
+  constructor({ home, vm, machine = null, share = null, botIdFor = null } = {}) {
     if (typeof home !== 'string' || home.trim() === '') throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, 'SeatBackend needs the app data home');
     if (!vm || typeof vm.status !== 'function') throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, 'SeatBackend needs a shared vm');
     this.#home = path.resolve(home);
     this.#vm = vm;
     this.#machine = machine;
     this.#share = share;
+    this.#botIdFor = typeof botIdFor === 'function' ? botIdFor : null;
     this.#file = path.join(this.#home, 'computers', 'seats.json');
+    this.#oldFile = path.join(this.#home, 'computers', 'old-computers.json');
     this.#stageDir = path.join(this.#home, 'computers', 'guest-files');
   }
 
@@ -323,7 +345,10 @@ export class SeatBackend {
   /** 座席是按需建的：已经绑定过旧电脑的 bot 第一次 start 时直接得到一个座席。 */
   async start(computerId) {
     this.#assertId(computerId);
-    return await this.#queue(computerId, 'starting', () => this.#up(computerId, {}));
+    const out = await this.#queue(computerId, 'starting', () => this.#up(computerId, {}));
+    // 共享电脑就绪后把旧电脑的文件搬进来
+    if (computerId !== LOGIN_SEAT_ID) this.#kickOld();
+    return out;
   }
 
   async stop(computerId) {
@@ -423,6 +448,150 @@ export class SeatBackend {
     const publishedAt = new Date().toISOString();
     const status = await this.stop(LOGIN_SEAT_ID);
     return { publishedAt, status };
+  }
+
+  // ---------------- 旧电脑 ----------------
+
+  /** 旧的每 bot 电脑和复制进度。没有旧电脑就是空列表。 */
+  oldComputers() {
+    const ids = this.#oldIds();
+    const saved = this.#oldState();
+    return ids.map(id => {
+      const botId = this.#botIdFor ? this.#botIdFor(id) : id;
+      const item = saved[id] ?? {};
+      const state = item.state === 'done' || item.state === 'error' ? item.state
+        : this.#oldBusy === id ? 'copying'
+          : botId ? 'pending' : 'orphan';
+      return {
+        id,
+        botId: botId ?? null,
+        state,
+        step: state === 'copying' ? this.#oldStep : null,
+        error: state === 'error' ? item.error ?? null : null,
+        copiedAt: item.copiedAt ?? null,
+        files: item.files ?? null,
+        bytes: item.bytes ?? null,
+      };
+    });
+  }
+
+  /** 依次复制所有待复制的旧电脑。已经在跑就返回同一个 Promise。出错的要用户点重试才再来。 */
+  migrateOld() {
+    if (!this.#oldRun) {
+      this.#oldRun = (async () => {
+        for (const item of this.oldComputers()) {
+          if (item.state === 'pending') await this.#copyOld(item.id);
+        }
+        return this.oldComputers();
+      })().finally(() => {
+        this.#oldRun = null;
+      });
+    }
+    return this.#oldRun;
+  }
+
+  /** 重试一台出错的旧电脑：清掉错误再跑一遍队列。 */
+  retryOld(computerId) {
+    this.#assertId(computerId);
+    const item = this.oldComputers().find(x => x.id === computerId);
+    if (!item) throw fail(COMPUTER_ERROR.NOT_CREATED, `没有旧电脑 ${computerId}`);
+    if (item.state === 'error') this.#saveOld(computerId, null);
+    return this.migrateOld();
+  }
+
+  /** 删旧电脑：关机、删磁盘和记录。复制中不删。不可逆，接口层先要用户确认。 */
+  async removeOld(computerId) {
+    this.#assertId(computerId);
+    const old = this.#vm.oldComputers?.();
+    if (!old || !this.#oldIds().includes(computerId)) throw fail(COMPUTER_ERROR.NOT_CREATED, `没有旧电脑 ${computerId}`);
+    if (this.#oldBusy === computerId) throw fail(COMPUTER_ERROR.STOP_FAILED, '这台旧电脑正在复制，等复制完再删');
+    await old.remove(computerId);
+    this.#saveOld(computerId, null);
+    return this.oldComputers();
+  }
+
+  #oldIds() {
+    const old = this.#vm.oldComputers?.();
+    if (!old) return [];
+    return old.list().filter(id => id !== LOGIN_SEAT_ID && ID_PATTERN.test(id));
+  }
+
+  #oldState() {
+    try {
+      const data = JSON.parse(fs.readFileSync(this.#oldFile, 'utf8'));
+      return data && typeof data.items === 'object' && data.items ? data.items : {};
+    } catch {
+      return {};
+    }
+  }
+
+  #saveOld(computerId, value) {
+    const items = { ...this.#oldState() };
+    if (value) items[computerId] = value;
+    else delete items[computerId];
+    writeJsonAtomic(this.#oldFile, { version: 1, items }, 0o600);
+  }
+
+  /** 有待复制的旧电脑就在后台开始复制，不挡座席开机。 */
+  #kickOld() {
+    if (this.#oldRun || !this.oldComputers().some(x => x.state === 'pending')) return;
+    this.migrateOld().catch(() => {});
+  }
+
+  /**
+   * 复制一台：开旧电脑，打包 /work 和主目录，取回宿主，关旧电脑；开这个 bot 的座席，传进共享电脑，
+   * 以座席用户身份解到 ~/old-computer/，已有文件不覆盖。座席原来没开就再关上。
+   */
+  async #copyOld(computerId) {
+    const old = this.#vm.oldComputers();
+    const local = path.join(this.#home, 'computers', 'old-import', computerId);
+    const step = s => { this.#oldStep = s; };
+    let seatStarted = false;
+    let bytes = 0;
+    this.#oldBusy = computerId;
+    try {
+      fs.rmSync(local, { recursive: true, force: true });
+      fs.mkdirSync(local, { recursive: true });
+      step('开旧电脑');
+      await old.start(computerId);
+      step('打包');
+      const packed = await old.run(computerId, { command: OLD_EXPORT, cwd: '/', timeoutMs: OLD_TIMEOUT_MS, tag: `old-export-${Date.now().toString(36)}-${++this.#seq}` });
+      if (packed.exitCode !== 0) throw fail(COMPUTER_ERROR.GUEST_RPC_FAILED, `旧电脑打包失败（退出码 ${packed.exitCode ?? 'null'}）：${tail(packed.stderr || packed.stdout)}`);
+      step('取回');
+      for (const name of ['work', 'home']) {
+        const got = await old.downloadFile(computerId, { path: `${OLD_EXPORT_DIR}/${name}.tgz`, localPath: path.join(local, `${name}.tgz`) }, { signal: AbortSignal.timeout(OLD_TIMEOUT_MS) });
+        bytes += Number(got?.bytes ?? fs.statSync(path.join(local, `${name}.tgz`)).size);
+      }
+      step('关旧电脑');
+      await old.stop(computerId);
+      step('开座席');
+      if ((await this.status(computerId)).state !== 'running') {
+        await this.start(computerId);
+        seatStarted = true;
+      }
+      const seat = this.#seatOrThrow(computerId);
+      step('解包');
+      const inbox = await this.#manage(`install -d -m 0700 -o root -g root ${OLD_INBOX}`, { label: 'old-inbox', timeoutMs: MANAGE_TIMEOUT_MS });
+      if (inbox.exitCode !== 0) throw fail(COMPUTER_ERROR.GUEST_RPC_FAILED, `建 ${OLD_INBOX} 失败：${tail(inbox.stderr || inbox.stdout)}`);
+      const management = await this.#vm.management();
+      const guest = {};
+      for (const name of ['work', 'home']) {
+        guest[name] = `${OLD_INBOX}/${computerId}-${name}.tgz`;
+        await management.uploadFile({ localPath: path.join(local, `${name}.tgz`), path: guest[name] }, { signal: AbortSignal.timeout(OLD_TIMEOUT_MS) });
+      }
+      const out = await this.#manage(`exec ${SEAT_SCRIPT} import-old ${seat.user} ${guest.work} ${guest.home}`, { label: 'import-old', timeoutMs: OLD_TIMEOUT_MS });
+      if (out.exitCode !== 0) throw fail(COMPUTER_ERROR.GUEST_RPC_FAILED, `解到 ~/old-computer 失败（退出码 ${out.exitCode ?? 'null'}）：${tail(out.stderr || out.stdout)}`);
+      const files = Number(parseKv(out.stdout).files);
+      this.#saveOld(computerId, { state: 'done', copiedAt: new Date().toISOString(), files: Number.isFinite(files) ? files : null, bytes });
+    } catch (error) {
+      this.#saveOld(computerId, { state: 'error', error: { code: error?.code ?? 'computer_old_copy_failed', message: `${this.#oldStep}：${error?.message ?? error}` } });
+      await old.stop(computerId).catch(() => {});
+    } finally {
+      if (seatStarted) await this.stop(computerId).catch(() => {});
+      fs.rmSync(local, { recursive: true, force: true });
+      this.#oldBusy = null;
+      this.#oldStep = null;
+    }
   }
 
   // ---------------- 生命周期 ----------------
@@ -692,6 +861,19 @@ export class QemuSharedVm {
     });
   }
 
+  /** 旧的每 bot 电脑：同一个 ComputerBackend 里除共享电脑以外有记录的电脑。 */
+  oldComputers() {
+    const b = this.#backend;
+    return {
+      list: () => (b.listComputers?.() ?? []).filter(id => id !== this.#id),
+      start: id => b.start(id),
+      stop: id => b.stop(id),
+      run: (id, options, hooks) => b.run(id, options, hooks),
+      downloadFile: (id, transfer, options) => b.downloadFile(id, transfer, options),
+      remove: id => b.remove(id),
+    };
+  }
+
   async seatHealthy(guestPort) {
     const host = this.#backend.forwardedPort(this.#id, guestPort);
     return host ? await probeSpacesdHealth(host) : false;
@@ -756,5 +938,5 @@ export class SeatShare {
 export function createSharedComputer({ home, runtimeDir = null, image = null, roots = null, botIdFor = null } = {}) {
   const backend = new ComputerBackend({ home, ...(runtimeDir ? { runtimeDir } : {}), ...(image ? { image } : {}) });
   const share = roots && botIdFor ? new SeatShare({ fileShare: new FileShare({ home, roots }), botIdFor }) : null;
-  return new SeatBackend({ home, vm: new QemuSharedVm(backend), machine: () => readSharedMachine(home), share });
+  return new SeatBackend({ home, vm: new QemuSharedVm(backend), machine: () => readSharedMachine(home), share, botIdFor });
 }

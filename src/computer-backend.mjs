@@ -1237,6 +1237,32 @@ export class ComputerBackend {
     return await this.#exclusive(computerId, () => this.#stop(computerId));
   }
 
+  /** 有运行记录（vm.json）的电脑 id，按字母排。 */
+  listComputers() {
+    let names = [];
+    try {
+      names = fs.readdirSync(path.join(this.#home, 'computers'));
+    } catch {
+      return [];
+    }
+    return names.filter(id => COMPUTER_ID_PATTERN.test(id) && this.#readRecord(id)).sort();
+  }
+
+  /** 关机并删掉这台电脑的目录（磁盘、记录、令牌）。不可逆，调用方先问过用户。 */
+  async remove(computerId) {
+    this.#assertId(computerId);
+    return await this.#exclusive(computerId, async () => {
+      const after = await this.#stop(computerId);
+      if (after?.state === 'running' || after?.state === 'starting') {
+        throw fail(COMPUTER_ERROR.STOP_FAILED, `电脑 ${computerId} 没有关掉，不删`);
+      }
+      this.#desks.get(computerId)?.reset();
+      this.#desks.delete(computerId);
+      fs.rmSync(this.#dirFor(computerId), { recursive: true, force: true });
+      return { removed: computerId };
+    });
+  }
+
   async close() {
     for (const desk of this.#desks.values()) desk.reset();
     this.#desks.clear();
