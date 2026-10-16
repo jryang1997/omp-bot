@@ -281,6 +281,14 @@ Cua SDK 为 MIT，官方镜像中的 `cua-spacesd` 为 FSL-1.1-MIT，QEMU 保留
 - **busy 拒绝**：目标 runtime 正在跑回合时直接返回错误，不阻塞等待。A 调 B 期间 A 自己 `busy=true`（它的回合还没结束），所以 B 若反向调 A 会被立即拒绝，不会死锁。
 - **失败回执**：目标启动失败 / 超时 / 忙，都作为 `isError` 的 tool result 返回，发送方不会永久挂起。
 
+`delegate_bot` 是异步派活：A 调用它立刻返回，B 在后台做。每件活在台账里有一条派活记录（`delegations`），执行和交回分两本账：
+
+- **忙了排队**：B 正忙（或被人工接管暂停）就排队，空了按派活顺序开跑，同一个 B 后来的不插队。预算、并发上限这类当场拒绝照旧报错给 A。
+- **做完交回**：B 的 Run 一落定，结果连同子 Run id 作为一条新消息交给 A（在 A 的私聊里起一个新 Run，发送者是 B），由 A 验收。A 正忙就等它空了再送。交回状态 pending → delivered 或 dropped，只送 pending 的，重复触发不会重复唤醒。
+- **重启**：排队的继续排；跑到一半的子 Run 被标 interrupted，按"中断"交回 A，不自动重跑；做完没送到的补送。正常关停的级联取消不算用户取消。
+- **不越界**：开跑前重查准入（同工作区、不扩权、父回合没被用户取消）；交回前重查 A 和 B 还在不在同一工作区，不在就 dropped，结果只留在工作台。
+- **工作台**：任务页的"助手之间派的活"列出每件活的状态、交回与否和原因（`GET /api/delegations`，只给主人）。
+
 ## 测试
 
 ```sh
@@ -297,6 +305,7 @@ node test/computers.mjs # 电脑控制：旧代拒绝、接管竞态、输入 dr
 node test/seats.mjs     # 座席层：规格、建座席、最后一个停掉关机、补装客机脚本、装包、挂载参数、登录屏、旧电脑搬家（替身虚拟机）
 node test/file-share.mjs # SFTP 服务：分根、钥匙、越界和外链拒绝、改名覆盖、并发追加、请求顺序、OpenSSH sftp
 node test/team.mjs      # 团队目录：模板、身份块、git、迁移只复制、技能库和白名单
+node test/delegation.mjs      # 派活：忙时排队、做完交回、重启恢复、撤权不越界（注入 runtime 夹具，零模型）
 node test/rpc-client.mjs      # RPC 传输层：竞态、被拒 admission、取消、坏帧恢复（内联协议夹具，零模型）
 node test/channels.mjs        # 设备配对与 IM 适配器：真实 Ledger + 本地假端点，不发真实消息
 node smoke-gui.mjs     # HTTP API 层：静态/CRUD/校验/SSE/目录穿越
