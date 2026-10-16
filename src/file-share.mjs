@@ -112,13 +112,11 @@ class ShareSession {
     on('LSTAT', async (id, p) => sftp.attrs(id, attrsOf(await fsp.lstat(await this.#resolve(p, { follow: false })))));
     on('STAT', async (id, p) => sftp.attrs(id, attrsOf(await fsp.stat(await this.#resolve(p)))));
     on('SETSTAT', async (id, p, attrs) => {
+      // 按路径改，只读打开的句柄截断不了文件
       const real = await this.#resolve(p);
-      const fh = await fsp.open(real, fs.constants.O_RDONLY);
-      try {
-        await this.#applyAttrs(fh, attrs, real);
-      } finally {
-        await fh.close();
-      }
+      if (Number.isInteger(attrs?.size)) await fsp.truncate(real, attrs.size);
+      if (Number.isInteger(attrs?.mode)) await fsp.chmod(real, attrs.mode & 0o7777);
+      if (Number.isFinite(attrs?.atime) && Number.isFinite(attrs?.mtime)) await fsp.utimes(real, attrs.atime, attrs.mtime);
       sftp.status(id, STATUS_CODE.OK);
     });
     on('REMOVE', async (id, p) => {
