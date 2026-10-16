@@ -908,7 +908,7 @@ const BOT_ADVANCED_TABS = [["skills", "技能"], ["mcp", "MCP"], ["memory", "记
 const ADVANCED_HINTS = {
   skills: "装专门的技能包，用的时候自己带上",
   mcp: "接上外部工具服务，让它能用别的软件",
-  memory: "看它记住了什么，也可以手动改",
+  memory: "看它记住了什么",
 };
 const PANEL_LOADERS = { capabilities: "capabilitiesPanel", skills: "skillsPanel", mcp: "mcpPanel", memory: "memoryPanel" };
 

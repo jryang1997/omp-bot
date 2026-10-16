@@ -1,0 +1,9 @@
+{
+ "model": "intfloat/multilingual-e5-large",
+ "top1": "14/15",
+ "top3": "15/15",
+ "rememberMs": 72710,
+ "recallMs": 65056,
+ "rssMb": 1640,
+ "misses": []
+}

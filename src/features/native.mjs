@@ -473,7 +473,7 @@ export class NativeFeatures {
       readError: read.error,
       embedding: { variant: MEMORY_EMBEDDING_VARIANT, model: EMBEDDING_MODELS[MEMORY_EMBEDDING_VARIANT] ?? null },
       modelRoles: bot.model ? { default: bot.model, smol: bot.model, memory: bot.model } : null,
-      note: "私聊和群聊共用这一个 bank。要 bot 忘掉某件事，直接跟它说。",
+      note: "私聊和群聊共用这一个记忆库。要它忘掉某件事，直接跟它说。",
     };
   }
 

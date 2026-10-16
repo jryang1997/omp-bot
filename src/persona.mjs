@@ -21,7 +21,7 @@ import { COMPUTER_PROMPT_TOOLS, COMPUTER_TOOL_NAMES, DEFAULT_TASK_CONCURRENCY } 
 
 /**
  * 嵌入模型。multilingual = intfloat/multilingual-e5-large，中文换说法也召回得到；
- * 实测数据和内存代价见 CHANGELOG（0.2.0 记忆一节）。
+ * 实测数据和内存代价见 CHANGELOG 0.2.0 的「嵌入模型的选择」。
  */
 export const MEMORY_EMBEDDING_VARIANT = "multilingual";
 

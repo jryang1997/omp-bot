@@ -472,7 +472,7 @@ export function createPanels({ client, deps }) {
     const memoryToggle = checkbox(bot.memoryEnabled === true, (checked) => void patchBot(bot, { memoryEnabled: checked }));
     const memoryCard = el("div", "bt-set-card");
     memoryCard.append(row("记忆开关",
-      "开启后这个助手有自己的记忆库，私聊群聊通用，从下次任务生效。第一次开会下载约 2.8GB 的中文嵌入模型和运行库。",
+      "开启后这个助手有自己的记忆库，私聊群聊通用，从下次任务生效。第一次开会下载约 2.7GB 的中文嵌入模型和运行库。",
       memoryToggle));
     root.append(section("记忆", memoryCard));
 
@@ -1423,6 +1423,24 @@ export function createPanels({ client, deps }) {
     return root;
   }
 
+  const MEMORY_SOURCES = { "coding-agent-transcript": "对话存档", "coding-agent-retain": "它主动记下" };
+  // mnemopi 存档的对话带 [role: user] / [user:end] 标记，显示时换成「用户：」「助手：」。
+  function readableMemory(text) {
+    return String(text || "")
+      .replace(/^\[role: user\]\n?/gm, "用户：")
+      .replace(/^\[role: assistant\]\n?/gm, "助手：")
+      .replace(/^\[(user|assistant):end\]\n?/gm, "")
+      .trim();
+  }
+
+  // mnemopi 存 UTC 的 ISO 时间，按本机时区显示。
+  function memoryWhen(at) {
+    if (!at) return "";
+    const d = new Date(at);
+    if (Number.isNaN(d.getTime())) return String(at);
+    return d.toLocaleString("zh-CN", { hour12: false, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  }
+
   async function memoryPanel(bot) {
     const root = el("div", "wb-panel-body");
     const data = await apiOptional(`/api/bots/${encodeURIComponent(bot.id)}/memory`);
@@ -1436,7 +1454,7 @@ export function createPanels({ client, deps }) {
     const details = el("details", "wb-raw");
     details.append(el("summary", null, "记忆库细节"));
     details.append(kv("后端", data.backend || "mnemopi"));
-    details.append(kv("bank", data.bank || "未知"));
+    details.append(kv("库名（bank）", data.bank || "未知"));
     details.append(kv("库文件", data.dbExists ? `${data.dbPath}（${fmtSize(data.dbBytes)}）` : `${data.dbPath || "未知"}（还没建）`));
     if (data.embedding) details.append(kv("嵌入模型", data.embedding.model || data.embedding.variant || "未知"));
     facts.append(details);
@@ -1447,9 +1465,8 @@ export function createPanels({ client, deps }) {
     if (!memories.length) list.append(el("div", "bt-note", data.enabled ? "还没记下东西。多聊几轮，它会自己存。" : "库里没有这个助手的记忆。"));
     for (const item of memories) {
       const rowEl = el("div", "bt-set-row wb-memory-item");
-      const when = item.at ? String(item.at).replace("T", " ").slice(0, 16) : "";
-      rowEl.append(el("div", "bt-note", [when, item.kind === "episodic" ? "整理后" : "近期", item.source].filter(Boolean).join(" · ")));
-      rowEl.append(el("div", "wb-memory-text", item.content || ""));
+      rowEl.append(el("div", "bt-note", [memoryWhen(item.at), item.kind === "episodic" ? "整理后" : "近期", MEMORY_SOURCES[item.source]].filter(Boolean).join(" · ")));
+      rowEl.append(el("div", "wb-memory-text", readableMemory(item.content)));
       list.append(rowEl);
     }
     root.append(section("最近的记忆", list));

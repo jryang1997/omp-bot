@@ -2,6 +2,34 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的组织方式，版本号用 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.0] - 未发布
+
+团队架构重构进行中，完整说明在 12 号票落地时补齐。
+
+### 记忆
+
+- 开启记忆的助手改用 omp 自带的 mnemopi。每个助手一个 bank（`bot-<id>`），所有助手共用 `team/.memory/mnemopi.db`，私聊群聊通用。overlay 写 `scoping: global`、`bank`、`dbPath`，autolearn 关掉，default、smol、memory 三个模型角色钉在助手选定的模型上。
+- 删掉私有 agentDir、私有 `models.yml` 生成、凭据剥离和 `memory_prereq_missing` 门槛。子进程不再改 `PI_CODING_AGENT_DIR`，模型和登录沿用用户自己的 omp 配置。开记忆不再有前置条件。
+- omp-bot 发给助手的每条消息第一行标上场景和发送者，例如 `[私聊，用户]`、`[私聊，🤖 名字 (@id)]`、`[群聊，产品群]`。存档时这一行跟着进库。台账和聊天记录里仍是原文。
+- 记忆面板改成只读：显示开关、条目数、库文件和最近 50 条记忆。写入和遗忘由助手自己在会话里做，原来的编辑、清空和路径自检接口删掉。
+- 旧的 local 记忆不导入 mnemopi，升级时摘要复制到 `bots/<id>/work/old-memory/`（见 02 迁移）。
+
+#### 嵌入模型的选择
+
+选 `embeddingVariant: multilingual`，也就是 `intfloat/multilingual-e5-large`。测法是用 omp 18.10.3 自带的 mnemopi 引擎存 16 条中文记忆（含 1 条英文），再用 15 个换了说法的问句召回（2 个英文），问句尽量不和原文共用关键词。
+
+| 嵌入 | 召回第一条命中 | 前三条命中 | 内存 |
+| --- | --- | --- | --- |
+| 不用嵌入，只靠关键词 | 0/15 | 0/15 | 无 |
+| `BAAI/bge-small-zh-v1.5` | 1/15 | 1/15 | 约 0.3–0.6GB |
+| `intfloat/multilingual-e5-large` | 14/15 | 15/15 | 约 1.6–1.9GB |
+
+- bge-small-zh 单看排序不差（相似度第一名 13/15），但相似度只有 0.40–0.65，过不了 mnemopi 关键词不中时 0.65 的门槛，几乎都被丢掉。e5-large 的相似度在 0.78–0.89，全部过门槛。
+- e5-large 的相似度挤在一起，正确条目和第二名只差 0.02–0.05，门槛挡不住无关记忆，靠排序和召回条数上限截断。库里条目多了以后召回里会混进不相关的内容。
+- multilingual 系列里 omp 能本地加载的只有 e5-large，e5-small 和 e5-base 加载不了，所以没有更省内存的一档可选。
+- 代价：第一次开记忆会下载约 2.1GB 模型和 575MB 运行库，放在 `~/.omp/cache/`。嵌入由一个机器级的嵌入进程服务所有 omp 进程，实测三个 omp 进程共用一个，常驻约 1.85GB，空闲 15 分钟退出。沙盒 CPU 上每次召回约 4 秒，只在每个会话的第一轮召回，每 4 轮存一次档。
+- 实机验证：真实 omp 加 mock 模型，私聊 4 轮后存档进 `team/.memory/mnemopi.db`，带 `[私聊，用户]` 标签；同一个助手进群开新会话，首轮自动召回带出私聊里说的事；另一个助手用同一个库文件读不到；用户自己 omp 的记忆目录没被改动。证据在 `.scratch/team-rebuild/proof/memory-e2e.json`。
+
 ## [0.1.5] - 2026-10-14
 
 ### 修复
