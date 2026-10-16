@@ -490,6 +490,10 @@ export function createPanels({ client, deps }) {
     );
     root.append(facts);
     root.append(section("派的活", el("div", "wb-pre", String(rec.message || ""))));
+    const acceptance = Array.isArray(rec.acceptance) ? rec.acceptance : [];
+    if (acceptance.length) {
+      root.append(section("验收标准", el("div", "wb-pre", acceptance.map((x) => `- [ ] ${x}`).join("\n"))));
+    }
     const result = rec.result;
     if (result?.reply) root.append(section("交回的结果", el("div", "wb-pre", String(result.reply))));
     if (result?.error) {
