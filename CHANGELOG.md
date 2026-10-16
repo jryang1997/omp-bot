@@ -87,6 +87,11 @@ bot 继续住在 Windows 本机，所有 bot 共用一台 Linux 共享电脑，�
 - 吉祥物形象是 Supamaus Software Private Limited 的商标，Apache-2.0 不授予商标权。界面里不出现上游产品名，吉祥物不当 omp-bot 的图标。发布前要等上游对商标问题的回复。
 - 证据：`.scratch/team-rebuild/proof/avatar/`，截图脚本 34 项全过，含各状态、编辑器、图片裁切、详情页、主助手、群头像和深色模式。
 
+### 安全
+
+- 客机文件工具不许删 `/`、`/home`、`/tmp`、`/workspace`、`~`、`~/work` 本身，里面的文件照常能删。
+- 挂载用的 SFTP 服务改权限时只收 rwx 位，客机设不了宿主文件的 setuid、setgid 和粘滞位。
+
 ### 待实机验证
 
 沙盒里座席、挂载、登录屏和旧电脑搬家都用真实的 Xvfb、spacesd、sshfs、Chromium 和仓库里的客机脚本跑过，共享虚拟机换成了沙盒本身。下面这些只能在 Windows 加 WHPX 的机器上验，步骤见 README 的「共享电脑 → 实机验证」。
