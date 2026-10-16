@@ -540,11 +540,18 @@ function runProcess(command, args, timeout = 60_000) {
   };
 }
 
+/** qemu-img create 的参数。sizeBytes 给了就按它建动态磁盘，但不小于底层镜像的虚拟大小。 */
+export function overlayCreateArgs({ backing, format, virtualSize = null, overlay, sizeBytes = null }) {
+  const args = ['create', '-q', '-f', 'qcow2', '-b', backing, '-F', format, overlay];
+  if (Number.isFinite(sizeBytes) && sizeBytes > 0) args.push(String(Math.max(sizeBytes, Number(virtualSize) || 0)));
+  return args;
+}
+
 /** qcow2 覆盖层；backing 用规范化的 \\?\ 绝对路径，和 cua-vmm create_overlay 一致（支持长路径）。 */
-async function createOverlay(qemuImg, backing, overlay) {
+async function createOverlay(qemuImg, backing, overlay, sizeBytes = null) {
   const backingSpec = inspectDiskImage(backing);
   const backingArg = process.platform === 'win32' ? `\\\\?\\${path.resolve(backing)}` : path.resolve(backing);
-  const result = runProcess(qemuImg, ['create', '-q', '-f', 'qcow2', '-b', backingArg, '-F', backingSpec.format, overlay]);
+  const result = runProcess(qemuImg, overlayCreateArgs({ backing: backingArg, format: backingSpec.format, virtualSize: backingSpec.virtualSize, overlay, sizeBytes }));
   if (result.code !== 0 || !fs.existsSync(overlay)) {
     throw fail(
       COMPUTER_ERROR.RUNTIME_UNAVAILABLE,
@@ -674,14 +681,459 @@ function guestPath(value, name) {
   return value;
 }
 
+/** 用官方 SDK 连一个 spacesd 端点（座席层连每个座席自己的 spacesd 用）。 */
+export async function connectSpacesd(url, token) {
+  const runtime = await cuaRuntime();
+  return await runtime.spacesd(url, token);
+}
+
+/** 宿主回环上某个端口的 spacesd 是否应答 /health。 */
+export async function probeSpacesdHealth(port, timeoutMs = HEALTH_PROBE_TIMEOUT_MS) {
+  return await probeGuestHealth(port, timeoutMs);
+}
+
+/** 把错误文字里的令牌换成 [redacted]。 */
+export function redactSecrets(message, secrets) {
+  return redact(message, secrets);
+}
+
+/** 用户网络：管理通道 spacesd 加上预先转发的座席端口，全部只绑宿主回环。 */
+function netdevArg(record) {
+  const forwards = [`hostfwd=tcp:127.0.0.1:${record.ports.spacesd}-:${GUEST_SPACESD_PORT}`];
+  for (const entry of record.ports?.forwards ?? []) forwards.push(`hostfwd=tcp:127.0.0.1:${entry.host}-:${entry.guest}`);
+  return `user,id=net0,${forwards.join(',')}`;
+}
+
+/** QEMU 启动参数。纯函数，测试直接对照规格和端口转发。 */
+export function qemuArgs(record) {
+  return [
+    '-name',
+    record.name,
+    '-machine',
+    'q35,smm=off',
+    '-cpu',
+    'host',
+    '-accel',
+    ACCEL,
+    '-smp',
+    String(record.cpus),
+    '-m',
+    String(record.memoryMb),
+    '-drive',
+    `file=${record.disk},if=none,id=disk0,format=qcow2,cache=writeback,discard=unmap`,
+    '-device',
+    'virtio-blk-pci,drive=disk0,bootindex=1',
+    '-drive',
+    `file=${record.seed},if=none,id=cidata,format=raw,readonly=on`,
+    '-device',
+    'virtio-blk-pci,drive=cidata',
+    '-netdev',
+    netdevArg(record),
+    '-device',
+    'virtio-net-pci,netdev=net0',
+    '-vga',
+    'std',
+    '-device',
+    'qemu-xhci,id=xhci',
+    '-device',
+    'usb-kbd',
+    '-device',
+    'usb-tablet',
+    '-display',
+    'none',
+    '-vnc',
+    'none',
+    '-qmp',
+    `pipe:${record.qmp.raw}`,
+    '-serial',
+    'null',
+    '-monitor',
+    'none',
+    '-pidfile',
+    record.pidFile,
+  ];
+}
+
+/**
+ * 一个 spacesd 端点上的桌面和命令操作：截图、输入、命令、传文件。
+ * 每 bot 电脑和共享电脑的座席都用它，区别只在怎么连上 spacesd。
+ * connect 返回 SDK 客户端，连接失败时下次重连；describe 把错误转成去掉令牌的文字。
+ */
+export class GuestDesk {
+  #connect;
+  #describe;
+  #pending = null;
+  #dirs = new Map();
+
+  constructor({ connect, describe = error => redact(error?.message ?? error, []) } = {}) {
+    if (typeof connect !== 'function') throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, 'GuestDesk needs connect()');
+    this.#connect = connect;
+    this.#describe = describe;
+  }
+
+  async client() {
+    if (!this.#pending) {
+      this.#pending = Promise.resolve().then(() => this.#connect()).catch(error => {
+        this.#pending = null;
+        throw error;
+      });
+    }
+    return await this.#pending;
+  }
+
+  /** 端点或令牌变了：丢掉缓存的客户端和已建目录，下次重新连。 */
+  reset() {
+    this.#pending = null;
+    this.#dirs.clear();
+  }
+
+  async screenshot({ signal } = {}) {
+    const client = await this.client();
+    const sdk = await loadSdk();
+    let shot;
+    try {
+      shot = await client.screenshot(
+        { format: sdk.ImageFormat.Png },
+        { signal: signal ?? AbortSignal.timeout(SCREENSHOT_TIMEOUT_MS) },
+      );
+    } catch (error) {
+      throw fail(COMPUTER_ERROR.GUEST_RPC_FAILED, `screenshot failed: ${this.#describe(error)}`);
+    }
+    if (shot.format !== sdk.ImageFormat.Png) {
+      throw fail(COMPUTER_ERROR.GUEST_RPC_FAILED, `the guest returned image format ${shot.format}; only PNG is served`);
+    }
+    const data = Buffer.from(shot.image);
+    if (data.length === 0) {
+      throw fail(COMPUTER_ERROR.GUEST_RPC_FAILED, 'the guest returned an empty screenshot');
+    }
+    return { data, mimeType: 'image/png', width: shot.width, height: shot.height };
+  }
+
+  async input(action = {}, { signal } = {}) {
+    const client = await this.client();
+    const options = { signal: signal ?? AbortSignal.timeout(INPUT_TIMEOUT_MS) };
+    const kind = action?.action;
+    try {
+      switch (kind) {
+        case 'click': {
+          const x = point(action.x, 'x');
+          const y = point(action.y, 'y');
+          const button = action.button ?? 'left';
+          if (button === 'left') await client.click(x, y, options);
+          else if (button === 'right') await client.rightClick(x, y, options);
+          else throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, `input click button must be "left" or "right", got ${JSON.stringify(button)}`);
+          break;
+        }
+        case 'move': {
+          await client.moveTo(point(action.x, 'x'), point(action.y, 'y'), options);
+          break;
+        }
+        case 'scroll': {
+          if (!Number.isFinite(action.deltaY)) {
+            throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, 'input scroll needs a numeric deltaY');
+          }
+          const deltaX = action.deltaX === undefined || action.deltaX === null ? 0 : action.deltaX;
+          if (!Number.isFinite(deltaX)) {
+            throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, 'input scroll needs deltaX as a number when given');
+          }
+          await client.scroll(Math.round(deltaX), Math.round(action.deltaY), options);
+          break;
+        }
+        case 'type': {
+          if (typeof action.text !== 'string') {
+            throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, 'input type needs text as a string');
+          }
+          const windows = JSON.parse(await client.callJson('WindowsService/ListWindows', '{}', options)).windows ?? [];
+          const focused = windows.find(window => window.focused);
+          if (!focused) throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, 'text input needs a focused guest window; click the destination first');
+          const app = focused.app?.appId ?? focused.app?.name ?? '';
+          const terminal = /^(?:xfce4-terminal|gnome-terminal(?:-server)?|konsole|xterm|kitty|alacritty|wezterm|tilix|terminator)(?:\.desktop)?$/i.test(app);
+          await client.setClipboard(action.text, options);
+          options.signal.throwIfAborted();
+          const keys = terminal ? ['KEY_CONTROL', 'KEY_SHIFT', 'KEY_V'] : ['KEY_CONTROL', 'KEY_V'];
+          await client.keyboardJson(JSON.stringify({ target: { window: focused.ref }, hotkey: { keys: keys.map(named => ({ named })) } }), options);
+          break;
+        }
+        case 'key': {
+          const chord = parseKeyChord(action.key);
+          const keys = desktopKeyboardKeys(chord);
+          await client.keyboardJson(JSON.stringify({ target: { displayId: 'primary', delivery: 'DELIVERY_FOREGROUND' }, hotkey: { keys } }), options);
+          break;
+        }
+        default:
+          throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, `unknown computer input action ${JSON.stringify(kind)}`);
+      }
+    } catch (error) {
+      if (error instanceof ComputerBackendError) throw error;
+      throw fail(COMPUTER_ERROR.GUEST_RPC_FAILED, `computer input ${JSON.stringify(kind)} failed: ${this.#describe(error)}`);
+    }
+  }
+
+  /** 客机 /bin/sh -lc；用 spawn+tag 而不是 run()，取消时才能杀该 tag 的进程组并确认终态（见 #cancelCommand）。 */
+  async run(options = {}, hooks = {}) {
+    const { command, cwd = GUEST_WORK_DIR, timeoutMs, tag, env = null } = options ?? {};
+    const { signal, onUpdate } = hooks ?? {};
+    if (typeof command !== 'string' || command.trim() === '') {
+      throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, 'run needs a non-empty command');
+    }
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, 'run needs timeoutMs as a positive number (the SDK field is a plain number, never a BigInt)');
+    }
+    if (typeof tag !== 'string' || tag.trim() === '') {
+      throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, 'run needs a tag so a cancelled command can be found and killed in the guest');
+    }
+    const target = guestPath(cwd, 'cwd');
+    const client = await this.client();
+    const sdk = await loadSdk();
+    await this.#ensureDir(client, target);
+
+    let guestProcess;
+    try {
+      guestProcess = await client.spawn(
+        sdk.SpacesdCommand.create({
+          program: '/bin/sh',
+          args: ['-lc', command],
+          cwd: target,
+          timeoutMs,
+          tag,
+          stdin: false,
+          ...(env ? { env: new Map(Object.entries(env).map(([key, value]) => [key, String(value)])) } : {}),
+        }),
+        { signal: AbortSignal.timeout(SDK_RPC_TIMEOUT_MS) },
+      );
+    } catch (error) {
+      throw fail(COMPUTER_ERROR.GUEST_RPC_FAILED, `the guest refused to start ${tag}: ${this.#describe(error)}`);
+    }
+
+    const kinds = sdk.ProcessEventKind;
+    const decoders = typeof onUpdate === 'function' ? { stdout: new StringDecoder('utf8'), stderr: new StringDecoder('utf8') } : null;
+    const parts = { stdout: [], stderr: [] };
+    const sizes = { stdout: 0, stderr: 0 };
+    let truncated = false;
+    let exit = null;
+    let guardFired = false;
+    const abort = new AbortController();
+    const relay = () => abort.abort(signal?.reason);
+    if (signal) {
+      if (signal.aborted) relay();
+      else signal.addEventListener('abort', relay, { once: true });
+    }
+    const guard = setTimeout(() => {
+      guardFired = true;
+      abort.abort(new Error('local run guard'));
+    }, timeoutMs + LOCAL_RUN_GUARD_SLACK_MS);
+    const emitUpdateBestEffort = (stream, chunk) => {
+      if (decoders === null) return;
+      try {
+        onUpdate({ stream, text: decoders[stream].write(chunk) });
+      } catch {
+        // 消费者回调的异常不能影响客机命令本身
+      }
+    };
+    const append = (stream, chunk) => {
+      const room = OUTPUT_LIMIT_BYTES - sizes[stream];
+      if (room <= 0) {
+        truncated = true;
+        return;
+      }
+      const kept = chunk.length <= room ? chunk : chunk.subarray(0, room);
+      parts[stream].push(kept);
+      sizes[stream] += kept.length;
+      if (kept.length < chunk.length) truncated = true;
+      emitUpdateBestEffort(stream, kept);
+    };
+
+    try {
+      for (;;) {
+        const event = await guestProcess.nextEvent({ signal: abort.signal });
+        if (event === undefined) break;
+        if (event.kind === kinds.Exit) {
+          exit = event.exit ?? null;
+          break;
+        }
+        const chunk = Buffer.from(event.data);
+        if (chunk.length === 0) continue;
+        append(event.kind === kinds.Stderr ? 'stderr' : 'stdout', chunk);
+      }
+    } catch (error) {
+      if (!abort.signal.aborted) {
+        throw fail(COMPUTER_ERROR.GUEST_RPC_FAILED, `the guest command ${tag} failed: ${this.#describe(error)}`);
+      }
+    } finally {
+      clearTimeout(guard);
+      if (signal) signal.removeEventListener('abort', relay);
+    }
+
+    if (exit === null && abort.signal.aborted) {
+      exit = await this.#cancelCommand(client, guestProcess, tag);
+    } else if (exit === null) {
+      try {
+        const output = await guestProcess.wait({ signal: AbortSignal.timeout(5_000) });
+        exit = output?.exit ?? null;
+      } catch {
+        exit = null;
+      }
+      if (exit === null) {
+        const survivors = await this.#runningWithTag(client, tag);
+        if (survivors.length > 0) {
+          exit = await this.#cancelCommand(client, guestProcess, tag);
+        }
+      }
+    }
+
+    const finish = stream => {
+      const text = Buffer.concat(parts[stream]).toString('utf8');
+      return truncated ? text + OUTPUT_TRUNCATED_NOTE : text;
+    };
+    return {
+      stdout: finish('stdout'),
+      stderr: finish('stderr'),
+      exitCode: Number.isInteger(exit?.code) ? exit.code : null,
+      timedOut: exit?.timedOut === true || guardFired,
+    };
+  }
+
+  async uploadFile({ localPath, path: target } = {}, { signal } = {}) {
+    const source = this.#hostFile(localPath, 'localPath');
+    const destination = guestPath(target, 'path');
+    const client = await this.client();
+    const sdk = await loadSdk();
+    let result;
+    try {
+      result = await client.uploadFile(
+        source,
+        destination,
+        sdk.UploadOptions.create({ createParents: true }),
+        { signal: signal ?? AbortSignal.timeout(TRANSFER_TIMEOUT_MS) },
+      );
+    } catch (error) {
+      throw fail(COMPUTER_ERROR.GUEST_RPC_FAILED, `upload ${source} -> ${destination} failed: ${this.#describe(error)}`);
+    }
+    return { path: destination, bytes: Number(result.size), sha256: result.sha256, resumes: result.resumes };
+  }
+
+  async downloadFile({ path: source, localPath } = {}, { signal } = {}) {
+    const guestSource = guestPath(source, 'path');
+    if (typeof localPath !== 'string' || localPath.trim() === '') {
+      throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, 'localPath must be a host file path');
+    }
+    const destination = path.resolve(localPath);
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    const client = await this.client();
+    let result;
+    try {
+      result = await client.downloadFile(guestSource, destination, {
+        signal: signal ?? AbortSignal.timeout(TRANSFER_TIMEOUT_MS),
+      });
+    } catch (error) {
+      throw fail(COMPUTER_ERROR.GUEST_RPC_FAILED, `download ${guestSource} -> ${destination} failed: ${this.#describe(error)}`);
+    }
+    return { path: guestSource, localPath: destination, bytes: Number(result.size), sha256: result.sha256 };
+  }
+
+  async #ensureDir(client, directory) {
+    const cached = this.#dirs.get(directory);
+    if (cached) return await cached;
+    const task = client.makeDir(directory, { signal: AbortSignal.timeout(SDK_RPC_TIMEOUT_MS) }).catch(error => {
+      this.#dirs.delete(directory);
+      throw fail(COMPUTER_ERROR.GUEST_RPC_FAILED, `the guest could not create ${directory}: ${this.#describe(error)}`);
+    });
+    this.#dirs.set(directory, task);
+    return await task;
+  }
+
+  async #runningWithTag(client, tag) {
+    let raw;
+    try {
+      raw = await client.listProcesses(false, { signal: AbortSignal.timeout(SDK_RPC_TIMEOUT_MS) });
+    } catch (error) {
+      throw fail(COMPUTER_ERROR.EFFECT_UNKNOWN, `cannot list guest processes to confirm ${tag} stopped: ${this.#describe(error)}`);
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (error) {
+      throw fail(COMPUTER_ERROR.EFFECT_UNKNOWN, `cannot read the guest process list for ${tag}: ${redact(error?.message ?? error, [])}`);
+    }
+    const list = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.processes) ? parsed.processes : null;
+    if (list === null) {
+      throw fail(COMPUTER_ERROR.EFFECT_UNKNOWN, `unexpected ListProcesses payload while confirming ${tag} stopped`);
+    }
+    return list.filter(entry => entry?.tag === tag && (entry?.state ?? 'PROCESS_STATE_RUNNING') !== 'PROCESS_STATE_EXITED');
+  }
+
+  async #signalGroupKill(client, tag) {
+    await client.callJson(
+      '/cua.env.v1.ProcessService/SignalProcess',
+      JSON.stringify({ process: { tag }, signal: 'SIGNAL_KILL', processGroup: true }),
+      { signal: AbortSignal.timeout(10_000) },
+    );
+  }
+
+  async #cancelCommand(client, guestProcess, tag) {
+    const deadline = Date.now() + CANCEL_CONFIRM_MS;
+    let killError = null;
+    const groupKill = async () => {
+      try {
+        await this.#signalGroupKill(client, tag);
+      } catch (error) {
+        killError = this.#describe(error);
+      }
+    };
+    await groupKill();
+    try {
+      await guestProcess.kill({ signal: AbortSignal.timeout(10_000) });
+    } catch (error) {
+      killError ??= this.#describe(error);
+    }
+    let exit = null;
+    try {
+      const output = await guestProcess.wait({ signal: AbortSignal.timeout(8_000) });
+      exit = output?.exit ?? null;
+    } catch {
+      exit = null;
+    }
+    let survivors = await this.#runningWithTag(client, tag);
+    if (survivors.length > 0 && Date.now() < deadline) {
+      await groupKill();
+      await sleep(250);
+      survivors = await this.#runningWithTag(client, tag);
+    }
+    if (survivors.length > 0) {
+      const pids = survivors.map(entry => entry?.pid).filter(pid => pid !== undefined).join(', ');
+      throw fail(
+        COMPUTER_ERROR.EFFECT_UNKNOWN,
+        `cancelled ${tag} but the guest still runs ${pids || 'a process'} with that tag; the side effects of this command are unknown${killError ? ` (kill error: ${killError})` : ''}`,
+      );
+    }
+    return exit;
+  }
+
+  #hostFile(localPath, name) {
+    if (typeof localPath !== 'string' || localPath.trim() === '') {
+      throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, `${name} must be a host file path`);
+    }
+    const resolved = path.resolve(localPath);
+    let stats;
+    try {
+      stats = fs.statSync(resolved);
+    } catch {
+      throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, `${name} ${resolved} does not exist`);
+    }
+    if (!stats.isFile()) {
+      throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, `${name} ${resolved} is not a regular file`);
+    }
+    return resolved;
+  }
+}
+
 export class ComputerBackend {
   #home;
   #runtimeDir;
   #imageFile;
   #imageLabel;
   #imageManifestSha;
-  #clients = new Map();
-  #guestDirs = new Map();
+  #desks = new Map();
   #starting = new Map();
   #locks = new Map();
 
@@ -758,9 +1210,21 @@ export class ComputerBackend {
     return this.#state('stopped', display, null);
   }
 
-  async create(computerId, { image } = {}) {
+  /**
+   * 建电脑并启动。machine 可选：cpus、memoryMb、diskGb、forwards（要预先转发的客机端口）。
+   * 已有电脑再次 create 时更新 CPU、内存和转发，下次开机生效；磁盘大小只在新建时用。
+   */
+  async create(computerId, { image, machine } = {}) {
     this.#assertId(computerId);
-    return await this.#exclusive(computerId, () => this.#create(computerId, { image }));
+    return await this.#exclusive(computerId, () => this.#create(computerId, { image, machine }));
+  }
+
+  /** 客机端口在宿主回环上的转发端口；没转发时是 null。 */
+  forwardedPort(computerId, guestPort) {
+    this.#assertId(computerId);
+    const record = this.#readRecord(computerId);
+    const entry = record?.ports?.forwards?.find(item => item.guest === guestPort);
+    return entry ? entry.host : null;
   }
 
   async start(computerId) {
@@ -774,8 +1238,8 @@ export class ComputerBackend {
   }
 
   async close() {
-    this.#clients.clear();
-    this.#guestDirs.clear();
+    for (const desk of this.#desks.values()) desk.reset();
+    this.#desks.clear();
   }
 
   async guest(computerId) {
@@ -784,268 +1248,52 @@ export class ComputerBackend {
     if (!record) {
       throw fail(COMPUTER_ERROR.NOT_CREATED, `computer ${computerId} has no runtime record; bind it first`);
     }
-    let pending = this.#clients.get(computerId);
-    if (!pending) {
-      pending = this.#createClient(record).catch(error => {
-        this.#clients.delete(computerId);
-        throw error;
+    return await this.#desk(computerId).client();
+  }
+
+  /** 这台电脑的 spacesd 操作。连接时重读记录，端口或令牌换了以后 reset 就会用上新的。 */
+  #desk(computerId) {
+    let desk = this.#desks.get(computerId);
+    if (!desk) {
+      desk = new GuestDesk({
+        connect: () => this.#createClient(this.#recordOrThrow(computerId)),
+        describe: error => redact(error?.message ?? error, [this.#readTokenSafe(this.#readRecord(computerId) ?? {}) ?? '\u0000']),
       });
-      this.#clients.set(computerId, pending);
+      this.#desks.set(computerId, desk);
     }
-    return await pending;
+    return desk;
   }
 
   async screenshot(computerId, { signal } = {}) {
     const record = this.#recordOrThrow(computerId);
-    const client = await this.guest(computerId);
-    const sdk = await loadSdk();
-    let shot;
-    try {
-      shot = await client.screenshot(
-        { format: sdk.ImageFormat.Png },
-        { signal: signal ?? AbortSignal.timeout(SCREENSHOT_TIMEOUT_MS) },
-      );
-    } catch (error) {
-      throw fail(COMPUTER_ERROR.GUEST_RPC_FAILED, `screenshot failed: ${this.#guestError(record, error)}`);
-    }
-    if (shot.format !== sdk.ImageFormat.Png) {
-      throw fail(COMPUTER_ERROR.GUEST_RPC_FAILED, `the guest returned image format ${shot.format}; only PNG is served`);
-    }
-    const data = Buffer.from(shot.image);
-    if (data.length === 0) {
-      throw fail(COMPUTER_ERROR.GUEST_RPC_FAILED, 'the guest returned an empty screenshot');
-    }
+    const shot = await this.#desk(computerId).screenshot({ signal });
     if (record.display?.width !== shot.width || record.display?.height !== shot.height) {
       record.display = { width: shot.width, height: shot.height };
       this.#writeRecord(record);
     }
-    return { data, mimeType: 'image/png', width: shot.width, height: shot.height };
+    return shot;
   }
 
   async input(computerId, action = {}, { signal } = {}) {
-    const record = this.#recordOrThrow(computerId);
-    const client = await this.guest(computerId);
-    const options = { signal: signal ?? AbortSignal.timeout(INPUT_TIMEOUT_MS) };
-    const kind = action?.action;
-    try {
-      switch (kind) {
-        case 'click': {
-          const x = point(action.x, 'x');
-          const y = point(action.y, 'y');
-          const button = action.button ?? 'left';
-          if (button === 'left') await client.click(x, y, options);
-          else if (button === 'right') await client.rightClick(x, y, options);
-          else throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, `input click button must be "left" or "right", got ${JSON.stringify(button)}`);
-          break;
-        }
-        case 'move': {
-          await client.moveTo(point(action.x, 'x'), point(action.y, 'y'), options);
-          break;
-        }
-        case 'scroll': {
-          if (!Number.isFinite(action.deltaY)) {
-            throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, 'input scroll needs a numeric deltaY');
-          }
-          const deltaX = action.deltaX === undefined || action.deltaX === null ? 0 : action.deltaX;
-          if (!Number.isFinite(deltaX)) {
-            throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, 'input scroll needs deltaX as a number when given');
-          }
-          await client.scroll(Math.round(deltaX), Math.round(action.deltaY), options);
-          break;
-        }
-        case 'type': {
-          if (typeof action.text !== 'string') {
-            throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, 'input type needs text as a string');
-          }
-          const windows = JSON.parse(await client.callJson('WindowsService/ListWindows', '{}', options)).windows ?? [];
-          const focused = windows.find(window => window.focused);
-          if (!focused) throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, 'text input needs a focused guest window; click the destination first');
-          const app = focused.app?.appId ?? focused.app?.name ?? '';
-          const terminal = /^(?:xfce4-terminal|gnome-terminal(?:-server)?|konsole|xterm|kitty|alacritty|wezterm|tilix|terminator)(?:\.desktop)?$/i.test(app);
-          await client.setClipboard(action.text, options);
-          options.signal.throwIfAborted();
-          const keys = terminal ? ['KEY_CONTROL', 'KEY_SHIFT', 'KEY_V'] : ['KEY_CONTROL', 'KEY_V'];
-          await client.keyboardJson(JSON.stringify({ target: { window: focused.ref }, hotkey: { keys: keys.map(named => ({ named })) } }), options);
-          break;
-        }
-        case 'key': {
-          const chord = parseKeyChord(action.key);
-          const keys = desktopKeyboardKeys(chord);
-          await client.keyboardJson(JSON.stringify({ target: { displayId: 'primary', delivery: 'DELIVERY_FOREGROUND' }, hotkey: { keys } }), options);
-          break;
-        }
-        default:
-          throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, `unknown computer input action ${JSON.stringify(kind)}`);
-      }
-    } catch (error) {
-      if (error instanceof ComputerBackendError) throw error;
-      throw fail(COMPUTER_ERROR.GUEST_RPC_FAILED, `computer input ${JSON.stringify(kind)} failed: ${this.#guestError(record, error)}`);
-    }
+    this.#recordOrThrow(computerId);
+    await this.#desk(computerId).input(action, { signal });
     return await this.status(computerId);
   }
 
-  /** 客机 /bin/sh -lc；用 spawn+tag 而不是 run()，取消时才能杀该 tag 的进程组并确认终态（见 #cancelGuestCommand）。 */
+  /** 客机 /bin/sh -lc，见 GuestDesk.run。 */
   async run(computerId, options = {}, hooks = {}) {
-    const { command, cwd = GUEST_WORK_DIR, timeoutMs, tag } = options ?? {};
-    const { signal, onUpdate } = hooks ?? {};
-    if (typeof command !== 'string' || command.trim() === '') {
-      throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, 'run needs a non-empty command');
-    }
-    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-      throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, 'run needs timeoutMs as a positive number (the SDK field is a plain number, never a BigInt)');
-    }
-    if (typeof tag !== 'string' || tag.trim() === '') {
-      throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, 'run needs a tag so a cancelled command can be found and killed in the guest');
-    }
-    const target = guestPath(cwd, 'cwd');
-    const record = this.#recordOrThrow(computerId);
-    const client = await this.guest(computerId);
-    const sdk = await loadSdk();
-    await this.#ensureGuestDir(record, client, target);
-
-    let guestProcess;
-    try {
-      guestProcess = await client.spawn(
-        sdk.SpacesdCommand.create({
-          program: '/bin/sh',
-          args: ['-lc', command],
-          cwd: target,
-          timeoutMs,
-          tag,
-          stdin: false,
-        }),
-        { signal: AbortSignal.timeout(SDK_RPC_TIMEOUT_MS) },
-      );
-    } catch (error) {
-      throw fail(COMPUTER_ERROR.GUEST_RPC_FAILED, `the guest refused to start ${tag}: ${this.#guestError(record, error)}`);
-    }
-
-    const kinds = sdk.ProcessEventKind;
-    const decoders = typeof onUpdate === 'function' ? { stdout: new StringDecoder('utf8'), stderr: new StringDecoder('utf8') } : null;
-    const parts = { stdout: [], stderr: [] };
-    const sizes = { stdout: 0, stderr: 0 };
-    let truncated = false;
-    let exit = null;
-    let guardFired = false;
-    const abort = new AbortController();
-    const relay = () => abort.abort(signal?.reason);
-    if (signal) {
-      if (signal.aborted) relay();
-      else signal.addEventListener('abort', relay, { once: true });
-    }
-    const guard = setTimeout(() => {
-      guardFired = true;
-      abort.abort(new Error('local run guard'));
-    }, timeoutMs + LOCAL_RUN_GUARD_SLACK_MS);
-    const emitUpdateBestEffort = (stream, chunk) => {
-      if (decoders === null) return;
-      try {
-        onUpdate({ stream, text: decoders[stream].write(chunk) });
-      } catch {
-        // 消费者回调的异常不能影响客机命令本身
-      }
-    };
-    const append = (stream, chunk) => {
-      const room = OUTPUT_LIMIT_BYTES - sizes[stream];
-      if (room <= 0) {
-        truncated = true;
-        return;
-      }
-      const kept = chunk.length <= room ? chunk : chunk.subarray(0, room);
-      parts[stream].push(kept);
-      sizes[stream] += kept.length;
-      if (kept.length < chunk.length) truncated = true;
-      emitUpdateBestEffort(stream, kept);
-    };
-
-    try {
-      for (;;) {
-        const event = await guestProcess.nextEvent({ signal: abort.signal });
-        if (event === undefined) break;
-        if (event.kind === kinds.Exit) {
-          exit = event.exit ?? null;
-          break;
-        }
-        const chunk = Buffer.from(event.data);
-        if (chunk.length === 0) continue;
-        append(event.kind === kinds.Stderr ? 'stderr' : 'stdout', chunk);
-      }
-    } catch (error) {
-      if (!abort.signal.aborted) {
-        throw fail(COMPUTER_ERROR.GUEST_RPC_FAILED, `the guest command ${tag} failed: ${this.#guestError(record, error)}`);
-      }
-    } finally {
-      clearTimeout(guard);
-      if (signal) signal.removeEventListener('abort', relay);
-    }
-
-    if (exit === null && abort.signal.aborted) {
-      exit = await this.#cancelGuestCommand(record, client, guestProcess, tag);
-    } else if (exit === null) {
-      try {
-        const output = await guestProcess.wait({ signal: AbortSignal.timeout(5_000) });
-        exit = output?.exit ?? null;
-      } catch {
-        exit = null;
-      }
-      if (exit === null) {
-        const survivors = await this.#runningWithTag(record, client, tag);
-        if (survivors.length > 0) {
-          exit = await this.#cancelGuestCommand(record, client, guestProcess, tag);
-        }
-      }
-    }
-
-    const finish = stream => {
-      const text = Buffer.concat(parts[stream]).toString('utf8');
-      return truncated ? text + OUTPUT_TRUNCATED_NOTE : text;
-    };
-    return {
-      stdout: finish('stdout'),
-      stderr: finish('stderr'),
-      exitCode: Number.isInteger(exit?.code) ? exit.code : null,
-      timedOut: exit?.timedOut === true || guardFired,
-    };
+    this.#recordOrThrow(computerId);
+    return await this.#desk(computerId).run(options, hooks);
   }
 
-  async uploadFile(computerId, { localPath, path: target } = {}, { signal } = {}) {
-    const record = this.#recordOrThrow(computerId);
-    const source = this.#hostFile(localPath, 'localPath');
-    const destination = guestPath(target, 'path');
-    const client = await this.guest(computerId);
-    const sdk = await loadSdk();
-    let result;
-    try {
-      result = await client.uploadFile(
-        source,
-        destination,
-        sdk.UploadOptions.create({ createParents: true }),
-        { signal: signal ?? AbortSignal.timeout(TRANSFER_TIMEOUT_MS) },
-      );
-    } catch (error) {
-      throw fail(COMPUTER_ERROR.GUEST_RPC_FAILED, `upload ${source} -> ${destination} failed: ${this.#guestError(record, error)}`);
-    }
-    return { path: destination, bytes: Number(result.size), sha256: result.sha256, resumes: result.resumes };
+  async uploadFile(computerId, transfer = {}, { signal } = {}) {
+    this.#recordOrThrow(computerId);
+    return await this.#desk(computerId).uploadFile(transfer, { signal });
   }
 
-  async downloadFile(computerId, { path: source, localPath } = {}, { signal } = {}) {
-    const record = this.#recordOrThrow(computerId);
-    const guestSource = guestPath(source, 'path');
-    if (typeof localPath !== 'string' || localPath.trim() === '') {
-      throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, 'localPath must be a host file path');
-    }
-    const destination = path.resolve(localPath);
-    fs.mkdirSync(path.dirname(destination), { recursive: true });
-    const client = await this.guest(computerId);
-    let result;
-    try {
-      result = await client.downloadFile(guestSource, destination, {
-        signal: signal ?? AbortSignal.timeout(TRANSFER_TIMEOUT_MS),
-      });
-    } catch (error) {
-      throw fail(COMPUTER_ERROR.GUEST_RPC_FAILED, `download ${guestSource} -> ${destination} failed: ${this.#guestError(record, error)}`);
-    }
-    return { path: guestSource, localPath: destination, bytes: Number(result.size), sha256: result.sha256 };
+  async downloadFile(computerId, transfer = {}, { signal } = {}) {
+    this.#recordOrThrow(computerId);
+    return await this.#desk(computerId).downloadFile(transfer, { signal });
   }
 
   #assertId(computerId) {
@@ -1304,7 +1552,7 @@ export class ComputerBackend {
     return await run;
   }
 
-  async #create(computerId, { image } = {}) {
+  async #create(computerId, { image, machine } = {}) {
     this.#assets();
     const directory = this.#dirFor(computerId);
     fs.mkdirSync(directory, { recursive: true });
@@ -1315,6 +1563,7 @@ export class ComputerBackend {
       if (typeof image === 'string' && image.trim() !== '' && record.image !== label) {
         record.image = label;
       }
+      await this.#applyMachine(record, machine);
       this.#writeRecord(record);
       return await this.#start(computerId);
     }
@@ -1337,9 +1586,10 @@ export class ComputerBackend {
         supervisorLog: path.join(directory, 'supervisor.log'),
         cmdline: path.join(directory, 'cmdline'),
         qmp: null,
-        ports: { spacesd: await bindFreePort() },
+        ports: { spacesd: await bindFreePort(), forwards: [] },
         cpus: DEFAULT_CPUS,
         memoryMb: DEFAULT_MEMORY_MB,
+        diskBytes: null,
         accel: ACCEL,
         createdAt: Date.now(),
         startedAt: null,
@@ -1352,9 +1602,10 @@ export class ComputerBackend {
       record.image = label;
       record.imagePath = this.#imageFile;
     }
+    await this.#applyMachine(record, machine, { fresh: !fs.existsSync(record.disk) });
     this.#ensureControlKey(record, directory);
     if (!fs.existsSync(record.disk)) {
-      const backing = await createOverlay(qemuImg, this.#imageFile, record.disk);
+      const backing = await createOverlay(qemuImg, this.#imageFile, record.disk, record.diskBytes);
       record.backingFormat = backing.format;
       // 这个覆盖层就是按当前镜像新建的，旧摘要描述的是已经不在的磁盘：留着会让 start 永远拒绝启动（新摘要由 #assertImageStamp 盖章）
       delete record.imageSha256;
@@ -1365,13 +1616,48 @@ export class ComputerBackend {
     return await this.#start(computerId);
   }
 
+  async #applyMachine(record, machine, { fresh = false } = {}) {
+    if (!machine) return;
+    const int = (value, name, min, max) => {
+      if (value === undefined || value === null) return null;
+      if (!Number.isInteger(value) || value < min || value > max) {
+        throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, `machine.${name} must be an integer between ${min} and ${max}`);
+      }
+      return value;
+    };
+    const cpus = int(machine.cpus, 'cpus', 1, 64);
+    const memoryMb = int(machine.memoryMb, 'memoryMb', 512, 262_144);
+    const diskGb = int(machine.diskGb, 'diskGb', 8, 4096);
+    if (cpus !== null) record.cpus = cpus;
+    if (memoryMb !== null) record.memoryMb = memoryMb;
+    if (diskGb !== null && fresh) record.diskBytes = diskGb * 2 ** 30;
+    const wanted = Array.isArray(machine.forwards) ? machine.forwards : [];
+    record.ports.forwards = Array.isArray(record.ports.forwards) ? record.ports.forwards : [];
+    for (const guestPort of wanted) {
+      int(guestPort, 'forwards[]', 1, 65_535);
+      if (guestPort === GUEST_SPACESD_PORT) throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, `port ${guestPort} is the management channel`);
+      if (record.ports.forwards.some(entry => entry.guest === guestPort)) continue;
+      record.ports.forwards.push({ guest: guestPort, host: await this.#freeHostPort(record) });
+    }
+  }
+
+  /** 宿主回环上的空闲端口，不和这台电脑已占的端口重复。 */
+  async #freeHostPort(record) {
+    const taken = new Set([record.ports.spacesd, ...(record.ports.forwards ?? []).map(entry => entry.host)]);
+    for (let attempt = 0; attempt < 32; attempt += 1) {
+      const port = await bindFreePort();
+      if (!taken.has(port)) return port;
+    }
+    throw fail(COMPUTER_ERROR.START_FAILED, 'no free host port for the guest forwards');
+  }
+
   #ensureToken(record, computerId, directory) {
     const existing = record ? this.#readTokenSafe(record) : null;
     if (existing) return { token: existing, created: false };
     const token = randomBytes(16).toString('hex');
     const file = record?.tokenFile ?? path.join(directory, 'token');
     fs.writeFileSync(file, `${token}\n`, { mode: 0o600 });
-    this.#clients.delete(computerId);
+    this.#desks.get(computerId)?.reset();
     return { token, created: true };
   }
 
@@ -1455,7 +1741,7 @@ export class ComputerBackend {
       record.backingFormat = backingFormat;
       this.#writeRecord(record);
     }
-    this.#clients.delete(computerId);
+    this.#desks.get(computerId)?.reset();
     await this.#ensurePorts(record);
     const children = this.#launchMachine(record);
     await this.#awaitSupervisor(record, children);
@@ -1464,60 +1750,25 @@ export class ComputerBackend {
   }
 
   async #ensurePorts(record) {
-    if (await portFree(record.ports.spacesd)) return;
-    record.ports.spacesd = await bindFreePort();
+    let changed = false;
+    if (!(await portFree(record.ports.spacesd))) {
+      record.ports.spacesd = await bindFreePort();
+      changed = true;
+    }
+    for (const entry of record.ports.forwards ?? []) {
+      if (await portFree(entry.host)) continue;
+      entry.host = await this.#freeHostPort(record);
+      changed = true;
+    }
+    if (!changed) return;
     this.#writeRecord(record);
-    this.#clients.delete(record.computerId);
+    this.#desks.get(record.computerId)?.reset();
   }
 
   #qemuArgs(record) {
-    return [
-      '-name',
-      record.name,
-      '-machine',
-      'q35,smm=off',
-      '-cpu',
-      'host',
-      '-accel',
-      ACCEL,
-      '-smp',
-      String(record.cpus),
-      '-m',
-      String(record.memoryMb),
-      '-drive',
-      `file=${record.disk},if=none,id=disk0,format=qcow2,cache=writeback,discard=unmap`,
-      '-device',
-      'virtio-blk-pci,drive=disk0,bootindex=1',
-      '-drive',
-      `file=${record.seed},if=none,id=cidata,format=raw,readonly=on`,
-      '-device',
-      'virtio-blk-pci,drive=cidata',
-      '-netdev',
-      `user,id=net0,hostfwd=tcp:127.0.0.1:${record.ports.spacesd}-:${GUEST_SPACESD_PORT}`,
-      '-device',
-      'virtio-net-pci,netdev=net0',
-      '-vga',
-      'std',
-      '-device',
-      'qemu-xhci,id=xhci',
-      '-device',
-      'usb-kbd',
-      '-device',
-      'usb-tablet',
-      '-display',
-      'none',
-      '-vnc',
-      'none',
-      '-qmp',
-      `pipe:${record.qmp.raw}`,
-      '-serial',
-      'null',
-      '-monitor',
-      'none',
-      '-pidfile',
-      record.pidFile,
-    ];
+    return qemuArgs(record);
   }
+
 
   #childEnv(extraEnv) {
     const env = { ...extraEnv };
@@ -1711,7 +1962,7 @@ export class ComputerBackend {
         record.startedAt = null;
         this.#writeRecord(record);
       }
-      this.#clients.delete(computerId);
+      this.#desks.get(computerId)?.reset();
       return await this.status(computerId);
     }
     const pid = live.pid ?? readPidFile(record.pidFile) ?? record.pid ?? null;
@@ -1750,7 +2001,7 @@ export class ComputerBackend {
     record.startedAt = null;
     record.pid = null;
     this.#writeRecord(record);
-    this.#clients.delete(computerId);
+    this.#desks.get(computerId)?.reset();
     return await this.status(computerId);
   }
 
@@ -1796,101 +2047,5 @@ export class ComputerBackend {
     const token = this.#token(record);
     const runtime = await cuaRuntime();
     return await runtime.spacesd(`http://127.0.0.1:${record.ports.spacesd}`, token);
-  }
-
-  async #ensureGuestDir(record, client, directory) {
-    const key = `${record.computerId}\u0000${directory}`;
-    const cached = this.#guestDirs.get(key);
-    if (cached) return await cached;
-    const task = client.makeDir(directory, { signal: AbortSignal.timeout(SDK_RPC_TIMEOUT_MS) }).catch(error => {
-      this.#guestDirs.delete(key);
-      throw fail(COMPUTER_ERROR.GUEST_RPC_FAILED, `the guest could not create ${directory}: ${this.#guestError(record, error)}`);
-    });
-    this.#guestDirs.set(key, task);
-    return await task;
-  }
-
-  async #runningWithTag(record, client, tag) {
-    let raw;
-    try {
-      raw = await client.listProcesses(false, { signal: AbortSignal.timeout(SDK_RPC_TIMEOUT_MS) });
-    } catch (error) {
-      throw fail(COMPUTER_ERROR.EFFECT_UNKNOWN, `cannot list guest processes to confirm ${tag} stopped: ${this.#guestError(record, error)}`);
-    }
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (error) {
-      throw fail(COMPUTER_ERROR.EFFECT_UNKNOWN, `cannot read the guest process list for ${tag}: ${redact(error?.message ?? error, [])}`);
-    }
-    const list = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.processes) ? parsed.processes : null;
-    if (list === null) {
-      throw fail(COMPUTER_ERROR.EFFECT_UNKNOWN, `unexpected ListProcesses payload while confirming ${tag} stopped`);
-    }
-    return list.filter(entry => entry?.tag === tag && (entry?.state ?? 'PROCESS_STATE_RUNNING') !== 'PROCESS_STATE_EXITED');
-  }
-
-  async #signalGroupKill(client, tag) {
-    await client.callJson(
-      '/cua.env.v1.ProcessService/SignalProcess',
-      JSON.stringify({ process: { tag }, signal: 'SIGNAL_KILL', processGroup: true }),
-      { signal: AbortSignal.timeout(10_000) },
-    );
-  }
-
-  async #cancelGuestCommand(record, client, guestProcess, tag) {
-    const deadline = Date.now() + CANCEL_CONFIRM_MS;
-    let killError = null;
-    const groupKill = async () => {
-      try {
-        await this.#signalGroupKill(client, tag);
-      } catch (error) {
-        killError = this.#guestError(record, error);
-      }
-    };
-    await groupKill();
-    try {
-      await guestProcess.kill({ signal: AbortSignal.timeout(10_000) });
-    } catch (error) {
-      killError ??= this.#guestError(record, error);
-    }
-    let exit = null;
-    try {
-      const output = await guestProcess.wait({ signal: AbortSignal.timeout(8_000) });
-      exit = output?.exit ?? null;
-    } catch {
-      exit = null;
-    }
-    let survivors = await this.#runningWithTag(record, client, tag);
-    if (survivors.length > 0 && Date.now() < deadline) {
-      await groupKill();
-      await sleep(250);
-      survivors = await this.#runningWithTag(record, client, tag);
-    }
-    if (survivors.length > 0) {
-      const pids = survivors.map(entry => entry?.pid).filter(pid => pid !== undefined).join(', ');
-      throw fail(
-        COMPUTER_ERROR.EFFECT_UNKNOWN,
-        `cancelled ${tag} but the guest still runs ${pids || 'a process'} with that tag; the side effects of this command are unknown${killError ? ` (kill error: ${killError})` : ''}`,
-      );
-    }
-    return exit;
-  }
-
-  #hostFile(localPath, name) {
-    if (typeof localPath !== 'string' || localPath.trim() === '') {
-      throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, `${name} must be a host file path`);
-    }
-    const resolved = path.resolve(localPath);
-    let stats;
-    try {
-      stats = fs.statSync(resolved);
-    } catch {
-      throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, `${name} ${resolved} does not exist`);
-    }
-    if (!stats.isFile()) {
-      throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, `${name} ${resolved} is not a regular file`);
-    }
-    return resolved;
   }
 }
