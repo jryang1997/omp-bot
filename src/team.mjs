@@ -15,10 +15,13 @@
 // omp 判断仓库根只看有没有名为 `.git` 的条目。没有 git 时手建一个空仓库骨架，
 // omp 照样停在 team 根上，以后装了 git 这个骨架也是合法的空仓库。
 // 运行时生成的 persona.md、isolate.yml 不进 team，放在 <home>/bots/<id>/<scope>/。
+//
+// 升级迁移：旧版每个 scope 一套 <home>/bots/<id>/<scope>/{work,sessions,agent}。
+// 第一次启动时只复制、不删、不覆盖，做完在 team 根上留 MIGRATION_MARKER。
 
 import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export const TEAM_DIRNAME = "team";
@@ -189,6 +192,171 @@ export function replaceIdentityBlock(text, nextBlock) {
 export const BOT_AGENTS_TAIL = `<!-- 下面是你和用户的地方：可以记工作习惯、常用资料位置、做事偏好。omp-bot 不会改动这里。 -->
 `;
 
+export const MIGRATION_MARKER = ".omp-bot-migrated.json";
+export const OLD_MEMORY_DIRNAME = "old-memory";
+export const OLD_MEMORY_NOTE = "以前的记忆摘要复制到了 `work/old-memory/`，按私聊和各个群分开放。需要回想以前的事时去读。";
+/** 旧 local 记忆里值得带走的文件。raw_memories.md 是未整理的原料，不带。 */
+const OLD_MEMORY_FILES = new Set(["memory_summary.md", "MEMORY.md", "learned.md"]);
+
+/**
+ * 只复制不覆盖：目标已有同名文件就跳过。符号链接不跟也不复制，免得把外面的东西带进 team。
+ * @returns {{copied:number, skipped:number, failed:string[]}}
+ */
+export function copyMissing(src, dest, { skipTop = [] } = {}) {
+  const tally = { copied: 0, skipped: 0, failed: [], files: [] };
+  const walk = (from, to, top) => {
+    let entries;
+    try {
+      entries = readdirSync(from, { withFileTypes: true });
+    } catch (e) {
+      tally.failed.push(`${from}: ${e.code ?? e.message}`);
+      return;
+    }
+    for (const ent of entries) {
+      if (top && skipTop.includes(ent.name)) continue;
+      const a = join(from, ent.name);
+      const b = join(to, ent.name);
+      try {
+        if (ent.isSymbolicLink()) {
+          tally.skipped += 1;
+        } else if (ent.isDirectory()) {
+          walk(a, b, false);
+        } else if (ent.isFile()) {
+          if (existsSync(b)) {
+            tally.skipped += 1;
+            continue;
+          }
+          mkdirSync(to, { recursive: true });
+          copyFileSync(a, b, fsConstants.COPYFILE_EXCL);
+          const st = statSync(a);
+          utimesSync(b, st.atime, st.mtime); // 保留时间：omp --continue 按修改时间挑最近的会话
+          tally.copied += 1;
+          tally.files.push(b);
+        }
+      } catch (e) {
+        tally.failed.push(`${a}: ${e.code ?? e.message}`);
+      }
+    }
+  };
+  if (existsSync(src)) walk(src, dest, true);
+  return tally;
+}
+
+/**
+ * 会话头记着创建时的 cwd。omp 续接时按它找 AGENTS.md，旧目录还在就会读不到 team 的两层。
+ * 只改副本的会话头，指到新 cwd；保留修改时间。改了返回 true。
+ */
+export function rerootSessionFile(file, fromRoot, toCwd) {
+  const text = readFileSync(file, "utf8");
+  const lines = text.split("\n");
+  for (let i = 0; i < Math.min(lines.length, 5); i++) {
+    let head;
+    try {
+      head = JSON.parse(lines[i]);
+    } catch {
+      continue;
+    }
+    if (head?.type !== "session") continue;
+    const cwd = typeof head.cwd === "string" ? head.cwd : "";
+    if (cwd !== fromRoot && !cwd.startsWith(`${fromRoot}/`) && !cwd.startsWith(`${fromRoot}\\`)) return false;
+    lines[i] = JSON.stringify({ ...head, cwd: toCwd });
+    const st = statSync(file);
+    writeFileSync(file, lines.join("\n"), "utf8");
+    utimesSync(file, st.atime, st.mtime);
+    return true;
+  }
+  return false;
+}
+
+const isDir = (p) => {
+  try {
+    return lstatSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * 把一个 bot 的旧数据复制进 team。没有旧目录返回 null。
+ * 私聊工作目录合到 work 根上，群聊的放 work/rooms/<scope>/；会话进 sessions/<scope>/；
+ * 旧 work/.omp/skills 进私有技能目录，私聊的 work/.omp/mcp.json 进 bot 的 .omp/；
+ * 旧 local 记忆摘要进 work/old-memory/<scope>/。
+ */
+export function migrateLegacyBot(home, botId) {
+  const legacy = join(home, "bots", botId);
+  if (!isDir(legacy)) return null;
+  const p = teamPaths(home, botId);
+  const out = { scopes: [], copied: 0, skipped: 0, failed: [], oldMemory: false };
+  const add = (t) => {
+    out.copied += t.copied;
+    out.skipped += t.skipped;
+    out.failed.push(...t.failed);
+    return t.copied;
+  };
+  for (const ent of readdirSync(legacy, { withFileTypes: true })) {
+    if (!ent.isDirectory()) continue;
+    const scope = ent.name;
+    const base = join(legacy, scope);
+    const oldWork = join(base, "work");
+    const oldSessions = join(base, "sessions");
+    const oldMemories = join(base, "agent", "memories");
+    if (!isDir(oldWork) && !isDir(oldSessions) && !isDir(oldMemories)) continue;
+    out.scopes.push(scope);
+    const workDest = scope === "private" ? p.workDir : join(p.workDir, "rooms", scope);
+    add(copyMissing(oldWork, workDest, { skipTop: [".omp"] }));
+    add(copyMissing(join(oldWork, ".omp", "skills"), p.skillsDir));
+    if (scope === "private") {
+      const mcp = join(oldWork, ".omp", "mcp.json");
+      const mcpDest = join(p.cwd, ".omp", "mcp.json");
+      if (existsSync(mcp) && !lstatSync(mcp).isSymbolicLink()) {
+        if (existsSync(mcpDest)) out.skipped += 1;
+        else {
+          mkdirSync(join(p.cwd, ".omp"), { recursive: true });
+          copyFileSync(mcp, mcpDest, fsConstants.COPYFILE_EXCL);
+          out.copied += 1;
+        }
+      }
+    }
+    const sessions = copyMissing(oldSessions, join(p.cwd, "sessions", scope));
+    add(sessions);
+    for (const file of sessions.files) {
+      if (!file.endsWith(".jsonl")) continue;
+      try {
+        if (rerootSessionFile(file, legacy, p.cwd)) out.rerooted = (out.rerooted ?? 0) + 1;
+      } catch (e) {
+        out.failed.push(`${file}: ${e.code ?? e.message}`);
+      }
+    }
+    if (isDir(oldMemories)) {
+      const memDest = join(p.workDir, OLD_MEMORY_DIRNAME, scope);
+      for (const root of readdirSync(oldMemories, { withFileTypes: true })) {
+        if (!root.isDirectory()) continue;
+        for (const f of readdirSync(join(oldMemories, root.name), { withFileTypes: true })) {
+          if (!f.isFile() || !OLD_MEMORY_FILES.has(f.name)) continue;
+          const from = join(oldMemories, root.name, f.name);
+          const to = join(memDest, f.name);
+          try {
+            if (!readFileSync(from, "utf8").trim()) continue; // 空文件不算记忆
+            if (existsSync(to)) {
+              out.skipped += 1;
+              continue;
+            }
+            mkdirSync(memDest, { recursive: true });
+            copyFileSync(from, to, fsConstants.COPYFILE_EXCL);
+            out.copied += 1;
+            out.oldMemory = true;
+          } catch (e) {
+            out.failed.push(`${from}: ${e.code ?? e.message}`);
+          }
+        }
+      }
+    }
+  }
+  if (!out.scopes.length) return null;
+  if (isDir(join(p.workDir, OLD_MEMORY_DIRNAME))) out.oldMemory = true;
+  return out;
+}
+
 let gitProbe = null;
 function hasGitBinary() {
   if (gitProbe === null) {
@@ -254,6 +422,43 @@ export class TeamDir {
     }
     if (created.length) this.commit(`建立团队目录：${created.join("、")}`);
     return this;
+  }
+
+  /**
+   * 升级后第一次启动把旧数据复制进来。有标记就不再做；单个文件失败记进标记，不挡启动。
+   * @param {{id:string, name?:string}[]} bots
+   * @returns {null | {bots:Record<string, object>}} 这次做了迁移才返回报告
+   */
+  migrate(bots) {
+    if (this.readonly) return null;
+    const marker = join(this.root, MIGRATION_MARKER);
+    if (existsSync(marker)) return null;
+    const report = { version: 1, at: new Date().toISOString(), bots: {} };
+    const names = [];
+    let broken = null;
+    for (const bot of bots) {
+      let r;
+      try {
+        r = migrateLegacyBot(this.home, bot.id);
+      } catch (e) {
+        broken = e; // 整个 bot 读不下来：不留标记，下次启动再试；已复制的不会重复
+        continue;
+      }
+      if (!r) continue;
+      report.bots[bot.id] = r;
+      if (r.copied) names.push(bot.name || bot.id);
+    }
+    if (names.length) this.commit(`迁移旧数据：${names.join("、")}`);
+    if (broken) {
+      this._fail("migrate", broken);
+      return report;
+    }
+    writeFileSync(marker, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+    const failed = Object.values(report.bots).reduce((n, r) => n + r.failed.length, 0);
+    if (failed) this._fail("migrate", new Error(`${failed} 个旧文件没复制成功，详情在 ${MIGRATION_MARKER}`));
+    this.onEvent("team_migrated", { bots: Object.keys(report.bots), failed });
+    if (!names.length) this.commit("记下旧数据已检查");
+    return report;
   }
 
   _gitInit() {
@@ -327,7 +532,9 @@ export class TeamDir {
     try {
       before = readFileSync(agentsFile, "utf8");
     } catch {}
-    const next = replaceIdentityBlock(before, renderIdentityBlock(bot));
+    const notes = [...(bot.identityNotes ?? [])];
+    if (isDir(join(cwd, "work", OLD_MEMORY_DIRNAME))) notes.push(OLD_MEMORY_NOTE);
+    const next = replaceIdentityBlock(before, renderIdentityBlock({ ...bot, identityNotes: notes }));
     if (next === before) {
       this._rememberStat(bot.id, agentsFile);
       return false;

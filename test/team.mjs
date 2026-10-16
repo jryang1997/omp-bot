@@ -3,13 +3,13 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { makeBot, normalizeBot, permissionOf, permissionModes } from "../src/domain.mjs";
 import { BotRuntime } from "../src/bot.mjs";
 import { Computers } from "../src/features/computers.mjs";
 import { COMPUTER_TOOL_NAMES } from "../src/constants.mjs";
-import { TEAM_AGENTS_TEMPLATE, parseIdentityBlock, renderIdentityBlock, replaceIdentityBlock, teamPaths } from "../src/team.mjs";
+import { MIGRATION_MARKER, OLD_MEMORY_NOTE, TEAM_AGENTS_TEMPLATE, parseIdentityBlock, renderIdentityBlock, replaceIdentityBlock, teamPaths } from "../src/team.mjs";
 import { Orchestrator } from "../src/orchestrator.mjs";
 import { permissionOf as uiPermissionOf, BOT_PERMISSION_LABELS } from "../web/workbench-core.js";
 
@@ -302,6 +302,140 @@ test("01 omp-bot 改动 team 目录后多一次提交", async () => {
       orch.updateBot(bot.id, { thinking: "high" });
       await orch.team.flush();
       assert.equal(gitLog(join(home, "team")).length, before + 1, "不碰身份的改动不提交");
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// ---------------- 02 旧数据复制进 team ----------------
+const put = (file, text, mtime) => {
+  mkdirSync(join(file, ".."), { recursive: true });
+  writeFileSync(file, text, "utf8");
+  if (mtime) utimesSync(file, mtime, mtime);
+};
+/** 造一个升级前的 home：花名册里有 bot，旧布局按 scope 分开，team 目录还不存在。 */
+async function legacyHome(prefix) {
+  const home = tmp(prefix);
+  let id;
+  await withOrch(home, async (orch) => { id = orch.addBot({ name: "老王", role: "写手" }).id; });
+  rmSync(join(home, "team"), { recursive: true, force: true });
+  const old = (scope, rel) => join(home, "bots", id, scope, rel);
+  const t = new Date("2025-03-01T08:00:00Z");
+  put(old("private", "work/notes.md"), "私聊笔记");
+  put(old("private", "work/sub/a.txt"), "A");
+  put(old("private", "work/.omp/skills/写周报/SKILL.md"), "---\nname: 写周报\n---\n");
+  put(old("private", "work/.omp/mcp.json"), '{"mcpServers":{}}');
+  const header = (scope) => `${JSON.stringify({ type: "title", v: 1, title: "" })}\n${JSON.stringify({ type: "session", version: 3, id: scope, cwd: old(scope, "work") })}\n{"type":"message","text":"旧对话"}\n`;
+  put(old("private", "sessions/2025-03-01_old.jsonl"), header("private"), t);
+  put(old("room_g1", "work/draft.md"), "群里的稿子");
+  put(old("room_g1", "work/.omp/skills/群技能/SKILL.md"), "---\nname: 群技能\n---\n");
+  put(old("room_g1", "sessions/g.jsonl"), header("room_g1"));
+  const mem = old("private", "agent/memories/--old-work--");
+  put(join(mem, "memory_summary.md"), "用户喜欢简短回复");
+  put(join(mem, "MEMORY.md"), "# 记忆");
+  put(join(mem, "raw_memories.md"), "原料");
+  put(join(mem, "learned.md"), "   ");
+  return { home, id, old, t };
+}
+
+test("02 私聊工作目录合到 work 根上，群聊的放 rooms，私有技能和 MCP 配置跟过来", async () => {
+  const { home, id, old } = await legacyHome("ompbot-mig-work-");
+  try {
+    await withOrch(home, async (orch) => {
+      await orch.team.flush();
+      const p = teamPaths(home, id);
+      assert.equal(readFileSync(join(p.workDir, "notes.md"), "utf8"), "私聊笔记");
+      assert.equal(readFileSync(join(p.workDir, "sub/a.txt"), "utf8"), "A");
+      assert.equal(readFileSync(join(p.workDir, "rooms/room_g1/draft.md"), "utf8"), "群里的稿子");
+      assert.ok(!existsSync(join(p.workDir, ".omp")), "旧 work/.omp 不原样搬进 work");
+      assert.ok(existsSync(join(p.skillsDir, "写周报/SKILL.md")));
+      assert.ok(existsSync(join(p.skillsDir, "群技能/SKILL.md")), "群里装的私有技能也并进来");
+      assert.ok(existsSync(join(p.cwd, ".omp/mcp.json")));
+      assert.ok(existsSync(old("private", "work/notes.md")) && existsSync(old("room_g1", "sessions/g.jsonl")), "旧目录原样保留");
+      assert.ok(existsSync(join(home, "team", MIGRATION_MARKER)));
+      assert.ok(gitLog(join(home, "team")).some((m) => m.includes("迁移旧数据：老王")));
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("02 旧会话进 sessions/<scope>/，新 runtime 带 --continue 续上", async () => {
+  const { home, id, t } = await legacyHome("ompbot-mig-session-");
+  try {
+    await withOrch(home, async () => {});
+    const p = teamPaths(home, id);
+    const file = join(p.cwd, "sessions/private/2025-03-01_old.jsonl");
+    assert.ok(existsSync(file));
+    assert.equal(statSync(file).mtimeMs, t.getTime(), "保留修改时间，omp 按它挑最近的会话");
+    assert.ok(existsSync(join(p.cwd, "sessions/room_g1/g.jsonl")));
+    // omp 续接时按会话头里的 cwd 找 AGENTS.md：副本要指到新 cwd，旧文件不动
+    for (const [scope, name] of [["private", "2025-03-01_old.jsonl"], ["room_g1", "g.jsonl"]]) {
+      const lines = readFileSync(join(p.cwd, "sessions", scope, name), "utf8").split("\n");
+      assert.equal(JSON.parse(lines[1]).cwd, p.cwd, `${scope} 会话头指到新 cwd`);
+      assert.equal(lines[2], '{"type":"message","text":"旧对话"}', "会话内容原样");
+      assert.equal(JSON.parse(readFileSync(join(home, "bots", id, scope, "sessions", name), "utf8").split("\n")[1]).cwd, join(home, "bots", id, scope, "work"), "旧会话不改");
+    }
+    const bot = makeBot({ id, name: "老王" });
+    for (const scope of ["private", "room:g1"]) {
+      const { args } = new BotRuntime({ bot, scope, home, bin: "omp-fixture" })._buildArgs();
+      assert.ok(args.includes("--continue"), `${scope} 续上旧会话`);
+    }
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("02 旧记忆摘要进 work/old-memory/，身份块里有一句提示", async () => {
+  const { home, id } = await legacyHome("ompbot-mig-memory-");
+  try {
+    await withOrch(home, async (orch) => {
+      await orch.team.flush();
+      const p = teamPaths(home, id);
+      const dir = join(p.workDir, "old-memory/private");
+      assert.equal(readFileSync(join(dir, "memory_summary.md"), "utf8"), "用户喜欢简短回复");
+      assert.ok(existsSync(join(dir, "MEMORY.md")));
+      assert.ok(!existsSync(join(dir, "raw_memories.md")), "未整理的原料不带");
+      assert.ok(!existsSync(join(dir, "learned.md")), "空文件不带");
+      const text = readFileSync(p.agentsFile, "utf8");
+      assert.ok(text.includes(OLD_MEMORY_NOTE));
+      assert.equal(parseIdentityBlock(text).role, "写手", "提示不影响身份字段");
+      orch.updateBot(id, { role: "编辑" });
+      assert.ok(readFileSync(p.agentsFile, "utf8").includes(OLD_MEMORY_NOTE), "改身份后提示还在");
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("02 第二次启动不再复制；去掉标记重做也不覆盖新文件", async () => {
+  const { home, id, old } = await legacyHome("ompbot-mig-again-");
+  try {
+    await withOrch(home, async () => {});
+    const p = teamPaths(home, id);
+    writeFileSync(join(p.workDir, "notes.md"), "升级后改过", "utf8");
+    put(old("private", "work/later.md"), "后来才放的");
+    const commits = gitLog(join(home, "team")).length;
+    await withOrch(home, async (orch) => { await orch.team.flush(); });
+    assert.ok(!existsSync(join(p.workDir, "later.md")), "有标记就不再迁移");
+    assert.equal(gitLog(join(home, "team")).length, commits, "没事可做不提交");
+    rmSync(join(home, "team", MIGRATION_MARKER));
+    await withOrch(home, async (orch) => { await orch.team.flush(); });
+    assert.equal(readFileSync(join(p.workDir, "notes.md"), "utf8"), "升级后改过", "已有文件不被覆盖");
+    assert.equal(readFileSync(join(p.workDir, "later.md"), "utf8"), "后来才放的");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("02 全新安装也留标记，不产生多余提交", async () => {
+  const home = tmp("ompbot-mig-fresh-");
+  try {
+    await withOrch(home, async (orch) => {
+      await orch.team.flush();
+      assert.ok(existsSync(join(home, "team", MIGRATION_MARKER)));
+      assert.equal(gitLog(join(home, "team")).length, 1, "建目录和标记合成一次提交");
     });
   } finally {
     rmSync(home, { recursive: true, force: true });

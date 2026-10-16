@@ -325,21 +325,27 @@ export class Orchestrator {
 
   // ---- 团队目录 ----
 
-  /** 建团队目录；花名册里每个 bot 都要有身份块（老 bot 第一次启动时补上，已有文件以文件为准）。 */
+  /**
+   * 建团队目录，升级后第一次启动复制旧数据；花名册里每个 bot 都要有身份块
+   * （老 bot 第一次启动时补上，已有文件以文件为准）。带回旧记忆的 bot 在身份块里多一句提示。
+   */
   _ensureTeam() {
     if (this.team.readonly) return;
     this.team.ensure();
+    const bots = this.store.listBots().map(normalizeBot).filter(Boolean);
+    const migrated = this.team.migrate(bots);
     const added = [];
-    for (const raw of this.store.listBots()) {
-      const bot = normalizeBot(raw);
-      if (!bot) continue;
+    const noted = [];
+    for (let bot of bots) {
       if (this.team.readIdentity(bot.id)) {
-        this._syncIdentity(bot);
+        bot = this._syncIdentity(bot);
+        if (migrated?.bots?.[bot.id]?.oldMemory && this.team.writeIdentity(bot)) noted.push(bot.name);
         continue;
       }
       if (this.team.writeIdentity(bot)) added.push(bot.name);
     }
     if (added.length) this.team.commit(`身份：补上 ${added.join("、")}`);
+    if (noted.length) this.team.commit(`身份：${noted.join("、")} 加上旧记忆提示`);
   }
 
   /**
