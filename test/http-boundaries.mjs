@@ -369,6 +369,11 @@ try {
   });
   check("设备向未授权 bot 派活 403 DEVICE_OUT_OF_SCOPE", deviceRunOutOfScope.status === 403 && /DEVICE_OUT_OF_SCOPE/.test(deviceRunOutOfScope.text), `status=${deviceRunOutOfScope.status}`);
 
+  const ownerDelegations = await api("/api/delegations");
+  check("主人能读派活记录", ownerDelegations.status === 200 && Array.isArray(ownerDelegations.data?.delegations), `status=${ownerDelegations.status}`);
+  const deviceDelegations = await raw("/api/delegations", { headers: deviceAuth });
+  check("设备读派活记录被拒（可能含别的 bot 的交回内容）", deviceDelegations.status === 403, `status=${deviceDelegations.status}`);
+
   // 群建好之后重新取设备视角的状态（不能用建群之前的快照）
   const deviceStateAfter = JSON.parse((await raw("/api/state", { headers: deviceAuth })).text);
   const scopedRoom = deviceStateAfter.rooms?.find((r) => r.id === mixedRoom.data.room.id);

@@ -726,6 +726,13 @@ export async function startServer({ port = 3099, host = "127.0.0.1", home, bin =
       return out && typeof out === "object" && out.id ? { run: out } : { ok: true };
     } },
 
+    // 助手之间派的活（delegate_bot 的工作账与交付账）。只给主人看：交回结果可能含别的 bot 的私有内容。
+    { method: "GET", path: ["api", "delegations"], run: (c) => {
+      const botId = c.query.get("botId") || null;
+      const limit = Number.parseInt(c.query.get("limit") ?? "100", 10);
+      return { delegations: orch.listDelegations({ botId, limit: Number.isFinite(limit) ? limit : 100 }) };
+    } },
+
     { method: "GET", path: ["api", "approvals"], access: "any", run: (c) => {
       const all = ledger() ? ledger().list("approvals", { limit: 200 }) ?? [] : [];
       const status = c.query.get("status");

@@ -16,6 +16,34 @@ const FILTERS = [
   ["failed", "失败", (run) => ["failed", "cancelled", "interrupted", "reconciliation_required"].includes(run.state)],
 ];
 
+const DROP_REASON_LABELS = {
+  parent_cancelled: "派活的任务被取消了",
+  parent_bot_gone: "派活的助手已删除",
+  target_gone: "接手的助手已删除",
+  visibility_revoked: "两个助手已不在同一工作区",
+  wake_rejected: "交回时被拒",
+  rejected_inline: "当场就被拒，报错已直接给了派活的助手",
+};
+
+const DELEGATION_RESULT_LABELS = {
+  completed: "做完了",
+  failed: "失败了",
+  cancelled: "被取消了",
+  interrupted: "重启中断了",
+  reconciliation_required: "要人工核对",
+  not_started: "没能开跑",
+};
+
+/** 一条派活给用户看的状态：执行到哪、交回了没有，合成一句。 */
+function delegationStatus(rec) {
+  if (rec.state === "queued") return { key: "queued", label: "排队中" };
+  if (rec.state === "running") return { key: "running", label: "在做" };
+  const done = DELEGATION_RESULT_LABELS[rec.result?.state] ?? "结束了";
+  if (rec.delivery === "delivered") return { key: "delivered", label: `${done}，已交回` };
+  if (rec.delivery === "dropped") return { key: "dropped", label: `${done}，没交回` };
+  return { key: "pending", label: `${done}，等着交回` };
+}
+
 function pendingNote(what, endpoint) {
   const note = el("div", "wb-pending");
   note.append(el("div", "wb-pending-title", `${what}暂不可用`));
@@ -203,7 +231,11 @@ export function createPanels({ client, deps }) {
     const emptyTitle = el("div", null, "还没有任务");
     const emptyHint = el("div", "bt-note");
     empty.append(emptyTitle, emptyHint);
-    root.append(approvals, list, empty);
+    // 助手之间派的活：排队、在做、交回了没有。放在任务列表上面，空就整块隐藏。
+    const delegationBox = el("div", "wb-approval-list wb-delegation-list hidden");
+    let delegations = [];
+    let delegationTimer = null;
+    root.append(approvals, delegationBox, list, empty);
 
     // 导出是低频动作，收进默认收起的「高级选项」，不占主流程。
     const exportAll = button("btn ghost", "导出全部任务", () => {
@@ -217,6 +249,48 @@ export function createPanels({ client, deps }) {
     advancedBody.append(row("导出全部任务", "把全部任务记录导出为一个文件，用于备份或排查问题。", exportAll));
     advanced.append(advancedBody);
     root.append(advanced);
+
+    async function loadDelegations() {
+      try {
+        const { delegations: rows } = await api("/api/delegations?limit=20");
+        delegations = Array.isArray(rows) ? rows : [];
+      } catch {
+        delegations = [];
+      }
+      paintDelegations();
+    }
+
+    /** 任务一有变化就顺手刷新派活（落定、交回都伴随 Run 变化），合并成一次请求。 */
+    function scheduleDelegations() {
+      clearTimeout(delegationTimer);
+      delegationTimer = setTimeout(() => void loadDelegations(), 300);
+    }
+
+    function paintDelegations() {
+      delegationBox.replaceChildren();
+      delegationBox.classList.toggle("hidden", delegations.length === 0);
+      if (!delegations.length) return;
+      delegationBox.append(el("div", "wb-dock-label", `助手之间派的活（${delegations.length}）`));
+      for (const rec of delegations) delegationBox.append(delegationTile(rec));
+    }
+
+    function delegationTile(rec) {
+      const tile = el("div", "wb-run-tile");
+      tile.dataset.delegationId = rec.id;
+      tile.dataset.state = delegationStatus(rec).key;
+      const top = el("div", "wb-run-top");
+      top.append(el("span", "wb-run-bot", `${rec.fromName || rec.fromBotId} → ${rec.targetName || rec.targetBotId}`));
+      top.append(el("span", "bt-state wb-run-state", delegationStatus(rec).label));
+      tile.append(top);
+      tile.append(el("div", "wb-run-text", String(rec.message || "").slice(0, 240) || "（没有内容）"));
+      const foot = el("div", "wb-run-foot");
+      foot.append(el("span", "wb-run-time", fmtTime(rec.createdAt)));
+      const actions = el("div", "bt-actions");
+      actions.append(button("btn ghost", "详情", () => void deps.openDrawer(`派活 ${rec.id.slice(0, 12)}`, () => delegationDetail(rec))));
+      foot.append(actions);
+      tile.append(foot);
+      return tile;
+    }
 
     function paintApprovals() {
       approvals.replaceChildren();
@@ -307,7 +381,45 @@ export function createPanels({ client, deps }) {
     }
 
     void draw();
-    return { node: root, refresh: draw, repaint: paint };
+    void loadDelegations();
+    return {
+      node: root,
+      refresh: () => { void loadDelegations(); return draw(); },
+      repaint: () => { paint(); scheduleDelegations(); },
+    };
+  }
+
+  /* --------------------------- delegation detail -------------------------- */
+
+  function delegationDetail(rec) {
+    const root = el("div", "wb-detail");
+    const status = delegationStatus(rec);
+    const state = el("div", "wb-detail-state");
+    state.append(el("span", "bt-state", status.label));
+    root.append(state);
+    const facts = el("div", "wb-kv-list");
+    facts.append(
+      kv("派活号", rec.id),
+      kv("派活的", rec.fromName || rec.fromBotId),
+      kv("接手的", rec.targetName || rec.targetBotId),
+      kv("派出", fmtTime(rec.createdAt)),
+      kv("开跑", rec.startedAt ? fmtTime(rec.startedAt) : null),
+      kv("结束", rec.returnedAt ? fmtTime(rec.returnedAt) : null),
+      kv("交回", rec.deliveredAt ? fmtTime(rec.deliveredAt) : null),
+      kv("子任务", rec.childRunId),
+      kv("交回的任务", rec.wakeRunId),
+      kv("没交回的原因", rec.dropReason ? DROP_REASON_LABELS[rec.dropReason] ?? rec.dropReason : null),
+    );
+    root.append(facts);
+    root.append(section("派的活", el("div", "wb-pre", String(rec.message || ""))));
+    const result = rec.result;
+    if (result?.reply) root.append(section("交回的结果", el("div", "wb-pre", String(result.reply))));
+    if (result?.error) {
+      const err = el("div", "wb-error");
+      err.append(el("div", "wb-pending-title", "原因"), el("div", "bt-note", String(result.error)));
+      root.append(err);
+    }
+    return root;
   }
 
   /* ------------------------------ run detail ------------------------------ */

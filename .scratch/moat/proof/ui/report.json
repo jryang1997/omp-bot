@@ -1,0 +1,50 @@
+{
+  "checks": [
+    {
+      "name": "区块标题带数量",
+      "ok": true,
+      "detail": "助手之间派的活（5）"
+    },
+    {
+      "name": "dlg_queued 显示「排队中」",
+      "ok": true,
+      "detail": "dlg_drop=做完了，没交回 | dlg_intr=重启中断了，等着交回 | dlg_done=做完了，已交回 | dlg_running=在做 | dlg_queued=排队中"
+    },
+    {
+      "name": "dlg_running 显示「在做」",
+      "ok": true,
+      "detail": "dlg_drop=做完了，没交回 | dlg_intr=重启中断了，等着交回 | dlg_done=做完了，已交回 | dlg_running=在做 | dlg_queued=排队中"
+    },
+    {
+      "name": "dlg_done 显示「做完了，已交回」",
+      "ok": true,
+      "detail": "dlg_drop=做完了，没交回 | dlg_intr=重启中断了，等着交回 | dlg_done=做完了，已交回 | dlg_running=在做 | dlg_queued=排队中"
+    },
+    {
+      "name": "dlg_intr 显示「重启中断了，等着交回」",
+      "ok": true,
+      "detail": "dlg_drop=做完了，没交回 | dlg_intr=重启中断了，等着交回 | dlg_done=做完了，已交回 | dlg_running=在做 | dlg_queued=排队中"
+    },
+    {
+      "name": "dlg_drop 显示「做完了，没交回」",
+      "ok": true,
+      "detail": "dlg_drop=做完了，没交回 | dlg_intr=重启中断了，等着交回 | dlg_done=做完了，已交回 | dlg_running=在做 | dlg_queued=排队中"
+    },
+    {
+      "name": "详情写出没交回的原因",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "详情保留结果供用户查看",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "没有页面错误或失败请求",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "errors": []
+}
