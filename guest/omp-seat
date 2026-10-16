@@ -113,7 +113,7 @@ mount_workspace() {
     printf '%s\n' "$OMP_SHARE_KNOWN_HOSTS" > "$SHARE_DIR/known_hosts" )
   local want; want="$(share_target "$OMP_SHARE_WORKSPACE_KEY")"
   if mounted "$WORKSPACE_MNT"; then
-    if [ "$(cat "$SHARE_DIR/workspace.target" 2>/dev/null)" != "$want" ] || ! timeout 3 stat -t "$WORKSPACE_MNT/." >/dev/null 2>&1; then
+    if [ "$(cat "$SHARE_DIR/workspace.target" 2>/dev/null)" != "$want" ] || ! timeout -k 1 3 stat -t "$WORKSPACE_MNT/." >/dev/null 2>&1; then
       umount -l "$WORKSPACE_MNT" 2>/dev/null || fusermount3 -uz "$WORKSPACE_MNT" 2>/dev/null || true
     fi
   fi
@@ -158,7 +158,7 @@ mount_work() {
   local want; want="$(share_target "$OMP_SHARE_USER:$OMP_SHARE_KEY")"
   local mark="$SHARE_DIR/work-$user.target"
   if mounted "$mnt"; then
-    if [ "$(cat "$mark" 2>/dev/null)" != "$want" ] || ! as_user "$user" timeout 3 stat -t "$mnt/." >/dev/null 2>&1; then
+    if [ "$(cat "$mark" 2>/dev/null)" != "$want" ] || ! as_user "$user" timeout -k 1 3 stat -t "$mnt/." >/dev/null 2>&1; then
       umount -l "$mnt" 2>/dev/null || true
     fi
   fi
@@ -301,12 +301,12 @@ cmd_status() {
     home="$(home_of "$user")"
     running "$user" Xvfb && xvfb=1
     running "$user" "$SPACESD" && spacesd=1
-    if mounted "$home/work" && as_user "$user" timeout 3 stat -t "$home/work/." >/dev/null 2>&1; then work=1; fi
+    if mounted "$home/work" && as_user "$user" timeout -k 1 3 stat -t "$home/work/." >/dev/null 2>&1; then work=1; fi
   fi
   if [ "$xvfb" = 1 ] && [ "$spacesd" = 1 ]; then
     if [ -z "$port" ] || healthy "$port"; then ready=1; fi
   fi
-  if mounted "$WORKSPACE_MNT" && timeout 3 stat -t "$WORKSPACE_MNT/." >/dev/null 2>&1; then workspace=1; fi
+  if mounted "$WORKSPACE_MNT" && timeout -k 1 3 stat -t "$WORKSPACE_MNT/." >/dev/null 2>&1; then workspace=1; fi
   printf 'user=%s\nexists=%s\nhome=%s\nxvfb=%s\nspacesd=%s\nready=%s\nworkspace=%s\nwork=%s\n' \
     "$user" "$exists" "$home" "$xvfb" "$spacesd" "$ready" "$workspace" "$work"
 }

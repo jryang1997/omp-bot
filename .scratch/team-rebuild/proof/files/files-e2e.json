@@ -1,0 +1,56 @@
+{
+  "startedAt": "2026-10-16T03:41:32.347Z",
+  "host": {
+    "kernel": "6.18.49",
+    "sshfs": "fusermount3 version: 3.10.4"
+  },
+  "checks": [
+    {
+      "name": "两个座席起来后 /workspace 和各自的 ~/work 都挂上，SFTP 服务只听 127.0.0.1",
+      "port": 45729,
+      "mounts": [
+        "workspace@127.0.0.1:/ /srv/omp-share/workspace fuse.sshfs",
+        "bot_e2e_a@127.0.0.1:/ /home/omp-1d861fdfa3ec/work fuse.sshfs",
+        "bot_e2e_b@127.0.0.1:/ /home/omp-55bd5b3c8666/work fuse.sshfs"
+      ],
+      "listen": [
+        "0100007F:B2A1"
+      ]
+    },
+    {
+      "name": "宿主和客机双向即时可见：新建、改写变长、删除、建目录，写完马上读"
+    },
+    {
+      "name": "改名落盘：临时文件改名覆盖、宿主改名、目录改名"
+    },
+    {
+      "name": "并发追加不丢：两个座席和宿主各 200 行，共 600 行不重不丢",
+      "lines": 600,
+      "unique": 600
+    },
+    {
+      "name": "越出根被拒：宿主建的绝对和相对外链读不到，客机建不了外链，根内链接照常"
+    },
+    {
+      "name": "钥匙：自己的钥匙能登自己的根，登别的 bot 和 workspace 被拒，陌生钥匙被拒，钥匙文件 0400",
+      "wrongUser": "Connection closed"
+    },
+    {
+      "name": "~/work 只有这个 bot 能读写：别的座席和客机 root 都读不到"
+    },
+    {
+      "name": "/workspace 归 team 组：组内能写、chmod +x 能跑、git 能用，组外用户进不去"
+    },
+    {
+      "name": "服务随 omp-bot 启停：停着时查状态不卡、报不可用，重启后用回同一个端口，客机 sshfs 自己接上，再开座席不重挂",
+      "port": 45729,
+      "statusWhileDownMs": 43
+    },
+    {
+      "name": "停座席先卸 ~/work，另一个座席不受影响，宿主的文件都在，最后一个停掉关共享电脑",
+      "vmStops": 2
+    }
+  ],
+  "result": "10/10 PASS",
+  "finishedAt": "2026-10-16T03:42:05.292Z"
+}

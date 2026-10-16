@@ -189,7 +189,13 @@ class ShareSession {
       await fsp.symlink(target, real);
       sftp.status(id, STATUS_CODE.OK);
     });
-    sftp.on('end', () => this.#closeAll());
+    // 客户端发了 EOF（sftp 批处理结束、sshfs 卸载）就关掉通道，不然对方一直等
+    sftp.on('end', () => {
+      this.#closeAll();
+      try {
+        sftp.end();
+      } catch {}
+    });
     sftp.on('close', () => this.#closeAll());
   }
 

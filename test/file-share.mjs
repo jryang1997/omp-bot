@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, existsSync, statSync } from "node:fs";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFile, execFileSync } from "node:child_process";
+import { promisify } from "node:util";
 import ssh2 from "ssh2";
 import { FileShare, HOST_KEY_ALIAS, WORKSPACE_USER, probePort } from "../src/file-share.mjs";
 
@@ -255,6 +257,39 @@ test("坏掉的钥匙文件会重新生成", async () => {
   c.end();
   await share.close();
   rmSync(home, { recursive: true, force: true });
+});
+
+test("OpenSSH 的 sftp 客户端：批处理读写改名，结束后通道关掉不挂住", async () => {
+  let hasSftp = true;
+  try {
+    execFileSync("sftp", ["-V"], { stdio: "ignore" });
+  } catch (e) {
+    hasSftp = e?.code !== "ENOENT";
+  }
+  if (!hasSftp) {
+    console.log("      skip: 这台机器没有 OpenSSH sftp");
+    return;
+  }
+  const { home, roots, share } = setup();
+  const { port } = await share.start();
+  const key = join(home, "key");
+  const kh = join(home, "known_hosts");
+  writeFileSync(key, share.credentials("bot_a").privateKey, { mode: 0o600 });
+  writeFileSync(kh, `${share.knownHosts}\n`);
+  writeFileSync(join(home, "local.txt"), "from sftp\n");
+  const batch = join(home, "batch");
+  writeFileSync(batch, `put ${join(home, "local.txt")} up.txt\nrename up.txt moved.txt\nmkdir d\nls\n`);
+  const args = ["-b", batch, "-i", key, "-P", String(port), "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes",
+    "-o", "StrictHostKeyChecking=yes", "-o", `HostKeyAlias=${HOST_KEY_ALIAS}`, "-o", `UserKnownHostsFile=${kh}`, "bot_a@127.0.0.1"];
+  try {
+    const { stdout } = await promisify(execFile)("sftp", args, { timeout: 15_000, encoding: "utf8" });
+    assert.match(stdout, /moved\.txt/);
+    assert.equal(readFileSync(join(roots.bot_a, "moved.txt"), "utf8"), "from sftp\n");
+    assert.ok(statSync(join(roots.bot_a, "d")).isDirectory());
+  } finally {
+    await share.close();
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test("用户名不合法时不发钥匙", () => {
