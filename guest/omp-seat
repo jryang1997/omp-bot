@@ -1,0 +1,210 @@
+#!/usr/bin/env bash
+# omp-seat：共享电脑里的座席。由管理通道（客机里 root 运行的 cua-spacesd）调用，每个子命令都可以重复执行。
+#
+#   omp-seat up <用户> <屏幕号> <端口>   建用户，起屏幕和这个用户自己的 spacesd。令牌从环境变量 OMP_SEAT_TOKEN 读。
+#   omp-seat down <用户>                 停这个座席的全部进程，用户和主目录保留。
+#   omp-seat status <用户> [端口]        打印座席状态，一行一个 key=value。
+#   omp-seat count                       打印正在运行的座席数。
+#   omp-seat install-packages <包名>...  用 apt 装系统包。
+#
+# 每个座席是一个 Linux 用户，加入 team 组，主目录 0700，没有 sudo。
+# 屏幕只认这个用户自己的 X cookie。spacesd 用宿主生成的令牌，令牌文件只有这个用户能读，加 --quic-port 0。
+# OMP_SEAT_LISTEN 是 spacesd 的监听地址，默认 0.0.0.0，QEMU 的端口转发才连得上。
+set -euo pipefail
+umask 022
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+GROUP=team
+LISTEN="${OMP_SEAT_LISTEN:-0.0.0.0}"
+SCREEN="${OMP_SEAT_SCREEN:-1280x800x24}"
+SPACESD=cua-spacesd
+
+die() { echo "omp-seat: $1" >&2; exit "${2:-2}"; }
+
+check_user() {
+  [[ "$1" =~ ^omp-[a-z0-9][a-z0-9-]{0,27}$ ]] || die "座席用户名不合法：$1"
+}
+
+check_int() {
+  [[ "$1" =~ ^[0-9]{1,5}$ ]] || die "$2 必须是数字：$1"
+}
+
+user_exists() { id -u "$1" >/dev/null 2>&1; }
+
+home_of() { getent passwd "$1" | cut -d: -f6; }
+
+# 以座席用户身份运行，环境只留最少几项，不带 root 的 CUA_ENV_* 和令牌。
+as_user() {
+  local user="$1"; shift
+  local home; home="$(home_of "$user")"
+  runuser -u "$user" -- env -i HOME="$home" USER="$user" LOGNAME="$user" SHELL=/bin/bash \
+    PATH="$PATH" LANG="${LANG:-C.UTF-8}" "$@"
+}
+
+running() { user_exists "$1" && pgrep -u "$1" -x "$2" >/dev/null 2>&1; }
+
+healthy() {
+  curl -fsS -o /dev/null --max-time 1 "http://127.0.0.1:$1/health" 2>/dev/null
+}
+
+# 屏幕号的锁文件留着、进程却没了，就清掉，不然 Xvfb 起不来。
+clear_stale_display() {
+  local num="$1" lock="/tmp/.X$1-lock" pid
+  [ -e "$lock" ] || return 0
+  pid="$(tr -cd '0-9' < "$lock" || true)"
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then return 0; fi
+  rm -f "$lock" "/tmp/.X11-unix/X$num"
+}
+
+cmd_up() {
+  [ $# -eq 3 ] || die "用法：omp-seat up <用户> <屏幕号> <端口>"
+  local user="$1" num="$2" port="$3"
+  check_user "$user"; check_int "$num" 屏幕号; check_int "$port" 端口
+  local token="${OMP_SEAT_TOKEN:-}"
+  [[ "$token" =~ ^[A-Za-z0-9]{16,128}$ ]] || die "缺少令牌，或令牌格式不对（OMP_SEAT_TOKEN）"
+
+  getent group "$GROUP" >/dev/null || groupadd "$GROUP"
+  if ! user_exists "$user"; then
+    useradd -m -U -s /bin/bash -G "$GROUP" "$user"
+  fi
+  usermod -aG "$GROUP" "$user"
+  local g
+  for g in sudo wheel admin; do
+    if id -nG "$user" | tr ' ' '\n' | grep -qx "$g"; then gpasswd -d "$user" "$g" >/dev/null; fi
+  done
+  local home; home="$(home_of "$user")"
+  chmod 0700 "$home"
+
+  # 主目录里的文件都由这个用户自己写，root 不往用户可控的目录里写东西。
+  local changed
+  changed="$(printf '%s\n' "$token" | as_user "$user" bash -c '
+    set -euo pipefail
+    umask 077
+    mkdir -p "$HOME/work" "$HOME/.omp-seat"
+    chmod 0700 "$HOME/.omp-seat"
+    new="$(cat)"
+    if [ -f "$HOME/.omp-seat/token" ] && [ "$(cat "$HOME/.omp-seat/token")" = "$new" ]; then echo 0; exit 0; fi
+    printf "%s\n" "$new" > "$HOME/.omp-seat/token.new"
+    chmod 0400 "$HOME/.omp-seat/token.new"
+    mv -f "$HOME/.omp-seat/token.new" "$HOME/.omp-seat/token"
+    echo 1')"
+
+  if ! running "$user" Xvfb; then
+    clear_stale_display "$num"
+    as_user "$user" bash -c '
+      set -euo pipefail
+      num="$1"; screen="$2"
+      umask 077
+      xa="$HOME/.Xauthority"
+      rm -f "$xa"; touch "$xa"
+      xauth -q -f "$xa" add ":$num" . "$(mcookie)"
+      nohup Xvfb ":$num" -screen 0 "$screen" -dpi 96 -nolisten tcp -auth "$xa" -noreset \
+        > "$HOME/.omp-seat/xvfb.log" 2>&1 < /dev/null &
+      for _ in $(seq 100); do [ -S "/tmp/.X11-unix/X$num" ] && exit 0; sleep 0.1; done
+      echo "omp-seat: 屏幕 :$num 没有起来" >&2
+      tail -n 20 "$HOME/.omp-seat/xvfb.log" >&2 || true
+      exit 3' _ "$num" "$SCREEN"
+  fi
+
+  if command -v xfwm4 >/dev/null 2>&1 && ! running "$user" xfwm4; then
+    as_user "$user" bash -c '
+      DISPLAY=":$1" XAUTHORITY="$HOME/.Xauthority" nohup xfwm4 --compositor=off --sm-client-disable \
+        > "$HOME/.omp-seat/xfwm4.log" 2>&1 < /dev/null &' _ "$num"
+  fi
+
+  if [ "$changed" = 1 ] && running "$user" "$SPACESD"; then
+    pkill -u "$user" -x "$SPACESD" || true
+    for _ in $(seq 50); do running "$user" "$SPACESD" || break; sleep 0.1; done
+  fi
+  if ! running "$user" "$SPACESD"; then
+    as_user "$user" bash -c '
+      set -euo pipefail
+      num="$1"; listen="$2"; port="$3"; spacesd="$4"
+      DISPLAY=":$num" XAUTHORITY="$HOME/.Xauthority" nohup "$spacesd" serve --listen "$listen:$port" \
+        --token-file "$HOME/.omp-seat/token" --data-dir "$HOME/.omp-seat/spacesd" --no-mcp --quic-port 0 \
+        > "$HOME/.omp-seat/spacesd.log" 2>&1 < /dev/null &' _ "$num" "$LISTEN" "$port" "$SPACESD"
+  fi
+
+  for _ in $(seq 150); do
+    if healthy "$port" && running "$user" "$SPACESD"; then
+      cmd_status "$user" "$port"
+      return 0
+    fi
+    sleep 0.1
+  done
+  echo "omp-seat: $user 的 spacesd 没有在端口 $port 上应答" >&2
+  tail -n 20 "$home/.omp-seat/spacesd.log" >&2 2>/dev/null || true
+  exit 3
+}
+
+cmd_down() {
+  [ $# -eq 1 ] || die "用法：omp-seat down <用户>"
+  local user="$1"
+  check_user "$user"
+  if user_exists "$user"; then
+    pkill -TERM -u "$user" 2>/dev/null || true
+    for _ in $(seq 50); do pgrep -u "$user" >/dev/null 2>&1 || break; sleep 0.1; done
+    pkill -KILL -u "$user" 2>/dev/null || true
+    for _ in $(seq 30); do pgrep -u "$user" >/dev/null 2>&1 || break; sleep 0.1; done
+    if pgrep -u "$user" >/dev/null 2>&1; then
+      echo "omp-seat: $user 还有进程没停：$(pgrep -u "$user" | tr '\n' ' ')" >&2
+      exit 3
+    fi
+  fi
+  cmd_status "$user"
+}
+
+cmd_status() {
+  [ $# -ge 1 ] && [ $# -le 2 ] || die "用法：omp-seat status <用户> [端口]"
+  local user="$1" port="${2:-}"
+  check_user "$user"
+  [ -z "$port" ] || check_int "$port" 端口
+  local exists=0 xvfb=0 spacesd=0 ready=0 home=""
+  if user_exists "$user"; then
+    exists=1
+    home="$(home_of "$user")"
+    running "$user" Xvfb && xvfb=1
+    running "$user" "$SPACESD" && spacesd=1
+  fi
+  if [ "$xvfb" = 1 ] && [ "$spacesd" = 1 ]; then
+    if [ -z "$port" ] || healthy "$port"; then ready=1; fi
+  fi
+  printf 'user=%s\nexists=%s\nhome=%s\nxvfb=%s\nspacesd=%s\nready=%s\n' "$user" "$exists" "$home" "$xvfb" "$spacesd" "$ready"
+}
+
+cmd_count() {
+  [ $# -eq 0 ] || die "用法：omp-seat count"
+  local n=0 u members
+  members="$(getent group "$GROUP" | cut -d: -f4 | tr ',' ' ')"
+  for u in $members; do
+    [[ "$u" =~ ^omp- ]] || continue
+    if running "$u" "$SPACESD" || running "$u" Xvfb; then n=$((n + 1)); fi
+  done
+  echo "$n"
+}
+
+cmd_install_packages() {
+  [ $# -ge 1 ] || die "用法：omp-seat install-packages <包名>..."
+  local p
+  for p in "$@"; do
+    [[ "$p" =~ ^[a-z0-9][a-z0-9+.-]+$ ]] && [ "${#p}" -le 100 ] || die "包名不合法：$p"
+  done
+  command -v apt-get >/dev/null 2>&1 || die "这台电脑上没有 apt-get" 4
+  export DEBIAN_FRONTEND=noninteractive
+  mkdir -p /run/omp-seat
+  exec 9> /run/omp-seat/apt.lock
+  flock -w 600 9 || die "等 apt 锁超时" 4
+  apt-get update -q || echo "omp-seat: apt-get update 失败，继续用现有的软件源索引" >&2
+  apt-get install -y -q --no-install-recommends "$@"
+}
+
+[ "$(id -u)" = 0 ] || die "omp-seat 要以 root 运行（经管理通道调用）"
+cmd="${1:-}"; [ $# -gt 0 ] && shift
+case "$cmd" in
+  up) cmd_up "$@" ;;
+  down) cmd_down "$@" ;;
+  status) cmd_status "$@" ;;
+  count) cmd_count "$@" ;;
+  install-packages) cmd_install_packages "$@" ;;
+  *) die "未知子命令：${cmd:-（空）}。可用 up、down、status、count、install-packages" ;;
+esac
