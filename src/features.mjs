@@ -259,6 +259,8 @@ export class WorkbenchFeatures {
         return { ...this.native.browserStatus(botId, c.scope), capability: await this.native.browserCapability(botId, c.scope) };
       }),
 
+      R("GET", /^\/api\/computer\/shared-machine$/, async () => ({ machine: await this.computers.sharedMachine() })),
+      R("PUT", /^\/api\/computer\/shared-machine$/, async (c) => ({ machine: await this.computers.setSharedMachine(c.body ?? {}) })),
       R("GET", /^\/api\/bots\/([^/]+)\/computer$/, async (c) =>
         ({ computer: await this.computers.status(decodeURIComponent(c.params[0])) }),
       ),

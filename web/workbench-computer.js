@@ -100,13 +100,13 @@ export function createComputerView(bot, deps = {}) {
   const errorBox = el("div", "wb-computer-errors");
 
   const bindButton = button("btn ghost", "绑定电脑", () => void runAction(bindButton, {
-    label: "绑定中…", path: "bind", failure: "绑定失败", success: "已为本 Bot 创建并启动电脑",
+    label: "绑定中…", path: "bind", failure: "绑定失败", success: "已在共享电脑上为本 Bot 开好座席",
   }));
   const startButton = button("btn ghost", "启动", () => void runAction(startButton, {
     label: "启动中…", path: "start", failure: "启动失败", success: "电脑已启动",
   }));
   const stopButton = button("btn ghost", "停止", () => void runAction(stopButton, {
-    label: "停止中…", path: "stop", failure: "停止失败", success: "电脑已停止（磁盘内容保留）",
+    label: "停止中…", path: "stop", failure: "停止失败", success: "座席已停止（主目录里的文件保留）",
   }));
   const takeoverButton = button("btn ghost", "接管控制", () => void runAction(takeoverButton, {
     label: "接管中…", path: "takeover", failure: "接管失败", success: "已接管控制，输入会发送到这台电脑",
@@ -119,6 +119,68 @@ export function createComputerView(bot, deps = {}) {
   const desktopButton = button("btn ghost", "打开桌面", () => setDesktopOpen(!desktopOpen));
   const zoomButton = button("btn ghost", "放大", () => openZoom());
 
+  // 共享电脑规格：所有座席共用一台虚拟机，改了下次开机生效
+  let machine = null;
+  const cpuSelect = el("select");
+  cpuSelect.setAttribute("aria-label", "共享电脑 vCPU 个数");
+  const memorySelect = el("select");
+  memorySelect.setAttribute("aria-label", "共享电脑内存");
+  const machineNote = el("div", "bt-note");
+  const saveMachineButton = button("btn ghost", "保存规格", () => void saveMachine());
+  const machineActions = el("div", "bt-actions");
+  machineActions.append(cpuSelect, memorySelect, saveMachineButton);
+  const machineBox = el("div", "wb-machine");
+  machineBox.append(machineNote, machineActions);
+
+  function fillSelect(select, [min, max], value, unit) {
+    select.replaceChildren();
+    for (let n = min; n <= max; n += 1) {
+      const option = el("option", "", `${n} ${unit}`);
+      option.value = String(n);
+      if (n === value) option.selected = true;
+      select.append(option);
+    }
+  }
+
+  function paintMachine() {
+    if (!machine) {
+      machineNote.textContent = "正在读取共享电脑规格…";
+      machineActions.hidden = true;
+      return;
+    }
+    machineActions.hidden = false;
+    fillSelect(cpuSelect, machine.limits.cpus, machine.cpus, "vCPU");
+    fillSelect(memorySelect, machine.limits.memoryGb, machine.memoryGb, "GiB 内存");
+    machineNote.textContent = `现在是 ${machine.cpus} vCPU、${machine.memoryGb} GiB 内存、${machine.diskGb} GiB 动态磁盘。改了下次开机生效。`;
+  }
+
+  async function loadMachine() {
+    try {
+      const out = await api("/api/computer/shared-machine");
+      if (disposed) return;
+      machine = out?.machine ?? null;
+    } catch (error) {
+      if (disposed) return;
+      machine = null;
+      machineNote.textContent = `读不到共享电脑规格：${error.message}`;
+      machineActions.hidden = true;
+      return;
+    }
+    paintMachine();
+  }
+
+  async function saveMachine() {
+    const body = { cpus: Number(cpuSelect.value), memoryGb: Number(memorySelect.value) };
+    try {
+      const out = await busy(saveMachineButton, api("/api/computer/shared-machine", { method: "PUT", body }), "保存中…");
+      machine = out?.machine ?? machine;
+      paintMachine();
+      toast("规格已保存，共享电脑下次开机生效");
+    } catch (error) {
+      toast(`保存失败：${error.message}`, true);
+    }
+  }
+
   const powerActions = el("div", "bt-actions");
   powerActions.append(bindButton, startButton, stopButton);
   const controlActions = el("div", "bt-actions");
@@ -129,8 +191,9 @@ export function createComputerView(bot, deps = {}) {
     stateList,
     stateHint,
     errorBox,
-    row("电源", "绑定会为本 Bot 创建一台独立 Linux 电脑并启动；停止只关电源，电脑里的文件和浏览器登录都保留。", powerActions),
+    row("电源", "绑定会在共享电脑上给本 Bot 开一个座席：它自己的 Linux 用户、屏幕和主目录，看不到别的 Bot 的主目录。停止只停这个座席，文件都保留。最后一个座席停掉后共享电脑自动关机。", powerActions),
     row("控制", "接管后 Bot 的自动输入立即失效，你的鼠标和键盘直接操作这台电脑。每次接管或归还会更换控制代号，旧代号的输入会被拒绝，也不会重放。", controlActions),
+    row("共享电脑规格", "所有 Bot 的座席共用这一台电脑。vCPU 上限是本机核数减 2。", machineBox),
   );
 
 
@@ -226,7 +289,7 @@ export function createComputerView(bot, deps = {}) {
 
   function stateHintText(state) {
     if (!computer) return "正在读取电脑状态…";
-    if (!computer.bound) return "还没有绑定电脑。绑定会为本 Bot 创建一台独立 Linux 电脑，文件和登录都留在这台电脑里。";
+    if (!computer.bound) return "还没有绑定电脑。绑定会在共享电脑上给本 Bot 开一个座席，文件都留在它自己的主目录里。";
     if (state === "starting" || state === "stopping") return "正在切换电源，请稍候…";
     if (state === "running") {
       return canInput()
@@ -234,7 +297,9 @@ export function createComputerView(bot, deps = {}) {
         : "Bot 正在使用这台电脑；现在是只读预览，点「接管控制」才能操作。";
     }
     if (state === "error") return "电脑出错，可尝试重新启动；下方是服务端返回的错误。";
-    return "电脑已关机，电脑里的文件和浏览器登录都保留。点「启动」继续。";
+    return computer.vm?.state === "running"
+      ? "座席已停止，共享电脑还开着（别的 Bot 在用）。主目录里的文件都保留。点「启动」继续。"
+      : "座席已停止，共享电脑已关机。主目录里的文件都保留。点「启动」继续。";
   }
 
   function paint() {
@@ -259,9 +324,10 @@ export function createComputerView(bot, deps = {}) {
       stateList.append(kv("控制方", HOLDER_LABELS[computer.holder] || (computer.bound ? "无" : "—")));
       if (computer.bound) {
         stateList.append(kv("电脑编号", computer.id || "—"));
-        stateList.append(kv("系统", `${computer.os === "linux" ? "Linux" : computer.os || "未知"}${computer.kind === "vm" ? " 虚拟机" : ""}`));
+        stateList.append(kv("系统", `${computer.os === "linux" ? "Linux" : computer.os || "未知"}${computer.kind === "vm" ? " 共享电脑的座席" : ""}`));
+        if (computer.vm) stateList.append(kv("共享电脑", STATE_LABELS[computer.vm.state] || computer.vm.state || "未知"));
         stateList.append(kv("分辨率", computer.display ? `${computer.display.width} × ${computer.display.height}` : "未知"));
-        stateList.append(kv("数据", computer.persistent ? "保留（停止后文件与登录仍在）" : "不保留"));
+        stateList.append(kv("数据", computer.persistent ? "保留（停止后主目录里的文件仍在）" : "不保留"));
         stateList.append(kv("控制代号", Number.isFinite(computer.generation) ? String(computer.generation) : "—"));
       }
     }
@@ -687,8 +753,10 @@ export function createComputerView(bot, deps = {}) {
   }
 
   paint();
+  paintMachine();
   pollTimer = setInterval(tick, POLL_MS);
   void loadState();
+  void loadMachine();
   void loadBotArtifacts();
 
   return { node: root, dispose };

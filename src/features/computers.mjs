@@ -256,6 +256,16 @@ const PUBLISH_SCHEMA = {
   additionalProperties: false,
 };
 
+function publicMachine(spec) {
+  return {
+    cpus: spec.cpus,
+    memoryGb: spec.memoryGb,
+    diskGb: spec.diskGb,
+    limits: { cpus: [...spec.limits.cpus], memoryGb: [...spec.limits.memoryGb] },
+    appliesOn: "next_boot",
+  };
+}
+
 export class Computers {
   /**
    * @param {object} deps
@@ -489,6 +499,22 @@ export class Computers {
     } catch (e) {
       this.orch.emit?.("computer_state_persist_failed", { computerId: ctrl.computerId, error: e?.message ?? String(e) });
       return false;
+    }
+  }
+
+  /** 共享电脑规格：存在 <home>/computers/shared-machine.json，下次开机生效。 */
+  async sharedMachine() {
+    const { readSharedMachine } = await import("../computer-seats.mjs");
+    return publicMachine(readSharedMachine(this.home));
+  }
+
+  async setSharedMachine(body = {}) {
+    const { writeSharedMachine } = await import("../computer-seats.mjs");
+    try {
+      return publicMachine(writeSharedMachine(this.home, { cpus: body?.cpus, memoryGb: body?.memoryGb }));
+    } catch (e) {
+      if (e?.code === "computer_invalid_argument") throw ferr(400, "invalid_field", e.message);
+      throw e;
     }
   }
 
