@@ -4,13 +4,21 @@
 
 **Blocked by:** 01
 
-**Status:** in progress
+**Status:** done
 
 - [x] 调研 Paseo 的 handoff 技能，定最短接法
 - [x] delegate_bot 教会写交接简报（工具说明 + 人设）
 - [x] delegate_bot 加 `acceptance`：存进派活记录，开跑时给对方，交回时带回来让派活方逐条核对
 - [x] 工作台显示验收标准
-- [ ] 变异测试
+- [x] 变异测试
+
+落地记录：
+
+- c8c8278：`delegate_bot` 的 `message` 说明改成交接简报（任务、背景、相关文件、现状、试过什么、决定、约束，任务性质原样带过去），工具说明加"先用 list_bots 按角色挑人"，人设加一句"对方看不到你的对话"。`message_bot` 同样受这句人设约束。
+- d67052e：`acceptance` 可选字符串数组，最多 10 条、每条 300 字，去空白空行，不合规当场拒绝、不记派活。存进派活记录，重启后排队的照样带着。开跑时附在简报后面让对方逐条交代；交回时原样带回，提示派活方按清单逐条核对。不带就和原来一字不差。
+- 4e480e9：工作台派活详情加"验收标准"一节，截图检查 `proof/ui/shot-handoff.mjs` 5/5。
+- 测试：`test/delegation.mjs` 加 5 条（共 17 条）。变异 `proof/mutate-07.py` 12/12 抓到。
+- skip: 用真实模型验证简报写得好不好（没有可用的真实模型账号；结构靠工具说明约束，交回时有验收清单兜底）
 
 调研（getpaseo/paseo `skills/paseo-handoff/SKILL.md`）：
 
