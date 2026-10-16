@@ -1,8 +1,0 @@
-#!/bin/sh
-branch=$(git symbolic-ref --short HEAD 2>/dev/null) || exit 0
-[ "$branch" = master ] && exit 0
-if timeout 120 git push -q origin "HEAD:refs/heads/$branch" 2>/tmp/post-commit-push.err; then
-  echo "post-commit: pushed $(git rev-parse --short HEAD) to origin/$branch"
-else
-  echo "post-commit: PUSH FAILED for $branch, see /tmp/post-commit-push.err" >&2
-fi
