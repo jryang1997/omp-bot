@@ -71,22 +71,50 @@ const SEAT_DOWN_TIMEOUT_MS = 30_000;
 const MANAGE_TIMEOUT_MS = 30_000;
 const SEAT_HEALTH_WAIT_MS = 15_000;
 const INSTALL_TIMEOUT_MS = 15 * 60_000;
-const LOGIN_BROWSER_TIMEOUT_MS = 30_000;
+const LOGIN_BROWSER_TIMEOUT_MS = 45_000;
 const BROWSER_PROCESS = "'chromium|chrome'";
 // 登录屏的浏览器：已经开着就不再开。setsid 让它脱离这条命令，命令结束浏览器还在。
+// 窗口出现后给它键盘焦点，用户第一下按键就落在浏览器里（没有窗口管理器时点击不会给焦点）
+const LOGIN_BROWSER_FOCUS = [
+  'focus() {',
+  '  command -v xdotool >/dev/null 2>&1 || return 0',
+  '  for _ in $(seq 50); do',
+  '    w="$(xdotool search --onlyvisible --class chrom 2>/dev/null | tail -n 1)"',
+  '    if [ -n "$w" ]; then xdotool windowactivate "$w" 2>/dev/null || xdotool windowfocus "$w" 2>/dev/null || true; return 0; fi',
+  '    sleep 0.2',
+  '  done',
+  '}',
+].join('\n');
 const LOGIN_BROWSER_OPEN = [
-  `if pgrep -u "$(id -u)" -x ${BROWSER_PROCESS} >/dev/null; then echo running; exit 0; fi`,
+  LOGIN_BROWSER_FOCUS,
+  `if pgrep -u "$(id -u)" -x ${BROWSER_PROCESS} >/dev/null; then focus; echo running; exit 0; fi`,
   'mkdir -p "$HOME/.omp-seat"',
   'setsid -f chromium --no-first-run --no-default-browser-check --start-maximized about:blank > "$HOME/.omp-seat/chromium.log" 2>&1 < /dev/null',
-  `for _ in $(seq 100); do pgrep -u "$(id -u)" -x ${BROWSER_PROCESS} >/dev/null && { echo started; exit 0; }; sleep 0.1; done`,
+  `for _ in $(seq 100); do pgrep -u "$(id -u)" -x ${BROWSER_PROCESS} >/dev/null && { focus; echo started; exit 0; }; sleep 0.1; done`,
   'echo "浏览器没有起来" >&2; tail -n 20 "$HOME/.omp-seat/chromium.log" >&2; exit 1',
 ].join('\n');
-// 正常关掉浏览器，它退出前才把 cookie 全部写进磁盘
-const LOGIN_BROWSER_CLOSE = [
+// 正常退出浏览器，它退出前才把 cookie 全部写进磁盘。Chromium 收到 SIGTERM 不写，只靠每 30 秒一次的定时写入，
+// 刚登录就点「完成」会丢掉这次登录。所以先在每个窗口上按关窗键（Ctrl+Shift+W），最后一个窗口关掉浏览器就正常退出，
+// 退不掉才发 SIGTERM。沙盒实测 Chromium 153：SIGTERM 后库里没有刚登录的 cookie，Ctrl+Shift+W 后有，Ctrl+Shift+Q 和 chrome://quit 没反应。
+export const BROWSER_QUIT = [
+  `alive() { pgrep -u "$(id -u)" -x ${BROWSER_PROCESS} >/dev/null; }`,
+  'wait_gone() { for _ in $(seq "$1"); do alive || return 0; sleep 0.1; done; return 1; }',
+  'alive || exit 0',
+  'if command -v xdotool >/dev/null 2>&1 && [ -n "$DISPLAY" ]; then',
+  '  for _ in $(seq 20); do',
+  '    w="$(xdotool search --onlyvisible --class chrom 2>/dev/null | tail -n 1)"',
+  '    [ -n "$w" ] || break',
+  '    xdotool windowactivate "$w" 2>/dev/null || xdotool windowfocus "$w" 2>/dev/null || true',
+  '    xdotool key --clearmodifiers ctrl+shift+w 2>/dev/null || true',
+  '    wait_gone 5 && exit 0',
+  '  done',
+  '  wait_gone 150 && exit 0',
+  'fi',
   `pkill -TERM -u "$(id -u)" -x ${BROWSER_PROCESS} || true`,
-  `for _ in $(seq 200); do pgrep -u "$(id -u)" -x ${BROWSER_PROCESS} >/dev/null || exit 0; sleep 0.1; done`,
-  'echo "浏览器 20 秒内没有关掉" >&2; exit 1',
+  'wait_gone 200 && exit 0',
+  'echo "浏览器 35 秒内没有关掉" >&2; exit 1',
 ].join('\n');
+const LOGIN_BROWSER_CLOSE = BROWSER_QUIT;
 const OUTPUT_TAIL = 1_500;
 
 function fail(code, message) {
