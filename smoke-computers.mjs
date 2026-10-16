@@ -60,7 +60,7 @@ async function waitFor(fn, deadlineMs = 30_000) {
   throw new Error(`Smoke condition did not settle within ${deadlineMs}ms`);
 }
 async function command(id, text, tag, timeoutMs = 30_000) {
-  const output = await backend.run(id, { command: text, cwd: "/work", timeoutMs, tag: `smoke-${suffix}-${tag}` });
+  const output = await backend.run(id, { command: text, cwd: "~/work", timeoutMs, tag: `smoke-${suffix}-${tag}` });
   assert.equal(output.exitCode, 0, `${tag}: ${output.stderr}`);
   return output.stdout;
 }
@@ -88,15 +88,15 @@ async function screenshot(botId, name) {
   return size;
 }
 async function browserProof(id, browser, profile, html, tag) {
-  await command(id, `mkdir -p /work/browser-proof; printf '%s' ${quote(Buffer.from(html).toString("base64"))} | base64 -d > /work/browser-proof/index.html`, `${tag}-page`);
+  await command(id, `mkdir -p ~/work/browser-proof; printf '%s' ${quote(Buffer.from(html).toString("base64"))} | base64 -d > ~/work/browser-proof/index.html`, `${tag}-page`);
   const controller = new AbortController();
   const serving = backend.run(id, {
-    command: "python3 -m http.server 8767 --bind 127.0.0.1 --directory /work/browser-proof",
-    cwd: "/work", timeoutMs: 90_000, tag: `smoke-${suffix}-${tag}-http`,
+    command: "python3 -m http.server 8767 --bind 127.0.0.1 --directory ~/work/browser-proof",
+    cwd: "~/work", timeoutMs: 90_000, tag: `smoke-${suffix}-${tag}-http`,
   }, { signal: controller.signal }).catch((error) => ({ stopped: error.code ?? error.name }));
   try {
     await waitFor(async () => {
-      const result = await backend.run(id, { command: "curl -fsS http://127.0.0.1:8767/ >/dev/null", cwd: "/work", timeoutMs: 3000, tag: `smoke-${suffix}-${tag}-ready` });
+      const result = await backend.run(id, { command: "curl -fsS http://127.0.0.1:8767/ >/dev/null", cwd: "~/work", timeoutMs: 3000, tag: `smoke-${suffix}-${tag}-ready` });
       return result.exitCode === 0;
     });
     return await command(id, `${quote(browser)} --headless --no-sandbox --disable-dev-shm-usage --no-first-run --no-default-browser-check --user-data-dir=${quote(profile)} --virtual-time-budget=1500 --dump-dom http://127.0.0.1:8767/`, `${tag}-browser`, 45_000);
@@ -128,12 +128,12 @@ try {
 
   const markerA = `VIZ_A_${randomBytes(3).toString("hex")}.txt`;
   const markerB = `VIZ_B_${randomBytes(3).toString("hex")}.txt`;
-  await command(pcA.id, `mkdir -p /home/cua/Desktop; printf A > ${quote(`/home/cua/Desktop/${markerA}`)}`, "visual-a");
-  await command(pcB.id, `mkdir -p /home/cua/Desktop; printf B > ${quote(`/home/cua/Desktop/${markerB}`)}`, "visual-b");
+  await command(pcA.id, `mkdir -p ~/Desktop; printf A > ~/Desktop/${quote(markerA)}`, "visual-a");
+  await command(pcB.id, `mkdir -p ~/Desktop; printf B > ~/Desktop/${quote(markerB)}`, "visual-b");
   await sleep(1200);
   const attachmentText = `A-COMPUTER-ISOLATION-${suffix}\n`;
   const attachment = (await okPost("/api/attachments", { botId: a.id, filename: "source.txt", mime: "text/plain", dataBase64: Buffer.from(attachmentText).toString("base64") })).attachment;
-  const runA = await startRun(a.id, "先且只能用 computer_screenshot 读取桌面新增的 VIZ_ 开头文件名，逐字答出完整文件名。随后用 computer_shell 读取本次附件，把附件正文原样复制到 /work/output-a.txt，并用 computer_publish_file 发布该文件。不要使用本机工具。", { attachmentIds: [attachment.id] });
+  const runA = await startRun(a.id, "先且只能用 computer_screenshot 读取桌面新增的 VIZ_ 开头文件名，逐字答出完整文件名。随后用 computer_shell 读取本次附件，把附件正文原样复制到 ~/work/output-a.txt，并用 computer_publish_file 发布该文件。不要使用本机工具。", { attachmentIds: [attachment.id] });
   const doneA = await finished(runA.id);
   assert.equal(doneA.state, "completed", JSON.stringify(doneA.error));
   assert.ok(doneA.reply?.includes(markerA), `模型未读取截图中的随机文件名: ${doneA.reply}`);
@@ -150,16 +150,19 @@ try {
   const capsA = (await api(`/api/bots/${a.id}/native/capabilities`)).data;
   const names = capsA.tools?.names;
   assert.ok(Array.isArray(names), JSON.stringify(capsA.tools));
-  for (const name of ["computer_screenshot", "computer_input", "computer_shell", "computer_files", "computer_upload_attachment", "computer_publish_file"]) assert.ok(names.includes(name), `实际工具清单缺少 ${name}`);
+  for (const name of ["computer_screenshot", "computer_input", "computer_shell", "computer_files", "computer_upload_attachment", "computer_install_packages", "computer_publish_file"]) assert.ok(names.includes(name), `实际工具清单缺少 ${name}`);
   for (const name of ["bash", "read"]) assert.ok(names.includes(name), `本机工具 ${name} 不应因绑定电脑消失`);
   pass("真实 dumpTools 里本机工具和共享电脑工具都在", { tools: names });
 
-  const runB = await startRun(b.id, "先用 computer_screenshot 读取桌面新增的 VIZ_ 文件完整名称，文件名必须仅从截图识别。随后只用自己的 computer_shell 检查 /work/output-a.txt 不存在，存在就报告失败。最终回复严格两行：第一行是从截图识别的完整文件名；第二行是 ISOLATED_B。禁止使用其他 Bot 的电脑或本机工具。");
+  const runB = await startRun(b.id, "先用 computer_screenshot 读取桌面新增的 VIZ_ 文件完整名称，文件名必须仅从截图识别。随后只用自己的 computer_shell 检查 ~/work/output-a.txt 不存在，存在就报告失败。最终回复严格两行：第一行是从截图识别的完整文件名；第二行是 ISOLATED_B。禁止使用其他 Bot 的电脑或本机工具。");
   const doneB = await finished(runB.id);
   assert.equal(doneB.state, "completed", JSON.stringify(doneB.error));
   assert.ok(doneB.reply?.includes(markerB), `第二台电脑的最终回复未包含截图文件名: ${doneB.reply}`);
   assert.ok(doneB.reply?.includes("ISOLATED_B"));
-  assert.equal(await command(pcB.id, "test ! -e /work/output-a.txt && printf ISOLATED_B", "isolation-b"), "ISOLATED_B");
+  // 共享电脑上隔离靠 Linux 用户：B 读不到 A 的主目录
+  const homeA = (await command(pcA.id, "printf %s \"$HOME\"", "home-a")).trim();
+  assert.match(homeA, /^\/home\/omp-[0-9a-f]{12}$/);
+  assert.equal(await command(pcB.id, `test ! -e ~/work/output-a.txt && ! ls ${quote(homeA)} >/dev/null 2>&1 && ! cat ${quote(`${homeA}~/work/output-a.txt`)} >/dev/null 2>&1 && printf ISOLATED_B`, "isolation-b"), "ISOLATED_B");
   const foreign = await startRun(b.id, "读取附件", { attachmentIds: [attachment.id] });
   const foreignDone = await finished(foreign.id);
   assert.equal(foreignDone.state, "failed");
@@ -168,9 +171,9 @@ try {
   const humanB = (await okPost(`${pathB}/takeover`)).computer;
   await okPost(`${pathB}/input`, { generation: humanB.generation, action: "key", key: "ctrl+alt+t" });
   await waitFor(async () => (JSON.parse(await (await backend.guest(pcB.id)).callJson('WindowsService/ListWindows', '{}')).windows ?? []).some(window => window.focused && /terminal/i.test(window.app?.appId ?? window.app?.name ?? '')));
-  await okPost(`${pathB}/input`, { generation: humanB.generation, action: "type", text: "printf B-DESKTOP-INPUT > /work/human-b.txt" });
+  await okPost(`${pathB}/input`, { generation: humanB.generation, action: "type", text: "printf B-DESKTOP-INPUT > ~/work/human-b.txt" });
   await okPost(`${pathB}/input`, { generation: humanB.generation, action: "key", key: "Enter" });
-  await waitFor(async () => (await command(pcB.id, "cat /work/human-b.txt 2>/dev/null || true", "human-b-proof")) === "B-DESKTOP-INPUT");
+  await waitFor(async () => (await command(pcB.id, "cat ~/work/human-b.txt 2>/dev/null || true", "human-b-proof")) === "B-DESKTOP-INPUT");
   await okPost(`${pathB}/input`, { generation: humanB.generation, action: "click", x: 50, y: 12, button: "left" });
   await screenshot(b.id, "smoke-human-b");
   await okPost(`${pathB}/release`, { generation: humanB.generation });
@@ -182,9 +185,9 @@ try {
   await okPost(`${pathA}/input`, { generation: human.generation, action: "key", key: "ctrl+alt+t" });
   await waitFor(async () => (JSON.parse(await (await backend.guest(pcA.id)).callJson('WindowsService/ListWindows', '{}')).windows ?? []).some(window => window.focused && /terminal/i.test(window.app?.appId ?? window.app?.name ?? '')));
   const humanText = "电脑接管输入验证";
-  await okPost(`${pathA}/input`, { generation: human.generation, action: "type", text: `printf '%s' '${humanText}' > /work/human-input.txt` });
+  await okPost(`${pathA}/input`, { generation: human.generation, action: "type", text: `printf '%s' '${humanText}' > ~/work/human-input.txt` });
   await okPost(`${pathA}/input`, { generation: human.generation, action: "key", key: "Enter" });
-  await waitFor(async () => (await command(pcA.id, "cat /work/human-input.txt 2>/dev/null || true", "human-proof")) === humanText);
+  await waitFor(async () => (await command(pcA.id, "cat ~/work/human-input.txt 2>/dev/null || true", "human-proof")) === humanText);
   await screenshot(a.id, "smoke-human-input");
   await okPost(`${pathA}/input`, { generation: human.generation, action: "click", x: 50, y: 12, button: "left" });
   await screenshot(a.id, "smoke-human-click");
@@ -194,31 +197,31 @@ try {
 
   const controller = new AbortController();
   const sleeping = backend.run(pcA.id, {
-    command: "echo $$ > /work/cancel-parent.pid; sleep 300 & echo $! > /work/cancel-child.pid; wait",
-    cwd: "/work", timeoutMs: 310_000, tag: `smoke-${suffix}-cancel-tree`,
+    command: "echo $$ > ~/work/cancel-parent.pid; sleep 300 & echo $! > ~/work/cancel-child.pid; wait",
+    cwd: "~/work", timeoutMs: 310_000, tag: `smoke-${suffix}-cancel-tree`,
   }, { signal: controller.signal }).then((value) => ({ value }), (error) => ({ error: { code: error.code, name: error.name, message: error.message } }));
-  await waitFor(async () => (await command(pcA.id, "test -s /work/cancel-child.pid && printf READY || true", "cancel-ready")) === "READY");
+  await waitFor(async () => (await command(pcA.id, "test -s ~/work/cancel-child.pid && printf READY || true", "cancel-ready")) === "READY");
   controller.abort();
   const cancelled = await Promise.race([sleeping, sleep(20_000).then(() => { throw new Error("客机取消未在期限内返回"); })]);
   assert.notEqual(cancelled.error?.code, "computer_effect_unknown", JSON.stringify(cancelled));
   await waitFor(async () => {
-    const stat = await command(pcA.id, 'ps -o stat= -p "$(cat /work/cancel-child.pid)" 2>/dev/null || true', "cancel-child-state");
+    const stat = await command(pcA.id, 'ps -o stat= -p "$(cat ~/work/cancel-child.pid)" 2>/dev/null || true', "cancel-child-state");
     return !stat.trim() || /^[ZX]/.test(stat.trim());
   });
   pass("取消真正终止客机 sleep 300 子进程", cancelled);
-  const appLong = await startRun(a.id, "仅使用 computer_shell 执行 echo $$ > /work/app-cancel-parent.pid; sleep 300 & echo $! > /work/app-cancel-child.pid; wait。不要设短超时，等待这条命令运行结束，不调用其他工具。 ");
-  await waitFor(async () => (await command(pcA.id, "test -s /work/app-cancel-child.pid && printf READY || true", "app-cancel-ready")) === "READY", 120_000);
+  const appLong = await startRun(a.id, "仅使用 computer_shell 执行 echo $$ > ~/work/app-cancel-parent.pid; sleep 300 & echo $! > ~/work/app-cancel-child.pid; wait。不要设短超时，等待这条命令运行结束，不调用其他工具。 ");
+  await waitFor(async () => (await command(pcA.id, "test -s ~/work/app-cancel-child.pid && printf READY || true", "app-cancel-ready")) === "READY", 120_000);
   const room = (await okPost("/api/rooms", { name: `Computer scope ${suffix}`, members: [a.id], adminId: a.id, mode: "admin" })).room;
   const beforeRoom = server.orch.ledger.lastSeq();
-  const roomAttempt = await startRun(undefined, "使用 computer_shell 执行 printf ILLEGAL_ROOM_INPUT > /work/room-cross-scope.txt，然后报告结果。", { roomId: room.id });
+  const roomAttempt = await startRun(undefined, "使用 computer_shell 执行 printf ILLEGAL_ROOM_INPUT > ~/work/room-cross-scope.txt，然后报告结果。", { roomId: room.id });
   const roomDone = await finished(roomAttempt.id);
   assert.ok(server.orch.ledger.eventsSince(beforeRoom, { limit: 1000 }).some(event => event.type === "room_turn_error" && event.roomId === room.id));
-  assert.equal(await command(pcA.id, "test ! -e /work/room-cross-scope.txt && printf ROOM_INPUT_REJECTED", "room-input-rejected"), "ROOM_INPUT_REJECTED");
+  assert.equal(await command(pcA.id, "test ! -e ~/work/room-cross-scope.txt && printf ROOM_INPUT_REJECTED", "room-input-rejected"), "ROOM_INPUT_REJECTED");
   assert.equal((await api(pathA)).data.computer.holder, "agent");
   const takeoverDuringRun = (await okPost(`${pathA}/takeover`)).computer;
   assert.equal(takeoverDuringRun.holder, "human");
   await waitFor(async () => {
-    const state = await command(pcA.id, 'ps -o stat= -p "$(cat /work/app-cancel-child.pid)" 2>/dev/null || true', "takeover-kill-confirm");
+    const state = await command(pcA.id, 'ps -o stat= -p "$(cat ~/work/app-cancel-child.pid)" 2>/dev/null || true', "takeover-kill-confirm");
     return !state.trim() || /^[ZX]/.test(state.trim());
   });
   await okPost(`/api/runs/${appLong.id}/cancel`);
@@ -236,7 +239,7 @@ try {
   await okPost(`${pathA}/stop`);
   assert.equal((await api(pathA)).data.computer.state, "stopped");
   await okPost(`${pathA}/start`);
-  assert.equal(await command(pcA.id, "cat /work/output-a.txt", "persisted-work"), attachmentText);
+  assert.equal(await command(pcA.id, "cat ~/work/output-a.txt", "persisted-work"), attachmentText);
   assert.ok((await browserProof(pcA.id, browser, profile, page, "profile-after")).includes(`<p id="proof">${browserMarker}</p>`));
   pass("停启保留客机工作文件与真实 Chromium 浏览器 localStorage", { browser, profile, browserMarker });
 
@@ -275,7 +278,7 @@ try {
   backend = await server.orch.features.computers.ensureBackend();
   const rebound = (await okPost(`${pathA}/start`)).computer;
   assert.equal(rebound.id, pcA.id);
-  assert.equal(await command(pcA.id, "cat /work/output-a.txt", "service-reconnect"), attachmentText);
+  assert.equal(await command(pcA.id, "cat ~/work/output-a.txt", "service-reconnect"), attachmentText);
   pass("编排服务重启后恢复同一绑定与持久磁盘", { computerId: rebound.id });
   proof.status = "PASS";
 } catch (error) {
