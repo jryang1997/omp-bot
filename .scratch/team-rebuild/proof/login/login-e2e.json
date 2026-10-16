@@ -1,0 +1,70 @@
+{
+  "ticket": "09-shared-login",
+  "chromium": "Google Chrome for Testing 153.0.8010.12",
+  "startedAt": "2026-10-16T04:12:25.612Z",
+  "steps": {
+    "botAOwnLogin": "logged-in:bot-a-own",
+    "userLogsInOnLoginScreen": "logged-in:alice",
+    "publish": "published",
+    "parallel": [
+      "logged-in:alice",
+      "logged-in:alice"
+    ],
+    "syncWhileRunning": "profile in use, skipped",
+    "botAOwnLoginKept": "logged-in:bot-a-own",
+    "afterRestart": [
+      "logged-in:alice",
+      "logged-in:alice"
+    ],
+    "localClearInA": [
+      "anonymous",
+      "logged-in:alice"
+    ],
+    "serverLogoutInB": "logged-out",
+    "afterServerLogout": [
+      "anonymous",
+      "anonymous"
+    ],
+    "afterRelogin": [
+      "logged-in:alice",
+      "logged-in:alice"
+    ]
+  },
+  "checks": [
+    {
+      "name": "开机补装：登录脚本和浏览器钩子就是仓库里那两份，钩子 root:root 0644"
+    },
+    {
+      "name": "登录屏：打开就有浏览器，用户经输入接口登录，「完成」关浏览器、发布、停登录屏",
+      "publishedAt": "2026-10-16T04:12:29.507Z"
+    },
+    {
+      "name": "共享库 /var/lib/omp-login 归 root:team，目录 0750、文件 0640，bot 能读不能写"
+    },
+    {
+      "name": "两个 bot 同时开浏览器都是登录状态，自己别的网站的登录还在；钩子带 basic 和 256 MiB，以 bot 身份同步，浏览器开着时跳过",
+      "args": "/usr/local/bin/chromium --no-sandbox --disable-gpu --disable-background-networking --disable-sync --disable-component-update --user-data-dir=/home/omp-33a858b7687a/.config/chromium --password-store=basic --disk-cache-size=268435456 --no-first-run --no-default-browser-check http://127.0.0.1:18091/"
+    },
+    {
+      "name": "关掉再开登录还在；本地清 cookie 只影响自己；点网站退出会让大家掉线；登录屏重登一次大家都恢复"
+    },
+    {
+      "name": "结论和 02 号票的 proof.json 逐条一致",
+      "compared": [
+        "botAOwnLogin",
+        "userLogsInOnLoginScreen",
+        "publish",
+        "parallel",
+        "botAOwnLoginKept",
+        "syncWhileRunning",
+        "afterRestart",
+        "localClearInA",
+        "serverLogoutInB",
+        "afterServerLogout",
+        "afterRelogin"
+      ]
+    }
+  ],
+  "result": "6/6 PASS",
+  "finishedAt": "2026-10-16T04:12:40.668Z"
+}
