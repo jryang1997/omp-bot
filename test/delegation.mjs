@@ -375,5 +375,94 @@ await test("派活教模型写交接简报：工具说明讲清对方看不到�
   }
 });
 
+await test("带验收标准派活：对方看到清单，交回原样带回让派活方逐条核对", async () => {
+  const t = newTeam();
+  try {
+    const { a, b, fa, fb } = await pair(t);
+    fb.queue = [{ kind: "complete", text: "周报在 work/weekly.md，三条风险都带了出处" }];
+    const acceptance = ["  周报在 work/weekly.md ", "", "列出三条风险，每条带出处"];
+    fa.queue = [{ kind: "tool", tool: "delegate_bot", args: { to: b.name, message: "写周报", acceptance } }];
+    await t.orch.waitRun(t.orch.startRun({ botId: a.id, text: "派周报" }).id);
+    const rec = await waitFor(() => dlgs(t.orch).find((d) => d.delivery === "delivered"), { label: "已交回" });
+    assert.deepEqual(rec.acceptance, ["周报在 work/weekly.md", "列出三条风险，每条带出处"], "去空白、去空行后存进派活记录");
+    assert.equal(
+      body(fb.calls[0].text),
+      "写周报\n\n验收标准（做完逐条说明满足没有，没满足的写清原因）：\n- [ ] 周报在 work/weekly.md\n- [ ] 列出三条风险，每条带出处",
+    );
+    const wake = await t.orch.waitRun(rec.wakeRunId);
+    assert.match(wake.text, /原任务：写周报\n验收标准：\n- \[ \] 周报在 work\/weekly\.md\n- \[ \] 列出三条风险，每条带出处\n/);
+    assert.match(wake.text, /请按上面的验收标准逐条核对/);
+  } finally {
+    await t.cleanup();
+  }
+});
+
+await test("不带验收标准：对方只收到简报原文，交回照旧", async () => {
+  const t = newTeam();
+  try {
+    const { a, b, fa, fb } = await pair(t);
+    fb.queue = [{ kind: "complete", text: "好了" }];
+    fa.queue = [{ kind: "tool", tool: "delegate_bot", args: { to: b.name, message: "写周报", acceptance: [" ", ""] } }];
+    await t.orch.waitRun(t.orch.startRun({ botId: a.id, text: "派周报" }).id);
+    const rec = await waitFor(() => dlgs(t.orch).find((d) => d.delivery === "delivered"), { label: "已交回" });
+    assert.equal(rec.acceptance, undefined);
+    assert.equal(body(fb.calls[0].text), "写周报");
+    const wake = await t.orch.waitRun(rec.wakeRunId);
+    assert.doesNotMatch(wake.text, /验收标准/);
+    assert.match(wake.text, /请验收：结果不对就再派或自己补上/);
+  } finally {
+    await t.cleanup();
+  }
+});
+
+await test("验收标准不合规：当场拒绝，不记派活、不开跑", async () => {
+  const t = newTeam();
+  try {
+    const { a, b, fa, fb } = await pair(t);
+    const bad = [
+      ["一条字符串", /字符串数组/],
+      [["好", 3], /字符串数组/],
+      [Array.from({ length: 11 }, (_, i) => `第${i}条`), /最多 10 条/],
+      [["长".repeat(301)], /最多 300 字/],
+    ];
+    for (const [acceptance, re] of bad) {
+      fa.queue = [{ kind: "tool", tool: "delegate_bot", args: { to: b.name, message: "写周报", acceptance } }];
+      const parent = await t.orch.waitRun(t.orch.startRun({ botId: a.id, text: "派周报" }).id);
+      assert.match(parent.reply, /派活被拒绝/);
+      assert.match(parent.reply, re);
+    }
+    assert.equal(dlgs(t.orch).length, 0);
+    assert.equal(fb.calls.length, 0);
+    const tool = fa.tools.find((x) => x.name === "delegate_bot");
+    assert.equal(tool.parameters.properties.acceptance.maxItems, 10, "模型看到的上限和校验一致");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+await test("重启：排队的活带着验收标准，起来后对方照样看到清单", async () => {
+  const t = newTeam();
+  let t2;
+  try {
+    const { a, b, fa, fb } = await pair(t);
+    fb.queue = [{ kind: "hang" }];
+    t.orch.startRun({ botId: b.id, text: "B 自己在忙" });
+    await waitFor(() => fb.busy, { label: "B busy" });
+    fa.queue = [{ kind: "tool", tool: "delegate_bot", args: { to: b.name, message: "排着的活", acceptance: ["有结论"] } }];
+    await t.orch.waitRun(t.orch.startRun({ botId: a.id, text: "派活" }).id);
+    assert.equal(dlgs(t.orch)[0].state, "queued");
+    crash(t);
+    t2 = newTeam({ home: t.home });
+    const rec = await waitFor(() => t2.orch.listDelegations({}).find((d) => d.delivery === "delivered"), { label: "开跑并交回" });
+    assert.match(rec.result.reply, /排着的活\n\n验收标准（做完逐条说明满足没有，没满足的写清原因）：\n- \[ \] 有结论/);
+    const wake = await t2.orch.waitRun(rec.wakeRunId);
+    assert.match(wake.text, /验收标准：\n- \[ \] 有结论/);
+  } finally {
+    try {
+      await t2?.cleanup();
+    } catch {}
+  }
+});
+
 console.log(`\n${passed}/${passed + failed} PASS${failed ? `，${failed} FAIL` : ""}`);
 process.exit(failed ? 1 : 0);

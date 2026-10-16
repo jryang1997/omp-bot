@@ -8,7 +8,7 @@
 
 - [x] 调研 Paseo 的 handoff 技能，定最短接法
 - [x] delegate_bot 教会写交接简报（工具说明 + 人设）
-- [ ] delegate_bot 加 `acceptance`：存进派活记录，开跑时给对方，交回时带回来让派活方逐条核对
+- [x] delegate_bot 加 `acceptance`：存进派活记录，开跑时给对方，交回时带回来让派活方逐条核对
 - [ ] 工作台显示验收标准
 - [ ] 变异测试
 

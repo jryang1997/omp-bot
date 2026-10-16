@@ -76,6 +76,33 @@ const MESSAGE_BOT_SCHEMA = {
   additionalProperties: false,
 };
 
+/** 派活验收标准：最多几条、每条多长。 */
+const MAX_ACCEPTANCE_ITEMS = 10;
+const MAX_ACCEPTANCE_CHARS = 300;
+
+/** 校验并整理 delegate_bot 的 acceptance：去空白、去空行；不合规抛出原因。没给返回空数组。 */
+function normalizeAcceptance(raw) {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw) || raw.some((x) => typeof x !== "string")) {
+    throw new Error("acceptance 要是字符串数组，一条一个验收标准");
+  }
+  const list = raw.map((x) => x.trim()).filter(Boolean);
+  if (list.length > MAX_ACCEPTANCE_ITEMS) throw new Error(`验收标准最多 ${MAX_ACCEPTANCE_ITEMS} 条，挑最要紧的`);
+  const long = list.find((x) => x.length > MAX_ACCEPTANCE_CHARS);
+  if (long) throw new Error(`每条验收标准最多 ${MAX_ACCEPTANCE_CHARS} 字，这条太长：${long.slice(0, 40)}…`);
+  return list;
+}
+
+/** 验收标准的清单行。 */
+const acceptanceLines = (list) => list.map((x) => `- [ ] ${x}`);
+
+/** 派给目标 bot 的正文：交接简报，带验收标准时附在后面，让它做完逐条交代。 */
+function delegationTaskText(rec) {
+  const list = rec.acceptance ?? [];
+  if (!list.length) return rec.message;
+  return [rec.message, "", "验收标准（做完逐条说明满足没有，没满足的写清原因）：", ...acceptanceLines(list)].join("\n");
+}
+
 /** delegate_bot 工具的 JSON schema（非阻塞派活）。 */
 const DELEGATE_BOT_SCHEMA = {
   type: "object",
@@ -84,7 +111,14 @@ const DELEGATE_BOT_SCHEMA = {
     message: {
       type: "string",
       description:
-        "交接简报。对方看不到你和用户的对话，只拿到这段话，要写成拿来就能干的：任务（一句话说要做什么）、背景（为什么做）、相关文件（路径和用处）、现状（做到哪、哪里不行）、试过什么（为什么放弃）、已定的决定、约束（不能动什么）。任务性质原样带过去：只调研就写明不要改文件，修就写修，重构不是重写。",
+        "交接简报。对方看不到你和用户的对话，只拿到这段话，要写成拿来就能干的：任务（一句话说要做什么）、背景（为什么做）、相关文件（路径和用处）、现状（做到哪、哪里不行）、试过什么（为什么放弃）、已定的决定、约束（不能动什么）。任务性质原样带过去：只调研就写明不要改文件，修就写修，重构不是重写。验收标准别写在这里，放进 acceptance。",
+    },
+    acceptance: {
+      type: "array",
+      items: { type: "string" },
+      maxItems: MAX_ACCEPTANCE_ITEMS,
+      description:
+        "验收标准，一条一个，写做完怎样算合格，要能逐条核对（比如「周报在 work/weekly.md」「列出三条风险，每条带出处」）。对方开跑时看到，交回时原样带回给你逐条核对。",
     },
   },
   required: ["to", "message"],
@@ -158,9 +192,15 @@ function delegationReturnText(rec, targetName) {
     `子 Run：${rec.childRunId ?? "（没有开跑）"}`,
     `原任务：${String(rec.message ?? "").slice(0, 500)}`,
   ];
+  const list = rec.acceptance ?? [];
+  if (list.length) lines.push("验收标准：", ...acceptanceLines(list));
   if (r.reply) lines.push(`结果：\n${String(r.reply).slice(0, 8000)}`);
   if (r.error) lines.push(`原因：${String(r.error).slice(0, 1000)}`);
-  lines.push("请验收：结果不对就再派或自己补上；已经做完的不要重复派。");
+  lines.push(
+    list.length
+      ? "请按上面的验收标准逐条核对：没满足的再派或自己补上；已经做完的不要重复派。"
+      : "请验收：结果不对就再派或自己补上；已经做完的不要重复派。",
+  );
   return lines.join("\n");
 }
 
@@ -517,7 +557,7 @@ export class Orchestrator {
       child = this.startRun(
         {
           botId: target.id,
-          text: rec.message,
+          text: delegationTaskText(rec),
           sender: `🤖 ${from.name} (@${from.id})`,
           source: "bot",
           parentRunId: rec.parentRunId,
@@ -1545,6 +1585,12 @@ export class Orchestrator {
   async _handleDelegateBot(fromBot, fromRuntime, args, meta) {
     const to = (args?.to ?? "").trim();
     const message = args?.message ?? "";
+    let acceptance;
+    try {
+      acceptance = normalizeAcceptance(args?.acceptance);
+    } catch (e) {
+      return { text: `派活被拒绝：${e.message}`, isError: true };
+    }
     const parentRunId = fromRuntime?.activeRun?.runId ?? null;
     const parentRun = parentRunId ? this.getRun(parentRunId) : null;
     const hop = parentRun?.depth ?? fromRuntime?.deliveryDepth ?? 0;
@@ -1567,6 +1613,7 @@ export class Orchestrator {
       targetBotId: target.id,
       targetName: target.name,
       message,
+      ...(acceptance.length ? { acceptance } : {}),
       parentRunId,
       depth: hop + 1,
       state: "queued",
