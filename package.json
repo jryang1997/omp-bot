@@ -58,6 +58,7 @@
   "dependencies": {
     "@larksuiteoapi/node-sdk": "1.75.0",
     "@trycua/cua": "0.4.1",
-    "qrcode": "^1.5.4"
+    "qrcode": "^1.5.4",
+    "ssh2": "1.17.0"
   }
 }
