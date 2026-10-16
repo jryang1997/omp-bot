@@ -253,7 +253,7 @@ export function createComputerView(bot, deps = {}) {
   const desktopActions = el("div", "bt-actions");
   desktopActions.append(desktopButton, zoomButton);
   desktopCard.append(
-    row("桌面", "只读预览随时可看；接管后才能点击、输入和按键。放大后关闭窗口即回到这里。", desktopActions),
+    row("桌面", login ? "直接在画面上点击、输入和按键。放大后关闭窗口即回到这里。" : "只读预览随时可看；接管后才能点击、输入和按键。放大后关闭窗口即回到这里。", desktopActions),
     desktopHost,
     desktopHint,
   );

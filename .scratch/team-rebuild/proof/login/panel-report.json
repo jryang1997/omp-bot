@@ -1,0 +1,61 @@
+{
+  "checks": [
+    {
+      "name": "Bot 面板有「网站登录」行",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "点「登录网站」就打开登录屏，不用再点一次",
+      "ok": true,
+      "detail": "openLogin"
+    },
+    {
+      "name": "登录屏只有打开、完成、关闭不保存",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "登录屏说明只同步 cookie，开着就是用户在操作，不用接管",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "登录屏显示实时画面",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "点登录屏的画面会把输入送到登录屏",
+      "ok": true,
+      "detail": "input:login:move,input:login:click"
+    },
+    {
+      "name": "登录屏视图不横向溢出",
+      "ok": true,
+      "detail": "溢出 0px"
+    },
+    {
+      "name": "点「完成」发布并写 login.json",
+      "ok": true,
+      "detail": "上次发布\n4:12:00"
+    },
+    {
+      "name": "收起后登录屏视图移除",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "页面没有报错和失败请求",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "errors": [],
+  "calls": [
+    "openLogin",
+    "input:login:move",
+    "input:login:click",
+    "publishLogin"
+  ]
+}
