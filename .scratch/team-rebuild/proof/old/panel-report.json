@@ -1,0 +1,50 @@
+{
+  "checks": [
+    {
+      "name": "有旧电脑时显示「旧电脑」行，出错的写明哪一步错了",
+      "ok": true,
+      "detail": "复制出错：打包：旧电脑打包失败（退出码 2）：tar: /work: No space left on device"
+    },
+    {
+      "name": "助手已删的旧电脑也列出来",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "点「重试复制」后显示进度，复制中没有删除按钮",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "轮询到复制完成：已复制到 ~/old-computer/，带文件数和时间",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "删除前要确认，取消就不删",
+      "ok": true,
+      "detail": "删除旧电脑 pc_7fc60474a9304736c7507fe6？它的磁盘和记录都会删掉，不能恢复。已经复制到 ~/old-computer/ 的文件不受影响。"
+    },
+    {
+      "name": "确认后删除",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "没复制的旧电脑删除时提醒文件还没复制；都删完「旧电脑」行隐藏",
+      "ok": true,
+      "detail": "删除旧电脑 pc_gone？它的磁盘和记录都会删掉，不能恢复。这台的文件还没有复制进共享电脑。"
+    },
+    {
+      "name": "页面没有报错和失败请求",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "errors": [],
+  "calls": [
+    "retry pc_7fc60474a9304736c7507fe6",
+    "remove pc_7fc60474a9304736c7507fe6",
+    "remove pc_gone"
+  ]
+}
