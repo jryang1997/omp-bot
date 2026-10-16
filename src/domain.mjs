@@ -24,7 +24,7 @@ export function genId(prefix) {
   return `${prefix}_${Date.now().toString(36)}_${idSeq.toString(36)}`;
 }
 
-// ---- 独立电脑（每个 Bot 一台客机）----
+// ---- 电脑（共享电脑上每个 Bot 一个座席）----
 // 绑定只由服务端持有：bot.computer 是 null 或 {runtime,kind,image}，
 // 不接受客户端指定电脑 id、地址、token 或宿主文件。电脑 id 由 botId 派生，稳定且不可伪造。
 

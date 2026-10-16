@@ -1,0 +1,131 @@
+{
+  "startedAt": "2026-10-16T03:00:33.617Z",
+  "host": {
+    "cpus": 2,
+    "kernel": "6.18.49"
+  },
+  "checks": [
+    {
+      "name": "两个座席同时启动，共享电脑只开一次，客机脚本经管理通道补装",
+      "creates": [
+        {
+          "cpus": 2,
+          "memoryMb": 8192,
+          "diskGb": 64,
+          "forwards": [
+            3300,
+            3301,
+            3302,
+            3303,
+            3304,
+            3305,
+            3306,
+            3307,
+            3308,
+            3309,
+            3310,
+            3311,
+            3312,
+            3313,
+            3314,
+            3315,
+            3316
+          ]
+        },
+        {
+          "cpus": 2,
+          "memoryMb": 8192,
+          "diskGb": 64,
+          "forwards": [
+            3300,
+            3301,
+            3302,
+            3303,
+            3304,
+            3305,
+            3306,
+            3307,
+            3308,
+            3309,
+            3310,
+            3311,
+            3312,
+            3313,
+            3314,
+            3315,
+            3316
+          ]
+        }
+      ],
+      "seatScript": {
+        "sha256": "3060c441cb94ba742b70367c2c51413f8ebc60120681d74dc4e200551384ace7",
+        "mode": "root:root 755"
+      },
+      "users": [
+        "omp-ee7963b6ef31",
+        "omp-c936ce21dcab"
+      ]
+    },
+    {
+      "name": "命令以各自座席用户运行，默认在 ~/work，没有 sudo",
+      "a": [
+        "omp-ee7963b6ef31",
+        "/home/omp-ee7963b6ef31",
+        "/home/omp-ee7963b6ef31/work"
+      ],
+      "b": [
+        "omp-c936ce21dcab",
+        "/home/omp-c936ce21dcab",
+        "/home/omp-c936ce21dcab/work"
+      ],
+      "groupsA": "omp-ee7963b6ef31 team"
+    },
+    {
+      "name": "两个座席的截图来自各自的屏幕",
+      "a": {
+        "width": 1280,
+        "height": 800,
+        "block": "srgb(255,0,0)",
+        "outside": "srgb(0,0,0)"
+      },
+      "b": {
+        "width": 1280,
+        "height": 800,
+        "block": "srgb(0,0,255)",
+        "outside": "srgb(0,0,0)"
+      }
+    },
+    {
+      "name": "输入只进自己的屏幕",
+      "a": "X=111 Y=222",
+      "bUntouched": "X=640 Y=400"
+    },
+    {
+      "name": "B 读不到 A 的主目录、令牌和屏幕；~ 路径的上传下载落在自己主目录",
+      "peekStderr": [
+        "cat: /home/omp-ee7963b6ef31/work/secret.txt: Permission denied",
+        "ls: cannot open directory '/home/omp-ee7963b6ef31': Permission denied"
+      ],
+      "xPeekExit": 1
+    },
+    {
+      "name": "一个座席的令牌连不上别的座席，seats.json 0600",
+      "rejected": "CuaError.Unauthenticated: unauthenticated: unauthenticated: missing or invalid bearer token (Unauthenticated)"
+    },
+    {
+      "name": "装包经管理通道以 root 运行 omp-seat install-packages，坏包名在宿主就被拒",
+      "exitCode": 4,
+      "stderr": "omp-seat: 这台电脑上没有 apt-get"
+    },
+    {
+      "name": "停一个座席只停它自己的进程，共享电脑和另一个座席照常",
+      "leftCount": 1
+    },
+    {
+      "name": "最后一个座席停掉后关共享电脑，再开文件还在",
+      "stops": 3
+    }
+  ],
+  "result": "9/9 PASS",
+  "finishedAt": "2026-10-16T03:00:39.665Z"
+}

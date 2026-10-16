@@ -1158,7 +1158,7 @@ export class Computers {
   }
 
   /**
-   * 绑定电脑的非 chat Bot：附件按 id 验归属后上传客机 /work/attachments/<id>-<safe-name>，
+   * 绑定电脑的非 chat Bot：附件按 id 验归属后上传到座席的 ~/work/attachments/<id>-<safe-name>，
    * 文本里给客机路径；图片仍按原生 ImageContent 交给模型。
    * 返回 null 表示「不走电脑路径」（未绑定，或 chat 档：chat 仍然只有聊天，
    * 附件继续走既有受控宿主读取，不依赖一台运行中的客机，人工接管期间也照常聊天）。
@@ -1410,7 +1410,7 @@ export class Computers {
         name: "computer_upload_attachment",
         label: "Computer Upload Attachment",
         description:
-          "在 Linux 共享电脑里放入本 Bot 附件库里已登记的附件（默认 /work/attachments/<附件 id>-<文件名>），之后可在客机里用文件路径访问它。只能上传属于本 Bot 的附件。",
+          "在 Linux 共享电脑里放入本 Bot 附件库里已登记的附件（默认 ~/work/attachments/<附件 id>-<文件名>），之后可在客机里用文件路径访问它。只能上传属于本 Bot 的附件。",
         parameters: UPLOAD_SCHEMA,
         handler: (args, meta) =>
           this.#toolCall({ bot, runId: runId(), cid, name: "computer_upload_attachment", signal: signalOf(meta), kind: "upload_attachment", mutating: true }, async ({ backend, signal, authority }) => {

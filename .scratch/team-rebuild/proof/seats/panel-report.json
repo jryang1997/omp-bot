@@ -1,0 +1,40 @@
+{
+  "checks": [
+    {
+      "name": "未绑定时说明是共享电脑上的座席",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "规格行显示默认值和下次开机生效",
+      "ok": true,
+      "detail": "现在是 2 vCPU、8 GiB 内存、64 GiB 动态磁盘。"
+    },
+    {
+      "name": "绑定后状态行有座席和共享电脑状态",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "内存可选 4 到 16 GiB",
+      "ok": true,
+      "detail": "13 档"
+    },
+    {
+      "name": "保存规格写进 shared-machine.json",
+      "ok": true,
+      "detail": "{\"cpus\":2,\"memoryGb\":12}"
+    },
+    {
+      "name": "停一个座席时提示共享电脑还开着",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "页面没有报错和失败请求",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "errors": []
+}

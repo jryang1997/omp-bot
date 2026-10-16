@@ -119,7 +119,7 @@ export class WorkbenchFeatures {
 
   /**
    * 把本次运行的资料物化进原生回合：
-   * - 绑定电脑的 Bot：附件按 id 验归属后上传客机 /work/attachments/<id>-<safe-name>，
+   * - 绑定电脑的 Bot：附件按 id 验归属后上传到座席的 ~/work/attachments/<id>-<safe-name>，
    *   文本里给客机路径（宿主机路径不交给模型）；图片仍走原生 ImageContent。
    * - 其他 Bot（原有行为不变）：图片 → 原生 prompt.images（ImageContent）；
    *   文档 → 文本块里给规范宿主绝对路径，由 OMP 原生 read 读取，原文保留。
