@@ -1,20 +1,20 @@
 ## 场景 1：派活时目标正忙
-A 的 delegate_bot 结果: {"text":"Beta 正忙，已排队（前面还有 0 件），空了按顺序自动开跑。做完后结果会作为一条新消息交回给你。派活号 dlg_mvawoxb1_3。"}
+A 的 delegate_bot 结果: {"text":"Beta 当前无法接手：bot:bot_mvaw86y3_2:private 已有运行在跑（run_mvaw86ye_9bbc53bd），拒绝并发启动","isError":true}
 A 的 Run: completed
 B 名下的 Run 数: 1 (只有它自己那条，派的活没留下)
 结论: 目标一忙，派的活就丢了，只剩一条报错给 A。这是 01 要关的窗口
 
 ## 场景 2：子任务跑到一半服务重启
-父 Run 结束: completed | 回复: "已派给 Beta 后台执行：run id=run_mvawoxcs_ca50f5c8。做完后结果会作为一条新消息交回给你，到时再验收；不用轮询。"
+父 Run 结束: completed | 回复: "已派给 Beta 后台执行：run id=run_mvaw870g_21699112（不等待结果，可在工作台收件箱查看进展与成果）。"
 重启前子 Run: delegation running
 重启后子 Run: interrupted | recovery: null
-重启后 A 名下 Run 数: 2 | 有没有新的唤醒 Run: 有
+重启后 A 名下 Run 数: 1 | 有没有新的唤醒 Run: 没有
 A 知道结果吗: 没有任何把子结果交回 A 的记录或事件
 结论: 子任务被标 interrupted，但结果和中断都不回到 A，这是 01 要关的窗口
 
 ## 场景 2b：不重启，子任务正常做完
 子 Run: completed | 回复: "周报写好了，放在 work/weekly.md"
-A 名下 Run 数: 2 | A 的会话收到的消息数: 2
+A 名下 Run 数: 1 | A 的会话收到的消息数: 1
 结论: 子任务做完了，A 也不会知道，只有用户去工作台看。这是 01 要关的窗口
 
 ## 场景 3：挂着审批时重启
