@@ -147,6 +147,12 @@ export class FakeRuntime extends EventEmitter {
           this._abortWaiters.push({ resolve, reject });
         });
         return { text: "never", status: "completed", settled: true };
+      case "gate":
+        // 像 hang 一样挂住，但能由测试 release() 正常放行（模拟「忙一阵再做完」）。
+        await new Promise((resolve, reject) => {
+          this._abortWaiters.push({ resolve, reject, gate: true });
+        });
+        return { text: step.text ?? "gate-open", status: "completed", settled: true };
       case "ui": {
         this.emit("ui_request", step.frame);
         const answered = await new Promise((resolve, reject) => {
@@ -209,6 +215,15 @@ export class FakeRuntime extends EventEmitter {
   async steer(text, { behavior } = {}) {
     this.steered = { text, behavior };
     return { ok: true };
+  }
+
+  /** 放行最早挂住的 gate 步骤；没有挂住的返回 false。 */
+  release() {
+    const i = this._abortWaiters.findIndex((w) => w.gate);
+    if (i < 0) return false;
+    const [w] = this._abortWaiters.splice(i, 1);
+    w.resolve();
+    return true;
   }
 
   async abort() {

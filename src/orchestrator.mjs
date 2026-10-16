@@ -93,6 +93,39 @@ const AUTHORIZATION_METHODS = new Set(["select", "confirm"]);
 /** 头像图片允许的附件类型。 */
 const AVATAR_MIMES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
+/** 派活开跑或交回时遇到这些就继续等（目标在忙、被人工接管暂停），不算失败。 */
+const DELEGATION_WAIT_CODES = new Set(["target_busy", "bot_paused"]);
+
+const DELEGATION_RESULT_LABELS = {
+  completed: "做完了",
+  failed: "失败了",
+  cancelled: "被取消了",
+  interrupted: "因为服务重启中断了，没有自动重跑",
+  reconciliation_required: "结束了，但有外部动作结果未知，需要人工核对",
+  not_started: "没能开跑",
+};
+
+/** 关停时的取消（直接的或经父回合级联的）：不是用户的决定。 */
+function byShutdown(run) {
+  return /(^|:)shutdown$/.test(String(run?.error ?? ""));
+}
+
+/** 交回给父 bot 的那条消息：子结果、子 Run id、原任务，最后提醒验收。 */
+function delegationReturnText(rec, targetName) {
+  const r = rec.result ?? {};
+  const label = DELEGATION_RESULT_LABELS[r.state] ?? `结束了（${r.state}）`;
+  const lines = [
+    `[派活交回] 你派给 ${targetName} 的活${label}。`,
+    `派活号：${rec.id}`,
+    `子 Run：${rec.childRunId ?? "（没有开跑）"}`,
+    `原任务：${String(rec.message ?? "").slice(0, 500)}`,
+  ];
+  if (r.reply) lines.push(`结果：\n${String(r.reply).slice(0, 8000)}`);
+  if (r.error) lines.push(`原因：${String(r.error).slice(0, 1000)}`);
+  lines.push("请验收：结果不对就再派或自己补上；已经做完的不要重复派。");
+  return lines.join("\n");
+}
+
 function httpErr(status, message, code) {
   const e = new Error(message);
   e.status = status;
@@ -253,6 +286,261 @@ export class Orchestrator {
       } catch {}
     }
     if (stale.length) this.emit("ui_stale_cleared", { ids: stale.map((a) => a.id) });
+    this._recoverDelegations();
+  }
+
+  // ---- 派活记录（delegate_bot 的工作账与交付账）----
+  //
+  // 一条记录管一件派出去的活：state 是执行（queued → running → returned），
+  // delivery 是交回（pending → delivered | dropped）。两本账分开：活做完了不等于父 bot 收到了。
+  // 只有 delegate_bot 写记录；message_bot 是同步等回复，不走这里。
+
+  /** 重启：排队的继续排；跑到一半的子 Run 已被 reconcile 标 interrupted，交回「中断」结果，不重跑。 */
+  _recoverDelegations() {
+    let recs = [];
+    try {
+      recs = this._delegationRecords();
+    } catch (e) {
+      this.emit("recover_error", { error: e?.message ?? String(e) });
+      return;
+    }
+    for (const rec of recs) {
+      if (rec.state !== "running") continue;
+      const child = rec.childRunId ? this.getRun(rec.childRunId) : null;
+      if (child && !isTerminalRunState(child.state)) continue;
+      this._returnDelegation(rec, child ?? { state: "interrupted", error: "子 Run 记录缺失" });
+    }
+    // 上面刚交回的也要送：按对账后的状态判断，不用循环前的旧快照。
+    if (this._delegationRecords().some((r) => r.state === "queued" || (r.state === "returned" && r.delivery === "pending"))) {
+      this._schedulePump();
+    }
+  }
+
+  /** 全部派活记录，按创建先后（最早的在前）。 */
+  _delegationRecords() {
+    return (this.ledger.list("delegations", { limit: 1000 }) ?? []).slice().reverse();
+  }
+
+  listDelegations({ botId = null, limit = 100 } = {}) {
+    const all = (this.ledger.list("delegations", { limit: 1000 }) ?? []).filter(
+      (r) => !botId || r.fromBotId === botId || r.targetBotId === botId,
+    );
+    return all.slice(0, Math.max(1, Math.min(1000, limit)));
+  }
+
+  _putDelegation(rec, type) {
+    const next = { ...rec, updatedAt: Date.now() };
+    this.ledger.put("delegations", next);
+    if (type) {
+      this.emit(type, {
+        delegationId: next.id,
+        botId: next.targetBotId,
+        fromBotId: next.fromBotId,
+        runId: next.childRunId ?? undefined,
+        state: next.state,
+        delivery: next.delivery,
+        delegation: next,
+      });
+    }
+    return next;
+  }
+
+  /** 子 Run 落定 → 执行账记 returned，交付账记 pending（父回合被取消的除外）。 */
+  _returnDelegation(rec, run) {
+    let state = run?.state ?? "interrupted";
+    // 关停时的取消（含经父回合级联的）不是谁的决定，重启后按中断交回。
+    const shutdown = byShutdown(run);
+    if (state === RUN_STATES.CANCELLED && shutdown) state = RUN_STATES.INTERRUPTED;
+    const parentCancelled = !shutdown && String(run?.error ?? "").startsWith("parent-cancelled");
+    return this._putDelegation(
+      {
+        ...rec,
+        state: "returned",
+        returnedAt: Date.now(),
+        result: { state, reply: run?.reply ?? null, error: run?.error ?? null },
+        delivery: parentCancelled ? "dropped" : "pending",
+        ...(parentCancelled ? { dropReason: "parent_cancelled" } : {}),
+      },
+      "delegation_returned",
+    );
+  }
+
+  /** 没能开跑：同样交回给父 bot（它要知道活没人做）。 */
+  _returnNotStarted(rec, error, { delivery = "pending", dropReason } = {}) {
+    return this._putDelegation(
+      {
+        ...rec,
+        state: "returned",
+        returnedAt: Date.now(),
+        result: { state: "not_started", reply: null, error },
+        delivery,
+        ...(dropReason ? { dropReason } : {}),
+      },
+      "delegation_returned",
+    );
+  }
+
+  _dropDelivery(rec, reason, error = null) {
+    return this._putDelegation(
+      { ...rec, delivery: "dropped", dropReason: reason, ...(error ? { dropError: error } : {}) },
+      "delegation_dropped",
+    );
+  }
+
+  /** 任一 Run 落定后调用：交回本条派活，再看排队和待交付能不能推进。 */
+  _onRunSettled(run) {
+    if (this.closing || this.ledger.readonly || !run) return;
+    try {
+      if (run.kind === "delegation") {
+        const rec = this._delegationRecords().find((r) => r.childRunId === run.id);
+        if (rec && rec.state === "running") this._returnDelegation(rec, run);
+      }
+    } catch (e) {
+      this.emit("delegation_error", { runId: run.id, error: e?.message ?? String(e) });
+    }
+    this._schedulePump();
+  }
+
+  /** 父回合被取消：还在排队的活不再开跑，也不交回。 */
+  _dropQueuedDelegations(parentRunId) {
+    // 关停也会级联取消：那不是用户的决定，排队的活重启后继续排。
+    if (this.closing || this.ledger.readonly) return;
+    for (const rec of this._delegationRecords()) {
+      if (rec.state === "queued" && rec.parentRunId === parentRunId) {
+        this._returnNotStarted(rec, "父回合已取消", { delivery: "dropped", dropReason: "parent_cancelled" });
+      }
+    }
+  }
+
+  _schedulePump() {
+    if (this._pumpScheduled || this.closing) return;
+    this._pumpScheduled = true;
+    setImmediate(() => {
+      this._pumpScheduled = false;
+      if (this.closing) return;
+      try {
+        this._pumpDelegations();
+      } catch (e) {
+        this.emit("delegation_error", { error: e?.message ?? String(e) });
+      }
+    });
+  }
+
+  /** 按创建先后推进：同一目标前面的还在排，后面的不插队。 */
+  _pumpDelegations() {
+    const blocked = new Set();
+    for (const rec of this._delegationRecords()) {
+      if (this.closing) return;
+      if (rec.state === "queued") {
+        if (blocked.has(rec.targetBotId)) continue;
+        const r = this._tryStartDelegation(rec);
+        if (r.outcome === "busy") blocked.add(rec.targetBotId);
+        // 没能开跑的这一轮就交回，不等下一次推进（可能再也没有 Run 落定来触发）。
+        else if (r.outcome === "failed") this._deliverDelegation(rec.id);
+      } else if (rec.state === "returned" && rec.delivery === "pending") {
+        this._deliverDelegation(rec.id);
+      }
+    }
+  }
+
+  /**
+   * 开跑一条排队的活。开跑前重查准入（目标还在、同工作区、不扩权、父回合没被取消）。
+   * @returns {{outcome:"started"|"busy"|"failed", child?, error?}}
+   */
+  _tryStartDelegation(rec, { inline = false } = {}) {
+    const from = this.getBot(rec.fromBotId);
+    const target = this.getBot(rec.targetBotId);
+    if (!from) {
+      this._returnNotStarted(rec, "派活的 bot 已删除", { delivery: "dropped", dropReason: "parent_bot_gone" });
+      return { outcome: "failed", error: "派活的 bot 已删除" };
+    }
+    if (!target) {
+      const error = `${rec.targetName ?? rec.targetBotId} 已删除，没能开跑`;
+      this._returnNotStarted(rec, error);
+      return { outcome: "failed", error };
+    }
+    const parentRun = rec.parentRunId ? this.getRun(rec.parentRunId) : null;
+    if (parentRun?.state === RUN_STATES.CANCELLED && !byShutdown(parentRun)) {
+      this._returnNotStarted(rec, "父回合已取消", { delivery: "dropped", dropReason: "parent_cancelled" });
+      return { outcome: "failed", error: "父回合已取消" };
+    }
+    try {
+      this._assertDelegationAllowed(from, target, parentRun);
+    } catch (e) {
+      this._returnNotStarted(rec, e.message);
+      return { outcome: "failed", error: e.message };
+    }
+    let child;
+    try {
+      child = this.startRun(
+        {
+          botId: target.id,
+          text: rec.message,
+          sender: `🤖 ${from.name} (@${from.id})`,
+          source: "bot",
+          parentRunId: rec.parentRunId,
+          depth: rec.depth,
+        },
+        { allowFinishedParent: true },
+      );
+    } catch (e) {
+      // 后台开跑时撞上全局并发上限也只是等；当场派活撞上就如实拒绝（不让排队绕过上限）。
+      if (DELEGATION_WAIT_CODES.has(e?.code) || (!inline && e?.code === "concurrency_limit")) {
+        return { outcome: "busy", error: e.message };
+      }
+      const error = e?.message ?? String(e);
+      this._returnNotStarted(rec, error);
+      return { outcome: "failed", error };
+    }
+    this._putDelegation({ ...rec, state: "running", childRunId: child.id, startedAt: Date.now() });
+    this.emit("delegation_accepted", {
+      runId: child.id,
+      parentRunId: rec.parentRunId,
+      botId: target.id,
+      from: from.name,
+      delegationId: rec.id,
+    });
+    return { outcome: "started", child };
+  }
+
+  /**
+   * 交回：在父 bot 的私聊里起一条新 Run，带上子结果和子 Run id，由它验收。
+   * 只处理 delivery=pending 的记录，所以重复调用不会重复唤醒。
+   * 交回前重查父 bot 还能不能看到目标 bot（同工作区）；看不到就 dropped，结果仍留在工作台。
+   */
+  _deliverDelegation(id) {
+    const rec = this.ledger.get("delegations", id);
+    if (!rec || rec.state !== "returned" || rec.delivery !== "pending") return { outcome: "noop" };
+    const from = this.getBot(rec.fromBotId);
+    if (!from) return { outcome: "dropped", rec: this._dropDelivery(rec, "parent_bot_gone") };
+    const target = this.getBot(rec.targetBotId);
+    // 没开跑的交回只含我们自己的说明，不带目标 bot 的内容，不必查可见性。
+    if (rec.result?.state !== "not_started") {
+      if (!target) return { outcome: "dropped", rec: this._dropDelivery(rec, "target_gone") };
+      if ((from.workspace ?? "") !== (target.workspace ?? "")) {
+        return { outcome: "dropped", rec: this._dropDelivery(rec, "visibility_revoked") };
+      }
+    }
+    const targetName = target?.name ?? rec.targetName ?? rec.targetBotId;
+    let wake;
+    try {
+      wake = this.startRun({
+        botId: from.id,
+        text: delegationReturnText(rec, targetName),
+        sender: `🤖 ${targetName} (@${rec.targetBotId})`,
+        source: "bot",
+        depth: rec.depth,
+      });
+    } catch (e) {
+      // 父 bot 正忙（startRun 的 scope 准入拒了）：交付留在 pending，等它空了再送。
+      if (DELEGATION_WAIT_CODES.has(e?.code) || e?.code === "concurrency_limit") return { outcome: "busy" };
+      return { outcome: "dropped", rec: this._dropDelivery(rec, "wake_rejected", e?.message ?? String(e)) };
+    }
+    const next = this._putDelegation(
+      { ...rec, delivery: "delivered", wakeRunId: wake.id, deliveredAt: Date.now() },
+      "delegation_delivered",
+    );
+    return { outcome: "delivered", rec: next, wake };
   }
 
   // ---- 事件 ----
@@ -815,7 +1103,7 @@ export class Orchestrator {
           name: "delegate_bot",
           label: "Delegate Bot",
           description:
-            "把任务派给另一个 bot 后台执行并立即返回子运行 id（不等待结果）。用于可以并行推进的工作；稍后可在工作台查看该子运行的进展与成果。",
+            "把任务派给另一个 bot 后台执行，立即返回（不等待结果）。对方正忙就排队，空了自动开跑。做完后结果会作为一条新消息交回给你，由你验收。用于可以并行推进的工作。",
           parameters: DELEGATE_BOT_SCHEMA,
           handler: (args, meta) => this._handleDelegateBot(bot, runtime, args, meta),
         },
@@ -992,28 +1280,45 @@ export class Orchestrator {
     } catch (e) {
       return { text: e.message, isError: true };
     }
-    let child;
-    try {
-      child = this.startRun({
-        botId: target.id,
-        text: message,
-        sender: `🤖 ${fromBot.name} (@${fromBot.id})`,
-        source: "bot",
-        parentRunId,
-        depth: hop + 1,
-      });
-    } catch (e) {
-      return { text: `${target.name} 当前无法接手：${e?.message ?? String(e)}`, isError: true };
-    }
-    this.emit("delegation_accepted", {
-      runId: child.id,
+    const rec = this._putDelegation({
+      id: genId("dlg"),
+      fromBotId: fromBot.id,
+      fromName: fromBot.name,
+      targetBotId: target.id,
+      targetName: target.name,
+      message,
       parentRunId,
-      botId: target.id,
-      from: fromBot.name,
+      depth: hop + 1,
+      state: "queued",
+      delivery: null,
+      createdAt: Date.now(),
     });
-    return {
-      text: `已派给 ${target.name} 后台执行：run id=${child.id}（不等待结果，可在工作台收件箱查看进展与成果）。`,
-    };
+    // 同一目标前面还有排队的：不插队，直接排到后面。
+    const ahead = this._delegationRecords().filter(
+      (r) => r.state === "queued" && r.targetBotId === target.id && r.id !== rec.id,
+    ).length;
+    const r = ahead ? { outcome: "busy" } : this._tryStartDelegation(rec, { inline: true });
+    if (r.outcome === "started") {
+      return {
+        text: `已派给 ${target.name} 后台执行：run id=${r.child.id}。做完后结果会作为一条新消息交回给你，到时再验收；不用轮询。`,
+      };
+    }
+    if (r.outcome === "busy") {
+      this.emit("delegation_queued", {
+        delegationId: rec.id,
+        botId: target.id,
+        fromBotId: fromBot.id,
+        parentRunId,
+        ahead,
+      });
+      return {
+        text: `${target.name} 正忙，已排队（前面还有 ${ahead} 件），空了按顺序自动开跑。做完后结果会作为一条新消息交回给你。派活号 ${rec.id}。`,
+      };
+    }
+    // 当场就被拒（预算、并发上限等）：报错已经直接给了父回合，不再另行唤醒。
+    const cur = this.ledger.get("delegations", rec.id);
+    if (cur?.delivery === "pending") this._dropDelivery(cur, "rejected_inline");
+    return { text: `${target.name} 当前无法接手：${r.error}`, isError: true };
   }
 
   // ---- Run：准入与驱动 ----
@@ -1022,7 +1327,7 @@ export class Orchestrator {
    * 同步建 Run 并原子预留 scope 租约；异步执行失败也持久进 run。
    * @returns {object} 刚创建的 run 记录（state=starting）
    */
-  startRun(input = {}) {
+  startRun(input = {}, { allowFinishedParent = false } = {}) {
     if (this.closing) throw httpErr(503, "团队正在关闭，无法启动新的运行");
     const {
       botId = null,
@@ -1055,7 +1360,8 @@ export class Orchestrator {
     if (parentRunId) {
       const parent = this.getRun(parentRunId);
       if (!parent) throw httpErr(404, `父 Run 不存在: ${parentRunId}`, "parent_not_found");
-      if (isTerminalRunState(parent.state)) {
+      // 排队的派活可能在父回合结束后才开跑：仍挂在原父 Run 下（预算、取消、工作台都按这棵树）。
+      if (isTerminalRunState(parent.state) && !allowFinishedParent) {
         throw httpErr(409, `父 Run 已结束（${parent.state}），不能派生新运行`, "parent_terminal");
       }
     }
@@ -1759,6 +2065,7 @@ export class Orchestrator {
       this._releaseLease(runId);
       this.features?.computers?.releaseRunLease(runId);
       this._notifyRunWaiters(runId, current);
+      this._schedulePump();
       return current;
     }
     // 取消与驱动可能同时收尾：只允许第一个真正落定。
@@ -1832,6 +2139,7 @@ export class Orchestrator {
     this._releaseLease(runId);
     this.features?.computers?.releaseRunLease(runId);
     this._notifyRunWaiters(runId, next);
+    this._onRunSettled(next);
     return next;
   }
 
@@ -1914,6 +2222,11 @@ export class Orchestrator {
     const ctrl = this.runs.get(runId);
     if (!ctrl) return;
     ctrl.cancelled = true;
+    try {
+      this._dropQueuedDelegations(runId);
+    } catch (e) {
+      this.emit("delegation_error", { runId, error: e?.message ?? String(e) });
+    }
     for (const apId of [...ctrl.approvals]) {
       this._resolveApproval(apId, "cancelled");
     }
