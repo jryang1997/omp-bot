@@ -10,7 +10,7 @@
 import { inkText } from "./vendor/ds-bot/inks.js";
 import { avatarNode, updateAvatar, colorOf, avatarEditor } from "./workbench-avatar.js";
 import {
-  $, el, button, toast, announce, api, bootstrapAuth, markdownFragment, runStateLabel, trapTab, svgIcon, BOT_PERMISSION_LABELS, permissionOf,
+  $, el, button, toast, announce, api, bootstrapAuth, markdownFragment, runStateLabel, trapTab, svgIcon, BOT_PERMISSION_LABELS, permissionOf, fmtDay,
 } from "./workbench-core.js";
 import { createRunClient, createApprovalDock } from "./workbench-runs.js";
 import { createPanels } from "./workbench-panels.js";
@@ -324,6 +324,7 @@ function renderSelected(scroll = false) {
     const status = state.runs?.statusText(target);
     $("head-sub").textContent = [item.isMain ? "主助手" : "", item.role, status].filter(Boolean).join(" · ") || "助手";
     $("btn-permissions").textContent = BOT_PERMISSION_LABELS[permissionOf(item)];
+    $("btn-permissions").dataset.level = permissionOf(item);
   } else {
     const admin = botById(item.adminId)?.name || "未设置";
     $("head-sub").textContent = `${item.members.length} 位助手 · ${item.mode === "everyone" ? "轮流发言" : "协调助手代答"} · 协调助手 ${admin}`;
@@ -436,6 +437,9 @@ function chatWelcome(target, item) {
   return box;
 }
 
+/** 每个会话上次画到第几条消息，用来认出新消息。 */
+const chatSeen = new Map();
+
 function renderChat(scroll = false) {
   const target = state.sel;
   const item = itemOf(target);
@@ -446,17 +450,24 @@ function renderChat(scroll = false) {
   log.replaceChildren();
   const messages = target.kind === "bot" ? state.chats[target.id] || [] : [...(item.log || []), ...(state.roomEvents[target.id] || [])].sort((a, b) => (a.at || 0) - (b.at || 0));
   let previousDay = "";
-  for (const message of messages) {
+  // 只给这次新来的消息加进场动效：整段日志每次都会重画，全加会一起闪。切换会话后第一次画不加。
+  const seenKey = keyOf(target);
+  const seen = chatSeen.get(seenKey);
+  const freshFrom = seen != null && messages.length > seen ? seen : messages.length;
+  chatSeen.set(seenKey, messages.length);
+  for (const [index, message] of messages.entries()) {
     const date = new Date(message.at);
     if (Number.isFinite(date.getTime())) {
-      const day = date.toLocaleDateString();
+      const day = fmtDay(date);
       if (day !== previousDay) {
         log.append(el("div", "bt-time-sep", day));
         previousDay = day;
       }
     }
     const speaker = target.kind === "bot" ? item : botById(message.from) || state.bots.find((bot) => bot.name === message.fromName || bot.name === message.from);
-    log.append(messageNode(message, speaker, target.kind === "room" ? item : null));
+    const node = messageNode(message, speaker, target.kind === "room" ? item : null);
+    if (index >= freshFrom) node.classList.add("is-new");
+    log.append(node);
   }
   const loading = target.kind === "bot" && state.history.get(target.id)?.loading;
   state.runs?.appendLive(log, target);

@@ -19,3 +19,8 @@
 - [ ] 6 暗色和手机检查
 
 截图：`shots.mjs <目录>` 拍全套，before/ 是改之前。
+
+## 进度存档（第 5 步未完成，WIP 提交）
+- 第 5 步对话区已改：头部按钮合进 #head-actions、权限胶囊带档位圆点、日期分隔用 fmtDay、新消息 is-new 进场动效。
+- chat-check.mjs 10/11，剩"打开会话时旧消息不做进场动效"失败：首次 renderChat 时历史还没加载，count 0 被记下，加载后被当成新消息。修法：历史 loading 或消息为空时不记录 chatSeen。
+- 之后：写 mutate-5.py、跑全套回归和测试 18、重拍 shots、勾第 5 项；再做第 6 步暗色和手机检查；最后问要不要合并 master。

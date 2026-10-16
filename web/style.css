@@ -120,7 +120,7 @@ button:disabled { cursor: default; }
   position: absolute;
   top: 60px;
   left: 28px;
-  max-width: calc(100% - 230px);
+  max-width: calc(100% - 56px);
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -128,11 +128,16 @@ button:disabled { cursor: default; }
   line-height: 18px;
   color: var(--bt-ink-2);
 }
-#btn-settings { position: absolute; top: 22px; right: 24px; pointer-events: auto; }
-#btn-permissions { position: absolute; top: 63px; right: 24px; pointer-events: auto; font-size: 11px; padding: 2px 8px; max-width: 170px; white-space: nowrap; height: 22px; }
-#btn-computer { position: absolute; top: 22px; right: 74px; display: inline-flex; align-items: center; gap: 7px; padding: 0 14px; font-size: 13px; pointer-events: auto; }
+#head-actions { position: absolute; top: 22px; right: 24px; display: flex; align-items: center; gap: 8px; pointer-events: auto; }
+#btn-settings { flex: none; }
+#btn-permissions { display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 13px; border-radius: 999px; font-size: 12.5px; white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis; color: var(--bt-ink-2); }
+#btn-permissions.hidden { display: none; }
+#btn-permissions::before { content: ''; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--bt-accent); }
+#btn-permissions[data-level=chat]::before { background: var(--bt-ink-3); }
+#btn-permissions[data-level=full]::before { background: var(--wb-warn); }
+#btn-computer { display: inline-flex; align-items: center; gap: 7px; padding: 0 14px; font-size: 13px; }
 #btn-computer svg { flex: none; }
-#main-head #head-title { max-width: calc(100% - 180px); }
+#main-head #head-title { max-width: calc(100% - 340px); }
 #chat-log {
   flex: 1 1 0;
   min-height: 0;
@@ -555,9 +560,9 @@ button:focus-visible { outline-offset: 2px; }
   body.sidebar-open #sidebar { visibility: visible; transform: none; }
   body.sidebar-open #sidebar-backdrop { display: block !important; position: fixed; inset: 0; z-index: 45; padding: 0; border: 0; background: rgba(0, 0, 0, .32); }
   #main-head { top: calc(56px + env(safe-area-inset-top)); height: 82px; padding: 10px 16px 28px; }
-  #btn-settings { right: 12px; top: 8px; }
-  #btn-computer { top: 8px; right: 56px; left: auto; height: 40px; padding: 0 12px; }
-  #btn-permissions { top: 54px; right: 12px; }
+  #head-actions { top: 8px; right: 12px; }
+  #btn-computer { height: 40px; padding: 0 12px; }
+  #btn-permissions { position: absolute; top: 46px; right: 0; height: 24px; padding: 0 9px; font-size: 11px; min-height: 0; }
   #main-head #head-title { max-width: calc(100% - 146px); font-size: 14px; gap: 8px; }
   #head-sub { display: block; top: 55px; left: 16px; max-width: calc(100% - 165px); font-size: 11px; }
   #chat-log { padding: 96px 16px 20px; }
@@ -718,3 +723,12 @@ button:focus-visible { outline-offset: 2px; }
 #drawer-body .wb-computer-state + .wb-computer-hint + .wb-computer-errors:empty + .bt-set-row { border-top: .5px solid var(--bt-line); }
 #drawer-body .bt-set-hint { font-size: 12.5px; line-height: 18px; color: var(--bt-ink-3); }
 #drawer-body .ui-intro { color: var(--bt-ink-3); }
+
+/* ---- ui 5: 对话区。权限标签和电脑、设置排成一行；新消息轻轻升起，只动新来的那几条 ---- */
+.bt-time-sep { color: var(--bt-ink-3); }
+#chat-log .is-new { transition: opacity 240ms var(--ease-out), transform 240ms var(--ease-out); }
+@starting-style { #chat-log .is-new { opacity: 0; transform: translateY(6px); } }
+@media (prefers-reduced-motion: reduce) {
+  #chat-log .is-new { transition: opacity 160ms linear; }
+  @starting-style { #chat-log .is-new { transform: none; } }
+}

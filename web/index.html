@@ -101,14 +101,16 @@
         <span class="bt-pill-go" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m9 5 7 7-7 7"/></svg></span>
       </button>
       <span id="head-sub"></span>
-      <button id="btn-computer" class="bt-soft hidden" type="button" aria-label="打开助手电脑" title="查看桌面或接管操作" aria-controls="drawer" aria-haspopup="dialog" aria-expanded="false">
-        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M9 20h6M12 16v4"/></svg>
-        <span>电脑</span>
-      </button>
-      <button id="btn-permissions" class="bt-soft hidden" type="button" aria-label="调整确认频率" title="调整确认频率" aria-controls="drawer" aria-haspopup="dialog"></button>
-      <button id="btn-settings" class="bt-round" type="button" aria-label="编辑会话设置" title="设置" aria-controls="drawer" aria-haspopup="dialog">
-        <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m9 3-.5 3-2 1.2-2.8-1-2.4 4.1 2.3 2-.1 2.3-2.2 1.9 2.4 4.1 2.8-1 2 1.1.5 3h4l.5-3 2-1.1 2.8 1 2.4-4.1-2.2-1.9-.1-2.3 2.3-2-2.4-4.1-2.8 1L14.5 6 14 3Z"/><circle cx="12" cy="13" r="3"/></svg>
-      </button>
+      <div id="head-actions">
+        <button id="btn-permissions" class="bt-soft hidden" type="button" aria-label="调整确认频率" title="调整确认频率" aria-controls="drawer" aria-haspopup="dialog"></button>
+        <button id="btn-computer" class="bt-soft hidden" type="button" aria-label="打开助手电脑" title="查看桌面或接管操作" aria-controls="drawer" aria-haspopup="dialog" aria-expanded="false">
+          <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M9 20h6M12 16v4"/></svg>
+          <span>电脑</span>
+        </button>
+        <button id="btn-settings" class="bt-round" type="button" aria-label="编辑会话设置" title="设置" aria-controls="drawer" aria-haspopup="dialog">
+          <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m9 3-.5 3-2 1.2-2.8-1-2.4 4.1 2.3 2-.1 2.3-2.2 1.9 2.4 4.1 2.8-1 2 1.1.5 3h4l.5-3 2-1.1 2.8 1 2.4-4.1-2.2-1.9-.1-2.3 2.3-2-2.4-4.1-2.8 1L14.5 6 14 3Z"/><circle cx="12" cy="13" r="3"/></svg>
+        </button>
+      </div>
     </header>
     <div id="chat-log" class="bt-dialog-log hidden" role="log" aria-label="会话消息" aria-live="polite" aria-relevant="additions text" tabindex="0"></div>
     <section id="approval-dock" class="wb-dock hidden" aria-label="需要你确认的事项"></section>

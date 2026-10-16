@@ -192,6 +192,11 @@ export function fmtDuration(ms) {
   const day = Math.floor(hour / 24);
   return hour % 24 ? `${day} 天 ${hour % 24} 小时` : `${day} 天`;
 }
+/** 对话里的日期分隔：今天、昨天、10月16日，跨年才带年份。 */
+export function fmtDay(at, now = new Date()) {
+  const when = fmtWhen(at, now);
+  return when ? when.replace(/ \d{2}:\d{2}$/, "") : "";
+}
 /** 给人看的时间：今天 13:44、昨天 09:02、10月16日 13:44，跨年才带年份。 */
 export function fmtWhen(at, now = new Date()) {
   const date = new Date(at);
