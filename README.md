@@ -76,8 +76,8 @@ node ompbot.mjs serve
 打开 `http://127.0.0.1:3099`（可用 `--port` 换端口，`--no-open` 不自动开浏览器）。GUI 里可以：
 
 - 侧栏按主助手、群聊和其他助手分组。顶部搜索名称或角色，点 ＋ 创建助手或群聊；创建助手只需填写名称，其余可选，创建后自动打开会话。空聊天里的需求建议只填入输入框，由你决定何时发送。
-- 点会话标题或右上角设置按钮打开助手设置。常用页签是设置、使用权限、电脑和计划；技能、工具服务和记忆编辑在「更多设置」。名称、擅长内容与工作偏好直接编辑，模型、思考程度和主助手标记在表单高级设置中。群聊的发言方式与协调助手也在高级设置中。
-- 聊天顶部的确认频率按钮直接打开权限设置。选择「少打扰」并确认一次后，Bot 会记住自动执行的选择，普通读写、命令和浏览器操作不再逐次弹卡；需要补充的信息仍会询问。可随时改回「运行命令前询问」或「修改和执行前询问」，下一次任务生效。工具操作没有限制在工作目录内。
+- 点会话标题或右上角设置按钮打开助手设置。常用页签是设置、使用权限、电脑和计划；技能、工具服务和记忆在「更多设置」。名称、擅长内容与工作偏好直接编辑，模型、思考程度和主助手标记在表单高级设置中。群聊的发言方式与协调助手也在高级设置中。
+- 使用权限只有三档：「只聊天」不运行命令、不改文件、不用电脑；「本机改东西先问我」读写文件照常，运行命令和操作浏览器前先问你，共享电脑里除装系统包都不问；「全部放手」本机和共享电脑都不再逐次问，装系统包仍会问，选它要确认一次。改动从下一次任务生效。工具操作没有限制在工作目录内。
 - 需要确认工具操作时，直接点「允许这一次」或「拒绝」，不用再点提交。信息选择题保留选择后提交。
 - Bot 默认用简体中文和日常表达，先说结果，再按需要解释。要看技术细节可以直接提出；Bot 的专属指令仍优先。
 - 私聊支持 Markdown、代码块、表格、消息复制和历史重载。Enter 发送，Shift+Enter 换行。切换会话后，正在生成的回复仍回到原会话。
@@ -85,7 +85,7 @@ node ompbot.mjs serve
 - 侧栏底部提供任务、使用情况和明暗主题切换。首次主题跟随系统；手动选择后保持该选择。连接状态旁的绿点表示 SSE 已连通。窄屏用左上角按钮打开侧栏，设置面板全屏显示。
 - 任务页先展示进行中、待处理和已完成数量，支持按助手名称、任务内容和中文状态筛选；导出在高级选项中。聊天显示真实回复和进度，思考过程、工具参数和输出默认折叠，可以主动展开，支持停止或补充指令。
 - 添加附件、粘贴或拖入图片和文本资料。任务详情提供成果预览与下载，领取的是登记时的不可变版本。HTML 和 SVG 预览使用隔离策略。使用情况先给出累计摘要，明细表默认折叠，手机上在表格内部横滚。
-- 使用权限提供执行范围、确认频率、工作目录与记忆开关；累计 token 额度、模型目录和原生诊断收进高级设置。开启完整本机能力或少打扰仍需明确确认。记忆默认关，开启后用 mnemopi，每个助手一个库，私聊群聊通用，第一次开会下载约 2.7GB 的中文嵌入模型和运行库；模型登录沿用 OMP。记录维护里的新会话、重载和清空显示分别操作。
+- 使用权限提供权限档、工作目录与记忆开关；累计 token 额度、模型目录和原生诊断收进高级设置。开启完整本机能力或少打扰仍需明确确认。记忆默认关，开启后用 mnemopi，每个助手一个库，私聊群聊通用，第一次开会下载约 2.7GB 的中文嵌入模型和运行库；模型登录沿用 OMP。记录维护里的新会话、重载和清空显示分别操作。
 - 任务页的「飞书连接」先选接入方式。官方长连接只用 App ID 和 App Secret，用飞书官方 SDK 由本机主动连出，不需要公网域名、回调端口、Verification Token 或 Encrypt Key（应用仍需在开放平台订阅事件并处于可用范围）。本地回调 HTTP 保留 App ID、App Secret、Verification Token、Encrypt Key、固定回调端口和 HTTPS 入口。秘密输入框不回显，留空保留已有值；保存配置不会自动启用渠道；状态里的接入方式与连接状态取自后端真实接收器。凭据保存在本机通道配置中，也支持既有环境变量引用。
 
 服务只听 `127.0.0.1`，不对外网暴露。
@@ -170,13 +170,41 @@ node ompbot.mjs interactive room:工作组    # 群聊
 - 地址与凭证来自该进程写在数据目录里的 `runtime.json`（`{pid,url,token,lockStartedAt,…}`，0600；只在「进程还活着、且它记录的写锁 pid 与 nonce 与当前 `state.lock` 一致」时才被采用，陈旧文件直接忽略）；也可以显式指定：`--url http://127.0.0.1:3099 --token <token>` 或 `OMPBOT_URL`/`OMPBOT_TOKEN`。**本 CLI 从不打印 token，也不把它写进日志。**
 - 拿不到活跃进程时，停止/审批这类必须由持有者执行的操作会**如实拒绝**（`runs stop` 打印真实状态或报错退出），不会假装停过；读取类命令（`runs list`、`settings show`、`template export`）仍然可用。`backup` 在有别的进程写同一个库时会拒绝，避免给出不一致的副本。
 
-## 给 Bot 绑定独立电脑
+## 团队目录
 
-Windows x64 可给每个 Bot 绑定一台持久 Linux 虚拟机。模型和 OMP 会话仍在本机，电脑里的命令、文件、浏览器和桌面操作在客机执行。每台电脑默认分配 2 个 vCPU 和 2048 MiB 内存，停止后保留磁盘和浏览器 profile。
+所有 bot 的文件放在应用数据目录下的 `team/`（默认 `~/.ompbot/team`），是一个 git 仓库。omp-bot 每次改动它都自动提交一次，没装 Git 时建一个空的 `.git` 骨架让 omp 照样停在这里，界面提示装上 Git 才有改动历史。
+
+```
+team/
+  AGENTS.md               共识层：所有 bot 共用的规矩，只有你和 Main Bot 改
+  skills/<name>/SKILL.md  技能库：所有 bot 共用，每个 bot 勾选要哪些
+  workspace/              共享工作区，挂到共享电脑的 /workspace
+  .memory/mnemopi.db      记忆库，每个 bot 一个 bank
+  bots/<id>/AGENTS.md     个人身份，omp-bot 只改注释标出的身份块
+  bots/<id>/.omp/skills/  私有技能，总是加载
+  bots/<id>/work/         私有文件，挂到这个 bot 座席的 ~/work
+  bots/<id>/sessions/<scope>/  会话，scope 是 private 或 room_<群 id>
+```
+
+- bot 的 omp 进程 cwd 是 `team/bots/<id>`，私聊群聊同一个 cwd，读到团队和自己两层 AGENTS.md。任一层改了，下一轮对话前换进程并续上会话。用户级的 AGENTS.md、CLAUDE.md、GEMINI.md 不进 bot。
+- `team/AGENTS.md` 第一次创建时写入模板（说话方式、征求同意、两台机器的分工、共享电脑规则），之后 omp-bot 不再改。
+- 装技能时选「装进共享库」或「只给这个 bot」，库里和任何私有技能不许重名。
+- 从 0.1.x 升级时旧数据只复制不移动：私聊的 `work` 合进 `bots/<id>/work`，群聊的进 `work/rooms/<scope>/`，会话进 `sessions/<scope>/`，私有技能进 `.omp/skills/`，旧记忆摘要进 `work/old-memory/`。目标已有同名文件就跳过。完成后 team 根上留 `.omp-bot-migrated.json`，重复启动不再迁移。
+
+## 共享电脑
+
+Windows x64 上所有 bot 共用一台 Linux 虚拟机，当作分给团队的一台电脑。bot 绑定电脑就是在里面得到一个座席：自己的 Linux 用户、屏幕和主目录（0700，没有 sudo，互相读不到）。模型和 omp 会话仍在本机，绑定电脑只是在本机工具之上多一套客机工具，本机工具、技能、扩展和 MCP 都还在（见 [ADR 0001](docs/adr/0001-computer-tools-are-additive.md)）。
+
+- 规格：默认 4 vCPU、8 GiB 内存、64 GiB 动态磁盘。电脑面板里能改 vCPU（2 到 8，不超过本机核数减 2）和内存（4 到 16 GiB），下次开机生效。最多 16 个 bot 座席，外加一块登录屏。
+- 停一个 bot 的电脑只停它的座席，文件都保留。最后一个座席停掉后共享电脑自动关机。
+- 文件：本机的 `team/workspace` 就是共享电脑的 `/workspace`，所有 bot 能读写；`team/bots/<id>/work` 就是这个 bot 座席的 `~/work`，只有它自己能读写。两边即时可见。omp-bot 内置一个只听 127.0.0.1 的 SFTP 服务，客机经 10.0.2.2 用 sshfs 连回来，不做缓存。依赖和构建产物放客机本地盘，比如 `~/build/`，挂载目录里大量小文件会慢。附件放 `~/work/attachments/`，`computer_publish_file` 把客机文件登记进成果库。
+- 审批：客机工具在「本机改东西先问我」和「全部放手」两档里都不问，只有装系统包（`computer_install_packages`，apt）每次都问。「只聊天」不给模型任何工具，绑定电脑也一样。
+- 网站登录：电脑面板点「登录网站」打开登录屏，在上面登录、点「完成」，所有 bot 下次开浏览器都是登录状态，bot 自己在别的网站上的登录不受影响。只同步 cookie，把登录存在本地存储里的网站同步不了。在网站上点退出会让大家一起掉线，到登录屏重登一次就恢复。
+- 旧电脑：0.1.x 每个 bot 一台的虚拟机。共享电脑开机后，omp-bot 依次开机每台旧电脑，把 `/work` 和主目录复制到对应座席的 `~/old-computer/`，已有文件不覆盖，复制过的跳过，浏览器登录不复制。电脑面板的「旧电脑」行显示进度和错误。旧磁盘一直保留，点「删除旧电脑」确认后才删，不能恢复。
 
 桌面发布版先将 `release/omp-bot-computer-runtime.zip` 解压到 `%LOCALAPPDATA%\omp-bot\`，得到 `%LOCALAPPDATA%\omp-bot\computer-runtime\manifest.json` 及 `qemu/`、`images/`、`licenses/`。这是共享缓存，安装版升级和便携版换目录都可继续使用。也可将资源包解压到 `omp-bot.exe` 所在文件夹，形成相邻的 `computer-runtime/`。聊天、任务和安卓配对不需要该资源包。
 
-资源选择顺序为显式路径或 `OMPBOT_COMPUTER_RUNTIME`、EXE 旁的资源、用户缓存、已有包内资源。已有电脑停止后换到内容相同的镜像，会先核对镜像摘要，再迁移磁盘的基础镜像路径，保留客机文件和登录状态；不会在电脑运行时改磁盘路径。镜像内容不一致时拒绝迁移。
+资源选择顺序为显式路径或 `OMPBOT_COMPUTER_RUNTIME`、EXE 旁的资源、用户缓存、已有包内资源。已有电脑停止后换到内容相同的镜像，会先核对镜像摘要，再迁移磁盘的基础镜像路径，保留客机文件和登录状态；不会在电脑运行时改磁盘路径。镜像内容不一致时拒绝迁移。已有的共享电脑镜像开机时自动补装座席脚本、登录脚本和浏览器钩子，缺 sshfs 时用 apt 装上。
 
 源码运行时先准备资源。QEMU 官方安装包的解包需要 7-Zip；运行电脑需要可用的 Windows Hypervisor Platform。应用不会自动安装系统功能或重启 Windows。
 
@@ -191,21 +219,21 @@ npm run serve
 npm run setup:computers -- --runtime-source "资源目录" --image-source "官方镜像文件"
 ```
 
-打开 Bot 的「电脑」面板，点「绑定电脑」。桌面画面来自本机同源接口。「接管控制」先终止自动操作，再允许鼠标、键盘和文本输入；「归还控制」等待在途输入结束，旧输入不会重放。动作结果无法确认时保留错误状态并阻止自动运行，可停止电脑后重新启动。
+打开 Bot 的「电脑」面板，点「绑定电脑」。桌面画面来自本机同源接口。「接管控制」先终止自动操作，再允许鼠标、键盘和文本输入；「归还控制」等待在途输入结束，旧输入不会重放。动作结果无法确认时保留错误状态并阻止自动运行，可停止座席后重新启动。中文和 emoji 使用「发送文本」，发送前先点击目标窗口获得焦点。
 
-电脑显示「运行中」前会核对客机服务、工作目录和 XFCE 图形桌面。快捷键通过 SDK 的主桌面目标送达，可以在没有应用窗口获得焦点时用 `Ctrl+Alt+T` 打开终端；中文和 emoji 使用「发送文本」，发送前先点击目标窗口获得焦点。
-
-绑定电脑的任务 Bot 只取得所属客机的截图、输入、命令、文件和成果工具，宿主工具、用户 MCP、扩展和技能不进入该回合。附件上传到客机 `/work/attachments/`，`computer_publish_file` 把客机文件登记进现有成果库。「只聊天」模式继续聊天，绑定电脑不授予模型电脑工具。
-
-电脑配置保存在应用数据目录的 `computers/`。退出应用只断开管理连接，仍在运行的电脑继续占用资源；点「停止」关闭电源并保留磁盘。服务重启可重连原电脑。不同 Bot 不共享磁盘，同一电脑在私聊与群聊间互斥。电脑保留公网 NAT 网络，不自动复制宿主浏览器登录。
+电脑配置保存在应用数据目录的 `computers/`：`shared/` 是共享电脑，`seats.json` 是座席，`file-share/` 是 SFTP 的钥匙和端口，`login.json` 记上次发布登录的时间，`old-computers.json` 记旧电脑的复制进度。退出应用只断开管理连接，仍在运行的共享电脑继续占用资源。服务重启可重连。同一座席在私聊与群聊间互斥。电脑保留公网 NAT 网络。
 
 Cua SDK 为 MIT，官方镜像中的 `cua-spacesd` 为 FSL-1.1-MIT，QEMU 保留 GPL/LGPL 许可。许可原文和来源摘要随独立电脑资源包分发；准备资源使用的 Cua CLI 为 MIT，留在源码的 `.computer-runtime/`，不随发布应用携带。商业竞争用途需按上游许可处理。
 
-电脑验收使用真实 VM 和支持图片的模型，需要已准备运行资源及 OMP 模型认证。
+### 实机验证
 
-```sh
-npm run smoke:computers -- --model magpie/codex/gpt-6.1-sol
-```
+沙盒里座席、文件挂载、登录屏和旧电脑搬家都用真实的 Xvfb、spacesd、sshfs、Chromium 和仓库里的客机脚本跑过（证据在 `.scratch/team-rebuild/proof/`），但共享虚拟机换成了沙盒本身。下面这些只能在 Windows 加 WHPX 的机器上验：
+
+1. `npm run setup:computers`，然后 `npm run smoke:computers -- --model <支持图片的模型>`。看两个 bot 的座席同时起来，各自截图、点击、输入，互相读不到主目录，共享电脑里的命令不弹审批，工具清单里有装系统包的工具。再让一个 bot 装一个系统包，确认会问你。
+2. 文件：在 Windows 的 `team/workspace` 放一个文件，客机 `/workspace` 马上看到；bot 在 `~/work` 写的文件，本机 `team/bots/<id>/work` 马上看到。这一步验证 QEMU 用户网络经 10.0.2.2 连回宿主、Windows 上的 SFTP 服务（路径分隔符、权限位、符号链接）和旧镜像补装 sshfs。
+3. 登录：点「登录网站」，在登录屏登录一个真实网站，点「完成」，再让两个 bot 各开一次浏览器，都应是登录状态。这一步验证 Debian 的 chromium 包、xfwm4 下的焦点和关窗。
+4. 旧电脑：留着 0.1.x 的电脑磁盘升级，开任一 bot 的座席，等「旧电脑」行显示已复制，到客机 `~/old-computer/` 核对文件，再试一次「删除旧电脑」。
+5. 资源：五六个 bot 同时开浏览器时看宿主内存，必要时在电脑面板调内存。
 
 ## 架构
 
@@ -231,8 +259,10 @@ npm run smoke:computers -- --model magpie/codex/gpt-6.1-sol
 - **`src/rpc-client.mjs`** — 驱动一个 `omp --mode rpc` 子进程的 JSONL 客户端：帧编解码、协议 v2 协商与 chunk 重组、命令/响应按 id 关联、事件订阅、host tool 回调服务。
 - **`src/server.mjs`** — GUI 后端：node:http 常驻服务（127.0.0.1），静态文件 + JSON API + SSE 事件流。
 - `web/` 提供共享网页界面。`app.js` 负责侧栏、聊天、设置与交互；`workbench-runs.js` 持有事件流、快照后的重放协调、Run 投影和原生增量渲染。草稿与附件归属分别由原有会话交互和附件模块管理。
-- **`src/bot.mjs`** — `BotRuntime`：一个 omp RPC 子进程绑定一个会话上下文（`private` 或 `room:<id>`）。注入人格（`--append-system-prompt`）与隔离 overlay（`--config`），注册团队工具，维护 `busy`/`deliveryDepth` 状态机。
-- **`src/persona.mjs`** — bot 人格文本生成 + 隔离 overlay（关掉 context-file provider 防止用户全局 `~/.omp/agent/AGENTS.md` 漏进 bot；关掉 `memory.backend`/`autolearn` 防止 bot recall/retain 用户的私有记忆库）。
+- **`src/bot.mjs`** — `BotRuntime`：一个 omp RPC 子进程绑定一个会话上下文（`private` 或 `room:<id>`），cwd 是 `team/bots/<id>`，会话在 `sessions/<scope>/`。注入团队工具说明（`--append-system-prompt`）与 overlay（`--config`），注册团队工具和客机工具，维护 `busy`/`deliveryDepth` 状态机。
+- **`src/team.mjs`** — 团队目录：建树、写模板、git 提交、身份块往返、技能库和私有技能、从 0.1.x 迁移。别的模块的 team 路径都从这里拿。
+- **`src/persona.mjs`** — 团队工具说明 + overlay：关掉用户级 AGENTS.md、CLAUDE.md、GEMINI.md，项目级打开；技能库目录；客机工具 allow、装系统包 prompt；记忆默认关，开启时用 mnemopi（`scoping: global`、`bank: bot-<id>`、库在 `team/.memory/`）。
+- **`src/computer-seats.mjs`** — 座席层：对外接口和电脑后端一样，电脑 id 指座席。经管理通道跑 `guest/omp-seat` 建座席、挂文件、装包；登录屏和发布登录；旧电脑搬家。`src/computer-backend.mjs` 是底下的 QEMU 后端，`src/file-share.mjs` 是挂载用的 SFTP 服务。
 - **`src/orchestrator.mjs`** — 唯一整合点：花名册 CRUD、runtime 池（按执行环境与权限档做租用兼容检查）、Run 生命周期（`startRun`/`cancelRun`/`steerRun`/`answerUi`）、`message_bot`/`list_bots` 团队工具、bot→bot 投递协议、群聊入口。公开的旧方法（`chatWithBot`/`postToRoom`）内部走同一套 Run，不再有第二条执行路径。
 - **`src/ledger.mjs`** — `node:sqlite` 台账：Run 投影、全局事件游标、附件/成果/计划/审批/设置等产品记录、每 Run 用量。**不是第二份模型历史**：真实的模型回合、工具调用、压缩与分支都在 OMP 自己的 session JSONL 里，台账只做有限重放与展示投影。
 - **`src/features.mjs`（`src/features/**`）** — 工作台产品面：资料与成果、计划调度、能力/MCP/技能/记忆、浏览器接管等端点，通过 `WorkbenchFeatures.handleRequest` 交给 server 调用一次。
@@ -264,6 +294,9 @@ node test/runs.mjs     # 运行契约：状态迁移、审批、取消级联、�
 node test/features.mjs # 资料/成果/计划/原生能力面/文件检查点（真 Ledger + 真文件系统）
 node test/http-boundaries.mjs # HTTP 边界：凭证、跨源/Host、Content-Type、超大 body、cookie bootstrap、SSE 重放
 node test/computers.mjs # 电脑控制：旧代拒绝、接管竞态、输入 drain、未知副作用与成果临时目录
+node test/seats.mjs     # 座席层：规格、建座席、最后一个停掉关机、补装客机脚本、装包、挂载参数、登录屏、旧电脑搬家（替身虚拟机）
+node test/file-share.mjs # SFTP 服务：分根、钥匙、越界和外链拒绝、改名覆盖、并发追加、请求顺序、OpenSSH sftp
+node test/team.mjs      # 团队目录：模板、身份块、git、迁移只复制、技能库和白名单
 node test/rpc-client.mjs      # RPC 传输层：竞态、被拒 admission、取消、坏帧恢复（内联协议夹具，零模型）
 node test/channels.mjs        # 设备配对与 IM 适配器：真实 Ledger + 本地假端点，不发真实消息
 node smoke-gui.mjs     # HTTP API 层：静态/CRUD/校验/SSE/目录穿越
@@ -283,9 +316,9 @@ node probe-isolation.mjs # 判决实验：证明 overlay 关掉了记忆后端�
 ## 已知限制
 
 - **模型指令遵循**：admin 模式的 @路由依赖 admin bot 听话地 `@` 出成员名。用能力强的模型（Claude/GPT-5.x）稳，弱模型偶尔不 @。`everyone` 模式不依赖 @，是确定性的。
-- **记忆隔离**：默认关闭 OMP 共享记忆后端与 autolearn，使用每 Bot、每 scope 独立的会话续接。原生 local 记忆需要私有 agentDir 和认证代理或专用 profile，并核对原生解析目录。前置缺失时明确拒绝开启，不修改用户全局认证或共享库。只清理本 Bot 的私有记忆文件，不调用会删除共享表的原生全局 clear。
+- **记忆**：默认关闭。开启后用 omp 自带的 mnemopi，每个 bot 一个 bank，所有 bot 共用 `team/.memory/mnemopi.db`，私聊群聊通用，autolearn 关掉。模型和登录沿用用户自己的 omp 配置。旧的 local 记忆不导入，摘要在 `bots/<id>/work/old-memory/`。记忆面板只读，写入和遗忘由 bot 自己做。
 - **单写者**：同一 `OMPBOT_HOME` 同时只能一个 orchestrator 写；第二个拿不到锁时只读，桌面版会直接提示而不是带着只读状态跑。CLI 与桌面版共用同一份 `state.json` + `workbench.sqlite`，不要用两个程序同时写。
-- **权限与沙箱如实披露**：`supervised` 是本机原生审批模式，不是 OS 沙箱；`full` 是明确的安全降级，可访问整个本机账户。本机没有经过验证的 Windows 沙箱（未验证 Docker/Windows Sandbox 可用性，也没验证 WSL 是否构成隔离），因此不提供 `sandbox` 模式，不挂「安全模式」标签继续放开 shell。
+- **权限与沙箱如实披露**：界面三档对应内部的执行档和审批档（chat+write、supervised+write、full+yolo）。`supervised` 是本机原生审批模式，不是 OS 沙箱；共享电脑的隔离只防误操作，不是对宿主的强制隔离；`full` 是明确的安全降级，可访问整个本机账户。本机没有经过验证的 Windows 沙箱（未验证 Docker/Windows Sandbox 可用性，也没验证 WSL 是否构成隔离），因此不提供 `sandbox` 模式，不挂「安全模式」标签继续放开 shell。
 - **Windows**：已在本机 Windows（Node v24 / Electron 44）实测；stdio 管道与子进程生命周期正常。
 - **飞书与设备**：已接入飞书适配器，两条接入路径共用同一套身份白名单、入站落库、去重、原生审批回答和投递记录。官方长连接由本机主动连出，不需要公网入口，但应用仍要在开放平台订阅事件并处于可用范围（已发布版本或测试可用名单），否则收不到事件；本地回调 HTTP 路径需要自备可达 HTTPS 入口把事件路径转发到本机端口。两条路径都只处理白名单内的身份，名单外的发送者一律拒绝；可以只保存配置不启用。真实飞书账号尚未验收。设备配对支持 Bot 范围权限和撤销，主服务仍默认仅监听回环地址；跨手机与远端需要用户自备并授权网络入口。
 - **HTTP 只服务本机**：监听 127.0.0.1，`/api` 要求同源有效会话 cookie 或 Bearer token，并校验 Host/Origin/Content-Type。别把端口转发到公网，也别把带 token 的启动 URL 记进日志或分享出去。

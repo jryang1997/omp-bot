@@ -4,10 +4,38 @@
 
 ## [0.2.0] - 未发布
 
-团队架构重构进行中，完整说明在 12 号票落地时补齐。
+bot 继续住在 Windows 本机，所有 bot 共用一台 Linux 共享电脑，每个 bot 在里面一个座席。团队的文件放进一个 team 目录，上层是共识、技能库和共享工作区，下层是每个 bot 自己的身份、私有技能、文件和会话。审批收成 3 档，头像换成吉祥物。为什么绑定电脑不再拿走本机工具，见 `docs/adr/0001-computer-tools-are-additive.md`。新词见 `GLOSSARY.md`。
+
+### 团队目录
+
+- 新的 `team/` 目录（默认 `~/.ompbot/team`）是一个 git 仓库：`AGENTS.md` 共识层，`skills/` 技能库，`workspace/` 共享工作区，`.memory/` 记忆库，`bots/<id>/` 下是个人身份 `AGENTS.md`、私有技能 `.omp/skills/`、私有文件 `work/` 和会话 `sessions/<scope>/`。路径都由 `src/team.mjs` 给出。
+- omp-bot 每次改 team 目录后自动提交一次，同一轮的多次改动合成一次，说明用"；"连接。没装 Git 时建一个 `.git` 骨架让 omp 照样停在 team 根上，界面提示一次装上 Git 才有改动历史。
+- bot 的 omp 进程 cwd 改成 `team/bots/<id>`，私聊群聊同一个 cwd，会话目录按 scope 分开。用户选的项目目录仍用 `--add-dir` 加进来。
+- 身份（名字、角色、专属指令）写进 `bots/<id>/AGENTS.md` 里 HTML 注释标出的身份块。表单只重写这一块；在文件里改了身份块，下次读花名册时回填表单。块外的内容属于用户和 bot。
+- `team/AGENTS.md` 第一次创建时写模板：说话方式和征求同意的默认规矩（从 persona 挪过来）、两台机器的分工、共享电脑规则、付款等事项先问用户、私聊的事在群里不主动提、只有 Main Bot 和用户改这个文件。之后 omp-bot 不再改它。
+- overlay 只关用户级的 AGENTS.md、CLAUDE.md、GEMINI.md，项目级打开，bot 读到团队和自己两层。任一层变了，下一轮对话前换进程并续上原会话。
+
+### 升级迁移
+
+- 启动时把 0.1.x 的数据复制进 team 目录，只复制不移动，目标已有同名文件就跳过，符号链接不复制。私聊的 `work` 合进 `bots/<id>/work`，群聊的进 `work/rooms/<scope>/`。旧 `work/.omp/skills` 并进 `bots/<id>/.omp/skills/`，私聊的 `mcp.json` 进 `bots/<id>/.omp/`。
+- 旧会话复制进 `sessions/<scope>/`，保留修改时间，副本的会话头改成新 cwd，续接时读得到两层 AGENTS.md。旧文件不动。
+- 旧记忆只带非空的 `memory_summary.md`、`MEMORY.md`、`learned.md`，放 `work/old-memory/<scope>/`，身份块里提示 bot 需要时去读。
+- 完成后 team 根上留 `.omp-bot-migrated.json`，记着每个 bot 复制、跳过、失败的数目。单个文件失败不挡启动；整个 bot 读不下来就不留标记，下次再试。
+- 旧的每 bot 电脑见下面「电脑」的旧电脑搬家。
+
+### 技能库
+
+- overlay 的 `skills.customDirectories` 指向 `team/skills`。白名单 null 表示库里全部；列表时并上私有技能传 `--skills`，并完为空传 `--no-skills`。行为变化：私有技能现在总是加载，以前取消勾选的私有技能升级后会重新加载。
+- 新接口 `POST /api/bots/<id>/skills/install`，`target` 选 `library`（装进共享库）或 `bot`（只给这个 bot），来源是本机技能目录或直接贴 SKILL.md。只给本机主人用，设备不能调。重名（不分大小写）、没写 description、名字带非法字符时拒绝并说明原因。
+- 装了技能下一轮就重建进程，不用手动重启。技能面板分共享库、只给这个 bot 的技能和装技能表单三块。
+
+### 审批
+
+- 用户只看到 3 档：「只聊天」「本机改东西先问我」「全部放手」，内部分别是 chat+write、supervised+write、full+yolo。旧的 9 种组合归到最近的一档，always-ask 归到「本机改东西先问我」。选「全部放手」要确认一次。新错误码 `confirm_permission_required`、`permission_invalid`。
 
 ### 电脑
 
+- 绑定电脑只加客机工具，不再加 `--no-tools --no-extensions --no-skills`，也不再因此关 MCP。本机工具、技能、扩展和 MCP 都还在，运行时的电脑档工具面校验和 `computer_host_escape_denied` 委派边界删掉。客机工具在两种可执行档里都 allow，描述开头写"在 Linux 共享电脑里"。推翻旧规格的理由见 ADR 0001。
 - 每个助手一台虚拟机改成一台共享电脑，每个助手一个座席：自己的 Linux 用户、屏幕、spacesd 和主目录。主目录 0700，没有 sudo，互相读不到。最后一个座席停掉后共享电脑自动关机。
 - 共享电脑默认 4 vCPU、8 GiB 内存、64 GiB 动态磁盘，可在电脑面板或 `PUT /api/computer/shared-machine` 改 CPU 和内存，下次开机生效。
 - 客机工具的路径可以写 `~`，默认工作目录从 `/work` 改成 `~/work`，附件放 `~/work/attachments`。不再限制只能写 `/work` 和 `/tmp`。
@@ -58,6 +86,16 @@
 - `scripts/build-mascot.mjs`（`OMS_DIR=<上游检出目录> npm run build:mascot`）从上游固定提交 `330b098` 生成 `web/vendor/mascot/omp-mascot.js`，同时写 `NOTICE`、复制上游 `LICENSE`。上游检出不在这个提交、或者要改写的片段找不到，脚本就停下。生成结果可复现。新增开发依赖 `esbuild`，只在重新生成时用，运行时不需要。
 - 吉祥物形象是 Supamaus Software Private Limited 的商标，Apache-2.0 不授予商标权。界面里不出现上游产品名，吉祥物不当 omp-bot 的图标。发布前要等上游对商标问题的回复。
 - 证据：`.scratch/team-rebuild/proof/avatar/`，截图脚本 34 项全过，含各状态、编辑器、图片裁切、详情页、主助手、群头像和深色模式。
+
+### 待实机验证
+
+沙盒里座席、挂载、登录屏和旧电脑搬家都用真实的 Xvfb、spacesd、sshfs、Chromium 和仓库里的客机脚本跑过，共享虚拟机换成了沙盒本身。下面这些只能在 Windows 加 WHPX 的机器上验，步骤见 README 的「共享电脑 → 实机验证」。
+
+- 真实 QEMU 和 WHPX 下的共享电脑，`npm run smoke:computers`，以及五六个 bot 同时开浏览器时的内存。
+- QEMU 用户网络经 10.0.2.2 连回宿主的 SFTP 服务，Windows 宿主上的路径分隔符、权限位和符号链接。
+- 已有镜像开机补装 sshfs、登录脚本和浏览器钩子；Debian 的 chromium 包、xfwm4 下的焦点和关窗；真实网站的登录。
+- 真实旧电脑和共享电脑之间的搬家（cua 用户、spacesd 传大文件、两台虚拟机同时开）。
+- 真实模型的 smoke（`gate.mjs`、`smoke-b2b.mjs`、`smoke-group.mjs`、`smoke-persist.mjs`）。
 
 ## [0.1.5] - 2026-10-14
 
