@@ -100,10 +100,11 @@ export const COMPUTER_TOOL_NAMES = Object.freeze([
   "computer_shell",
   "computer_files",
   "computer_upload_attachment",
+  "computer_install_packages",
   "computer_publish_file",
 ]);
 /** 客机工具里每次都要用户批准的：overlay 写 prompt，omp 在 yolo 下也尊重，全部放手档同样会问。 */
-export const COMPUTER_PROMPT_TOOLS = Object.freeze([]);
+export const COMPUTER_PROMPT_TOOLS = Object.freeze(["computer_install_packages"]);
 
 export const DEFAULT_MEMORY_ENABLED = false;
 

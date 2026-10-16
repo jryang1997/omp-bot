@@ -24,10 +24,13 @@ export const DEFAULT_COMPUTER_IMAGE = "cua-linux";
 /** 公开状态里允许出现的电脑状态（与合同一致；其余如实写 error，不发明新状态）。 */
 const PUBLIC_STATES = new Set(["starting", "running", "stopping", "stopped", "error"]);
 
-const DEFAULT_GUEST_CWD = "/work";
-const ATTACHMENT_GUEST_DIR = "/work/attachments";
-/** 写操作只允许落在客机工作区与临时目录，避免 Bot 删掉镜像里的系统与浏览器 profile。 */
-const MUTABLE_GUEST_ROOTS = ["/work", "/tmp"];
+/** 共享电脑里每个 bot 是一个座席用户，`~` 是它自己的主目录。 */
+const DEFAULT_GUEST_CWD = "~/work";
+const ATTACHMENT_GUEST_DIR = "~/work/attachments";
+/** remove 不删这几个路径本身。座席用户没有 sudo，系统目录本来就删不掉。 */
+const UNREMOVABLE_GUEST_PATHS = ["/", "~", "~/work"];
+
+const MAX_INSTALL_PACKAGES = 32;
 
 const DEFAULT_SHELL_TIMEOUT_MS = 30_000;
 const MIN_SHELL_TIMEOUT_MS = 1_000;
@@ -56,8 +59,8 @@ function boundedWait(ms) {
   return { promise, cancel: () => clearTimeout(timer) };
 }
 
-/** 客机路径：必须是绝对 POSIX 路径；写操作额外限制在 /work 与 /tmp。 */
-export function guestPath(raw, { label = "path", mutable = false } = {}) {
+/** 客机路径：绝对 POSIX 路径，或 `~`、`~/…`（座席用户的主目录）。 */
+export function guestPath(raw, { label = "path" } = {}) {
   const s = String(raw ?? "").trim();
   if (!s) throw ferr(400, "invalid_field", `${label} 必填`);
   if (s.length > 500) throw ferr(400, "invalid_field", `${label} 超长（>500）`);
@@ -65,15 +68,18 @@ export function guestPath(raw, { label = "path", mutable = false } = {}) {
   if (/^[A-Za-z]:/.test(s) || s.includes("\\")) {
     throw ferr(400, "invalid_path", `${label} 必须是客机绝对路径（宿主路径不被接受）：${s}`);
   }
-  if (!s.startsWith("/")) {
-    throw ferr(400, "invalid_path", `${label} 必须是客机绝对路径（以 / 开头）：${s}`);
+  if (!s.startsWith("/") && s !== "~" && !s.startsWith("~/")) {
+    throw ferr(400, "invalid_path", `${label} 必须是客机绝对路径（以 / 开头）或 ~/ 开头：${s}`);
   }
   if (s.split("/").some((seg) => seg === "..")) throw ferr(400, "invalid_path", `${label} 不能包含 ..`);
-  const norm = s.replace(/\/{2,}/g, "/").replace(/\/$/, "") || "/";
-  if (mutable && !MUTABLE_GUEST_ROOTS.some((root) => norm === root || norm.startsWith(`${root}/`))) {
-    throw ferr(400, "guest_path_readonly", `写操作只允许 ${MUTABLE_GUEST_ROOTS.join(" 与 ")} 下的路径，收到 ${norm}`);
-  }
-  return norm;
+  return s.replace(/\/{2,}/g, "/").replace(/\/$/, "") || "/";
+}
+
+/** 给 /bin/sh 用的路径：`~/rest` 写成 "$HOME"/'rest'，让座席用户自己的 shell 展开主目录。 */
+export function shPath(path) {
+  if (path === "~") return '"$HOME"';
+  if (path.startsWith("~/")) return `"$HOME"/${shQuote(path.slice(2))}`;
+  return shQuote(path);
 }
 
 /** 单引号安全引用（客机 /bin/sh -lc 用）。 */
@@ -207,7 +213,7 @@ const FILES_SCHEMA = {
   type: "object",
   properties: {
     action: { type: "string", enum: ["list", "read", "write", "remove"], description: "客机文件操作" },
-    path: { type: "string", description: "客机绝对路径（写/删只允许 /work 与 /tmp 下）" },
+    path: { type: "string", description: "客机路径：绝对路径，或 ~/ 开头（你自己的主目录）" },
     text: { type: "string", description: "write 要写入的 UTF-8 文本" },
     maxBytes: { type: "integer", description: `read 最多读取的字节数（默认 ${DEFAULT_READ_BYTES}，上限 ${MAX_READ_BYTES}）` },
   },
@@ -219,9 +225,24 @@ const UPLOAD_SCHEMA = {
   type: "object",
   properties: {
     attachmentId: { type: "string", description: "本 Bot 附件库里已登记的附件 id" },
-    path: { type: "string", description: `客机目标路径（默认 ${ATTACHMENT_GUEST_DIR}/<附件 id>-<文件名>，只允许 /work 与 /tmp 下）` },
+    path: { type: "string", description: `客机目标路径（默认 ${ATTACHMENT_GUEST_DIR}/<附件 id>-<文件名>）` },
   },
   required: ["attachmentId"],
+  additionalProperties: false,
+};
+
+const INSTALL_SCHEMA = {
+  type: "object",
+  properties: {
+    packages: {
+      type: "array",
+      items: { type: "string" },
+      minItems: 1,
+      maxItems: MAX_INSTALL_PACKAGES,
+      description: "要装的 Debian 包名，例如 [\"ffmpeg\", \"poppler-utils\"]",
+    },
+  },
+  required: ["packages"],
   additionalProperties: false,
 };
 
@@ -292,7 +313,7 @@ export class Computers {
   }
 
   /**
-   * 解析并缓存 backend。默认构造 `new ComputerBackend({home, runtimeDir?})`；
+   * 解析并缓存 backend。默认是共享电脑的座席层 `createSharedComputer({home, runtimeDir?})`；
    * 模块或运行时资产缺失时抛 computer_runtime_unavailable（不静默退回宿主执行）。
    */
   async ensureBackend() {
@@ -301,15 +322,15 @@ export class Computers {
       this._backendPromise = (async () => {
         let mod;
         try {
-          mod = await import("../computer-backend.mjs");
+          mod = await import("../computer-seats.mjs");
         } catch (e) {
-          throw ferr(503, "computer_runtime_unavailable", `电脑运行时不可用（src/computer-backend.mjs 无法加载）：${e?.message ?? e}`);
+          throw ferr(503, "computer_runtime_unavailable", `电脑运行时不可用（src/computer-seats.mjs 无法加载）：${e?.message ?? e}`);
         }
-        if (typeof mod?.ComputerBackend !== "function") {
-          throw ferr(503, "computer_runtime_unavailable", "电脑运行时不可用（computer-backend.mjs 没有导出 ComputerBackend）");
+        if (typeof mod?.createSharedComputer !== "function") {
+          throw ferr(503, "computer_runtime_unavailable", "电脑运行时不可用（computer-seats.mjs 没有导出 createSharedComputer）");
         }
         const opts = { home: this.home, ...(this.runtimeDir ? { runtimeDir: this.runtimeDir } : {}) };
-        return new mod.ComputerBackend(opts);
+        return mod.createSharedComputer(opts);
       })().catch((e) => {
         this._backendError = e?.message ?? String(e);
         this._backendPromise = null;
@@ -528,6 +549,9 @@ export class Computers {
         ...base,
         state,
         display,
+        // 座席层才有：共享电脑本身的状态，和这个座席是否就绪
+        ...(st?.vm ? { vm: { state: String(st.vm.state ?? "unknown") } } : {}),
+        ...(st?.seat ? { seat: { ready: st.seat.ready === true } } : {}),
         // 未核对的客机副作用优先于后端观察值：自动回合在核对前一直被拒绝。
         error: ctrl.reconcile
           ? { code: ctrl.reconcile.code ?? "computer_effect_unknown", message: ctrl.reconcile.message ?? "客机副作用未知，需要人工核对" }
@@ -1253,7 +1277,7 @@ export class Computers {
         name: "computer_shell",
         label: "Computer Shell",
         description:
-          "在 Linux 共享电脑里用 /bin/sh 执行命令，返回 stdout/stderr/退出码。默认工作目录 /work。这台电脑不是运行工作台的那台机器，本机工具照常可用。",
+          "在 Linux 共享电脑里你自己的座席上用 /bin/sh 执行命令，返回 stdout/stderr/退出码。默认工作目录 ~/work，~ 是你自己的主目录，别的 bot 的主目录你看不到。没有 sudo，要装系统包用 computer_install_packages。这台电脑不是运行工作台的那台机器，本机工具照常可用。",
         parameters: SHELL_SCHEMA,
         handler: (args, meta) =>
           this.#toolCall({ bot, runId: runId(), cid, name: "computer_shell", signal: signalOf(meta), kind: "shell", mutating: true }, async ({ backend, signal, generation, authority }) => {
@@ -1284,13 +1308,12 @@ export class Computers {
         name: "computer_files",
         label: "Computer Files",
         description:
-          "在 Linux 共享电脑里查看/读取/写入/删除文件。list/read 可看任意客机绝对路径；write/remove 只允许 /work 与 /tmp。宿主路径不接受。",
+          "在 Linux 共享电脑里查看/读取/写入/删除文件。路径可以是绝对路径或 ~/ 开头（你自己的主目录）。宿主路径不接受。",
         parameters: FILES_SCHEMA,
         handler: (args, meta) =>
           this.#toolCall({ bot, runId: runId(), cid, name: "computer_files", signal: signalOf(meta), kind: "files", mutating: true }, async ({ backend, signal, generation, authority }) => {
             const action = String(args?.action ?? "").trim();
-            const mutable = action === "write" || action === "remove";
-            const path = guestPath(args?.path, { label: "path", mutable });
+            const path = guestPath(args?.path, { label: "path" });
             // 每次调用一个独立 tag：并发工具调用不会因为一个被取消而互相杀掉客机命令。
             this._tagSeq += 1;
             const tag = `ompbot-files-${String(runId() ?? "unscoped").replace(/[^A-Za-z0-9_-]/g, "_")}-g${generation}-${this._tagSeq}`;
@@ -1301,7 +1324,7 @@ export class Computers {
               );
 
             if (action === "list") {
-              const out = await runGuest(`ls -la ${shQuote(path)}`, 20_000);
+              const out = await runGuest(`ls -la ${shPath(path)}`, 20_000);
               if (out?.exitCode !== 0) {
                 throw ferr(409, "guest_file_error", `列出客机目录失败：${truncate(out?.stderr || out?.stdout || "unknown", 2000)}`);
               }
@@ -1310,7 +1333,7 @@ export class Computers {
             if (action === "read") {
               const rawMax = Number(args?.maxBytes);
               const max = Number.isFinite(rawMax) && rawMax > 0 ? Math.min(Math.trunc(rawMax), MAX_READ_BYTES) : DEFAULT_READ_BYTES;
-              const script = `p=${shQuote(path)}; if [ ! -e "$p" ]; then echo "missing" >&2; exit 4; fi; if [ -d "$p" ]; then echo "is_directory" >&2; exit 4; fi; wc -c <"$p"; head -c ${max} "$p"`;
+              const script = `p=${shPath(path)}; if [ ! -e "$p" ]; then echo "missing" >&2; exit 4; fi; if [ -d "$p" ]; then echo "is_directory" >&2; exit 4; fi; wc -c <"$p"; head -c ${max} "$p"`;
               const out = await runGuest(script);
               if (out?.exitCode !== 0) {
                 throw ferr(409, "guest_file_error", `读取客机文件失败：${truncate(out?.stderr || out?.stdout || "unknown", 2000)}`);
@@ -1345,10 +1368,10 @@ export class Computers {
               return { content: [{ type: "text", text: `已写入客机文件 ${path}（${humanBytes(Buffer.byteLength(text, "utf8"))}）` }] };
             }
             if (action === "remove") {
-              if (MUTABLE_GUEST_ROOTS.includes(path)) {
+              if (UNREMOVABLE_GUEST_PATHS.includes(path)) {
                 throw ferr(400, "guest_path_readonly", `拒绝删除 ${path} 本身`);
               }
-              const out = await runGuest(`rm -rf -- ${shQuote(path)}`, 20_000);
+              const out = await runGuest(`rm -rf -- ${shPath(path)}`, 20_000);
               if (out?.exitCode !== 0) {
                 throw ferr(409, "guest_file_error", `删除客机路径失败：${truncate(out?.stderr || out?.stdout || "unknown", 2000)}`);
               }
@@ -1373,7 +1396,7 @@ export class Computers {
             const { record, absPath } = attachments.loadFor(bot.id, id);
             const dest = args?.path === undefined
               ? this.#attachmentGuestPath(record)
-              : guestPath(args.path, { label: "path", mutable: true });
+              : guestPath(args.path, { label: "path" });
             await this.#withAction(
               { computerId: cid, botId: bot.id, runId: runId(), kind: "upload_attachment", authority, signal },
               (s) => backend.uploadFile(cid, { localPath: absPath, path: dest }, { signal: s }),
@@ -1387,6 +1410,31 @@ export class Computers {
                 },
               ],
             };
+          }),
+      },
+      {
+        name: "computer_install_packages",
+        label: "Computer Install Packages",
+        description:
+          "在 Linux 共享电脑里用 apt 装系统包（Debian 包名）。装好后所有 bot 都能用。每次都要用户批准。只在确实缺少系统程序时用，Python/Node 包请用 pip/npm 装进你自己的主目录。",
+        parameters: INSTALL_SCHEMA,
+        handler: (args, meta) =>
+          this.#toolCall({ bot, runId: runId(), cid, name: "computer_install_packages", signal: signalOf(meta), kind: "install_packages", mutating: true }, async ({ backend, signal, authority }) => {
+            if (typeof backend.installPackages !== "function") {
+              throw ferr(501, "computer_install_unsupported", "这台电脑的后端不支持装系统包");
+            }
+            const packages = Array.isArray(args?.packages) ? args.packages : [];
+            const out = await this.#withAction(
+              { computerId: cid, botId: bot.id, runId: runId(), kind: "install_packages", authority, signal },
+              (s) => backend.installPackages(cid, packages, { signal: s }),
+            );
+            const ok = out?.exitCode === 0 && out?.timedOut !== true;
+            const parts = [
+              `${ok ? "已装好" : "没装成"}：${(out?.packages ?? packages).join(" ")}（exit=${out?.exitCode ?? "null"}${out?.timedOut ? "，超时" : ""}）`,
+              out?.stdout ? `stdout:\n${truncate(out.stdout, 6000)}` : "",
+              out?.stderr ? `stderr:\n${truncate(out.stderr, 6000)}` : "",
+            ].filter(Boolean);
+            return { content: [{ type: "text", text: parts.join("\n") }], isError: !ok };
           }),
       },
       {

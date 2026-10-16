@@ -9,7 +9,7 @@ import { DEFAULT_MASCOT_BODY, MAIN_MASCOT_COLOR, MASCOT_BODY_IDS, MASCOT_COLOR_I
 import { writePersonaFiles, personaText } from "../src/persona.mjs";
 import { BotRuntime } from "../src/bot.mjs";
 import { Computers } from "../src/features/computers.mjs";
-import { COMPUTER_TOOL_NAMES } from "../src/constants.mjs";
+import { COMPUTER_PROMPT_TOOLS, COMPUTER_TOOL_NAMES } from "../src/constants.mjs";
 import { MIGRATION_MARKER, OLD_MEMORY_NOTE, TEAM_AGENTS_TEMPLATE, TEAM_GITIGNORE, memoryBank, parseIdentityBlock, renderIdentityBlock, replaceIdentityBlock, skillArgs, teamPaths } from "../src/team.mjs";
 import { Orchestrator } from "../src/orchestrator.mjs";
 import { permissionOf as uiPermissionOf, BOT_PERMISSION_LABELS } from "../web/workbench-core.js";
@@ -98,7 +98,12 @@ test("06 绑定电脑的可执行档保留本机工具、扩展、技能和 MCP"
       assert.equal(rt.narrowedTools, false);
       assert.doesNotMatch(overlay, /enableProjectConfig/);
       assert.deepEqual(rt._narrowedDisabledExtensions(), []);
-      for (const name of COMPUTER_TOOL_NAMES) assert.match(overlay, new RegExp(`^    ${name}: allow$`, "m"), `${level} ${name}`);
+      for (const name of COMPUTER_TOOL_NAMES) {
+        const want = COMPUTER_PROMPT_TOOLS.includes(name) ? "prompt" : "allow";
+        assert.match(overlay, new RegExp(`^    ${name}: ${want}$`, "m"), `${level} ${name}`);
+      }
+      // 装系统包在全部放手档也要问
+      assert.match(overlay, /^    computer_install_packages: prompt$/m, `${level} install prompt`);
     }
     // 技能过滤照常生效，不再因为绑定电脑整体关闭
     assert.ok(launch(home, { skills: ["git-*"] }).args.includes("--skills"));

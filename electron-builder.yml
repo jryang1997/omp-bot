@@ -37,6 +37,7 @@ files:
   - desktop/CUA-SPACESD-LICENSE
   - src/**/*.mjs
   - web/**/*
+  - guest/**/*
   - package.json
   - README.md
   - CHANGELOG.md
