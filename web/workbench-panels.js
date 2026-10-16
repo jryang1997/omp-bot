@@ -24,6 +24,7 @@ const DROP_REASON_LABELS = {
   target_gone: "接手的助手已删除",
   visibility_revoked: "两个助手已不在同一工作区",
   wake_rejected: "交回时被拒",
+  budget_exhausted: "整棵派工树的预算用完了，没能唤醒派活的助手",
   rejected_inline: "当场就被拒，报错已直接给了派活的助手",
 };
 

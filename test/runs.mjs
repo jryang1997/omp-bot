@@ -384,7 +384,8 @@ await test("message_bot 同步投递：同工作区自动，回执带子 Run 与
     assert.equal(children[0].depth, 1);
     assert.equal(children[0].botId, b.id);
     assert.equal(children[0].text, "帮我看看", "台账里存原文");
-    assert.deepEqual(children[0].budget, { maxTokens: 100 });
+    // 06：子任务从整棵派工树的预算里扣，干活的成员只能用到余量线（八成），两成留给交回和汇总。
+    assert.deepEqual(children[0].budget, { maxTokens: 80 });
     assert.equal(children[0].state, "completed");
     assert.equal(t.orch.store.state.exchanges[0].status, "replied");
   } finally {
@@ -568,7 +569,7 @@ await test("全局并发上限：子 Run 派发超过上限被拒（用户直接
   }
 });
 
-await test("父 Run 额度按已花费递减派发：三跳子 Run 拿到 40/25/10，第四跳被拒", async () => {
+await test("父 Run 额度按整棵树已花费递减派发：三跳子 Run 拿到 32/17/2，第四跳被拒，整棵超额时根按预算耗尽收场", async () => {
   const t = newTeam();
   try {
     const names = ["ReserveA", "ReserveB", "ReserveC", "ReserveD", "ReserveE"];
@@ -580,15 +581,16 @@ await test("父 Run 额度按已花费递减派发：三跳子 Run 拿到 40/25/
 
     const run = t.orch.startRun({ botId: bots[0].id, text: "连派四跳", budget: { maxTokens: 40 } });
     const done = await t.orch.waitRun(run.id);
-    assert.equal(done.state, "completed");
     // listRuns 按 created_at DESC/rowid DESC 返回，反转即创建顺序（同毫秒也稳定）
     const children = t.orch
       .listRuns({})
       .filter((r) => r.parentRunId === run.id)
       .reverse();
-    // 每跳花 15：额度只剩多少就只派多少，并行/连续子 Run 不能重复用同一份
-    assert.deepEqual(children.map((r) => r.budget.maxTokens), [40, 25, 10]);
-    assert.match(done.reply, /预算耗尽/);
+    // 每跳花 15：余量线是 32（40 的八成），整棵树只剩多少就只派多少，第四跳被拒
+    assert.deepEqual(children.map((r) => r.budget.maxTokens), [32, 17, 2]);
+    // 三跳 45 加上根自己 15 一共 60，超过 40：根不算做完
+    assert.equal(done.state, "cancelled");
+    assert.match(done.error ?? "", /预算耗尽：整棵派工树用了 60 token，超出额度 40/);
   } finally {
     await t.cleanup();
   }
@@ -618,7 +620,7 @@ await test("并行子 Run 不能复用同一份额度：在飞预留占住父 Ru
     assert.match(done.reply, /预算耗尽/);
     const children = t.orch.listRuns({}).filter((r) => r.parentRunId === run.id);
     assert.equal(children.length, 1);
-    assert.equal(children[0].budget.maxTokens, 40);
+    assert.equal(children[0].budget.maxTokens, 32, "第一层只拿到余量线以内");
     // 子 Run 落定后预留释放：父 Run 的额度重新可用（同一 Bot 的下一条运行）
     assert.equal(t.orch.runs.get(run.id).reservation, null);
   } finally {

@@ -377,6 +377,9 @@ export class Ledger {
       createdAt: now,
       updatedAt: now,
       parentRunId: input.parentRunId ?? null,
+      // 派工树：根 Run 的 id（根自己是 null）；returnOf 是交回唤醒对应的派活号。
+      treeRootId: input.treeRootId ?? null,
+      returnOf: input.returnOf ?? null,
       depth,
       budget: input.budget ?? null,
       source: input.source ?? "user",

@@ -51,6 +51,8 @@ export class FakeRuntime extends EventEmitter {
     this.policyOk = true;
     this.stats = undefined;
     this.completedTurns = 0;
+    // 会话累计 token：每个跑完的回合加 step.tokens（默认 15，和原来的 10 入 5 出一致）。
+    this.tokensUsed = 0;
     this._tcSeq = 0;
     this._uiWaiters = [];
     this._abortWaiters = [];
@@ -96,7 +98,7 @@ export class FakeRuntime extends EventEmitter {
       sessionFile: this.sessionFile,
       model: "fixture/provider-model",
       provider: "fixture",
-      tokens: { input: 10 * turns, output: 5 * turns, total: 15 * turns },
+      tokens: { input: this.tokensUsed - 5 * turns, output: 5 * turns, total: this.tokensUsed },
       cost: 0.001 * turns,
       userMessages: turns,
     };
@@ -117,6 +119,7 @@ export class FakeRuntime extends EventEmitter {
       const out = await this._step(step, text);
       // 只有真正跑完的回合才计入会话累计用量（被杀/超时的不计）。
       this.completedTurns += 1;
+      this.tokensUsed += Number.isInteger(step.tokens) ? step.tokens : 15;
       this.state = "idle";
       return out;
     } catch (e) {

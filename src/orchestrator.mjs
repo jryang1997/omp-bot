@@ -127,6 +127,8 @@ const SIDE_EFFECT_KEEP = 20;
 
 /** 派活开跑或交回时遇到这些就继续等（目标在忙、被人工接管暂停），不算失败。 */
 const DELEGATION_WAIT_CODES = new Set(["target_busy", "bot_paused"]);
+/** 整棵派工树的预算里留给交回和汇总的比例：干活的成员只能用到 1 − 这个比例。 */
+const TREE_RETURN_SHARE = 0.2;
 
 const DELEGATION_RESULT_LABELS = {
   completed: "做完了",
@@ -251,6 +253,10 @@ export class Orchestrator {
     this._pendingRestart = new Map();
     /** 预留记账：`run:<id>` / `bot:<id>` → 在飞子 Run 的未落定额度 */
     this._reserved = new Map();
+    /** 已经到过余量线、停过一次的派工树根 id（只为不重复停、不重复发事件）。 */
+    this._stoppedTrees = new Set();
+    /** 整棵树上的在飞预留：根 id → 第一层干活成员占着的上限之和。 */
+    this._treeReserved = new Map();
     /** 后台清理任务（removeBot/shutdown 用的 fire-and-forget 也必须被追踪） */
     this._bg = new Set();
     this._modelsCache = null;
@@ -562,10 +568,17 @@ export class Orchestrator {
         sender: `🤖 ${targetName} (@${rec.targetBotId})`,
         source: "bot",
         depth: rec.depth,
+      }, {
+        // 唤醒算在派活那棵树里：用的是留下的余量，不另拿一份预算。
+        returnOf: rec.id,
+        treeRootId: rec.parentRunId ? this._treeRootOf(this.getRun(rec.parentRunId)) : null,
       });
     } catch (e) {
       // 父 bot 正忙（startRun 的 scope 准入拒了）：交付留在 pending，等它空了再送。
       if (DELEGATION_WAIT_CODES.has(e?.code) || e?.code === "concurrency_limit") return { outcome: "busy" };
+      if (e?.code === "budget_exhausted") {
+        return { outcome: "dropped", rec: this._dropDelivery(rec, "budget_exhausted", e.message) };
+      }
       return { outcome: "dropped", rec: this._dropDelivery(rec, "wake_rejected", e?.message ?? String(e)) };
     }
     const next = this._putDelegation(
@@ -1590,7 +1603,7 @@ export class Orchestrator {
    * 同步建 Run 并原子预留 scope 租约；异步执行失败也持久进 run。
    * @returns {object} 刚创建的 run 记录（state=starting）
    */
-  startRun(input = {}, { allowFinishedParent = false } = {}) {
+  startRun(input = {}, { allowFinishedParent = false, returnOf = null, treeRootId: returnTree = null } = {}) {
     if (this.closing) throw httpErr(503, "团队正在关闭，无法启动新的运行");
     const {
       botId = null,
@@ -1620,8 +1633,11 @@ export class Orchestrator {
     }
     // 预算入口校验：标量/数组/NaN/负数/未知键一律显式拒绝，绝不静默当成「无限制」。
     const requestedBudget = normalizeBudget(budget, "run.budget");
+    // 派工树：子 Run 跟父 Run 同一棵；交回的唤醒没有父 Run，由派活记录带来那棵树的根。
+    let treeRootId = returnTree;
     if (parentRunId) {
       const parent = this.getRun(parentRunId);
+      if (parent) treeRootId = this._treeRootOf(parent);
       if (!parent) throw httpErr(404, `父 Run 不存在: ${parentRunId}`, "parent_not_found");
       // 排队的派活可能在父回合结束后才开跑：仍挂在原父 Run 下（预算、取消、工作台都按这棵树）。
       if (isTerminalRunState(parent.state) && !allowFinishedParent) {
@@ -1668,6 +1684,8 @@ export class Orchestrator {
       parentRunId,
       requested: requestedBudget,
       depth,
+      treeRootId,
+      isReturn: Boolean(returnOf),
     });
     const reserveKey = this._reserveKey({ parentRunId, botId });
     const baseTimeout = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : RUN_TIMEOUT_MS;
@@ -1681,6 +1699,8 @@ export class Orchestrator {
       text,
       attachmentIds,
       parentRunId,
+      treeRootId,
+      returnOf,
       depth,
       budget: effectiveBudget,
       source,
@@ -1728,6 +1748,10 @@ export class Orchestrator {
     if (parentRunId) this.runs.get(parentRunId)?.children.add(run.id);
     // 预留本 Run 的额度上限：并行子 Run 因此拿不到同一份额度。
     this._reserveFor(run.id, reserveKey, effectiveBudget);
+    // 第一层干活成员（父是根或交回的唤醒）另在整棵树上占一份；更深的已经在它的上限里了。
+    if (treeRootId && parentRunId && !returnOf && !this._treeAllocOf(this.getRun(parentRunId), treeRootId)) {
+      this._reserveTree(run.id, treeRootId, effectiveBudget);
+    }
 
     this.emit("run_created", {
       runId: run.id,
@@ -1917,7 +1941,7 @@ export class Orchestrator {
    * 预留按「未落定子 Run 的额度上限」记账，所以并行子 Run 不能重复使用同一份额度。
    * @returns {object|null} 子 Run 可用额度（已扣掉已花费与在飞预留）
    */
-  _admitBudget({ botId, parentRunId, requested, depth }) {
+  _admitBudget({ botId, parentRunId, requested, depth, treeRootId = null, isReturn = false }) {
     const limits = this._limitsFor({ botId, parentRunId, requested });
     const budget = { ...(limits ?? {}) };
     const reserveKey = this._reserveKey({ parentRunId, botId });
@@ -1951,6 +1975,32 @@ export class Orchestrator {
       }
       if (limits.maxTimeMs !== undefined && !(limits.maxTimeMs > 0)) {
         throw httpErr(409, "预算耗尽：时间额度为 0", "budget_exhausted");
+      }
+    }
+    // 整棵派工树一份预算：干活的成员只能用到余量线，交回的唤醒可以用到总额。
+    const tree = treeRootId ? this._treeBudget(treeRootId) : null;
+    if (tree) {
+      const spent = this._treeSpent(treeRootId);
+      const ceil = isReturn ? tree.total : tree.line;
+      const reservedT = this._treeReserved.get(treeRootId) ?? { tokens: 0, cost: 0 };
+      const alloc = !isReturn && parentRunId ? this._treeAllocOf(this.getRun(parentRunId), treeRootId) : null;
+      const mine = alloc ? this.runs.get(alloc.id)?.treeReservation : null;
+      for (const [key, used, unit] of [["maxTokens", spent.tokens, "token"], ["maxCostUsd", spent.cost, "费用"]]) {
+        if (ceil[key] === undefined) continue;
+        // 在飞的第一层干活成员各占着自己的上限；本 Run 就在其中一份下面时，那一份不算别人的。
+        const field = key === "maxTokens" ? "tokens" : "cost";
+        const others = isReturn ? 0 : (reservedT[field] ?? 0) - (mine?.[field] ?? 0);
+        const left = ceil[key] - used - others;
+        if (left <= 0) {
+          throw httpErr(
+            409,
+            isReturn
+              ? `预算耗尽：整棵派工树的${unit}额度 ${tree.total[key]} 已用完（已花 ${used}）`
+              : `预算耗尽：整棵派工树已花 ${unit} ${used}，到了余量线 ${ceil[key]}（额度 ${tree.total[key]}），剩下的留给交回和汇总，不能再派新活`,
+            "budget_exhausted",
+          );
+        }
+        budget[key] = budget[key] === undefined ? left : Math.min(budget[key], left);
       }
     }
     // 全局在飞上限只约束子 Run（depth > 0），避免并行派活无界增长；用户直接发起不受限。
@@ -2012,6 +2062,16 @@ export class Orchestrator {
   /** 落定时释放预留（之后它的实际用量会从 Ledger 统计里扣，不重复计）。 */
   _releaseReservation(runId) {
     const ctrl = this.runs.get(runId);
+    const t = ctrl?.treeReservation;
+    if (t) {
+      const rec = this._treeReserved.get(t.rootId);
+      if (rec) {
+        rec.tokens = Math.max(0, rec.tokens - t.tokens);
+        rec.cost = Math.max(0, rec.cost - t.cost);
+        if (rec.tokens === 0 && rec.cost === 0) this._treeReserved.delete(t.rootId);
+      }
+      ctrl.treeReservation = null;
+    }
     const r = ctrl?.reservation;
     if (!r) return;
     const rec = this._reserved.get(r.key);
@@ -2031,6 +2091,123 @@ export class Orchestrator {
     });
   }
 
+  // ---- 整棵派工树一份预算 ----
+  // 预算挂在根 Run 上（根的有效额度）。子任务、孙任务、交回的唤醒都记着同一个 treeRootId，
+  // 花费按整棵树算。干活的成员只能用到余量线（总额的 80%），剩下的留给交回和汇总。
+  // 用到余量线时整棵停：在飞的干活成员取消，排队的活不开跑，都照常交回。
+
+  /** 这条 Run 所在派工树的根（自己是根就是自己）。 */
+  _treeRootOf(run) {
+    return run?.treeRootId ?? run?.id ?? null;
+  }
+
+  /** 根 Run 的 token/费用额度和余量线；根没有这两种额度就是 null（不限）。 */
+  _treeBudget(rootId) {
+    const b = rootId ? this.getRun(rootId)?.budget : null;
+    if (!b || (b.maxTokens === undefined && b.maxCostUsd === undefined)) return null;
+    const total = {};
+    const line = {};
+    if (b.maxTokens !== undefined) {
+      total.maxTokens = b.maxTokens;
+      line.maxTokens = Math.floor(b.maxTokens * (1 - TREE_RETURN_SHARE));
+    }
+    if (b.maxCostUsd !== undefined) {
+      total.maxCostUsd = b.maxCostUsd;
+      line.maxCostUsd = b.maxCostUsd * (1 - TREE_RETURN_SHARE);
+    }
+    return { total, line };
+  }
+
+  /** 整棵树的成员：记着这个根的，加上按父子链挂在根下面的（老记录没有 treeRootId）。 */
+  _treeRunIds(rootId) {
+    const ids = this._subtreeRunIds(rootId);
+    for (const r of this.ledger.listRuns({ limit: 1000 })) if (r.treeRootId === rootId) ids.add(r.id);
+    return ids;
+  }
+
+  /**
+   * 沿父链往上找「第一层干活成员」：父是根或交回的唤醒的那条。
+   * run 自己就是根或唤醒时返回 null（它下面新派的活就是第一层）。
+   */
+  _treeAllocOf(run, rootId) {
+    let cur = run;
+    for (let hops = 0; cur && hops <= MAX_DELEGATE_DEPTH + 1; hops++) {
+      if (cur.id === rootId || cur.returnOf) return null;
+      const parent = cur.parentRunId ? this.getRun(cur.parentRunId) : null;
+      if (!parent || parent.id === rootId || parent.returnOf) return cur;
+      cur = parent;
+    }
+    return null;
+  }
+
+  /** 第一层干活成员在整棵树上占一份上限：并行的兄弟不能重复用同一份。 */
+  _reserveTree(runId, rootId, budget) {
+    const ctrl = this.runs.get(runId);
+    if (!ctrl || !budget) return;
+    const tokens = budget.maxTokens ?? 0;
+    const cost = budget.maxCostUsd ?? 0;
+    if (!tokens && !cost) return;
+    const rec = this._treeReserved.get(rootId) ?? { tokens: 0, cost: 0 };
+    rec.tokens += tokens;
+    rec.cost += cost;
+    this._treeReserved.set(rootId, rec);
+    ctrl.treeReservation = { rootId, tokens, cost };
+  }
+
+  _treeSpent(rootId) {
+    const usage = this._usageByRun();
+    let tokens = 0;
+    let cost = 0;
+    for (const id of this._treeRunIds(rootId)) {
+      const u = usage.get(id);
+      if (!u) continue;
+      tokens += u.tokens;
+      cost += u.cost;
+    }
+    return { tokens, cost };
+  }
+
+  /** 每个回合记完用量后看一眼：整棵树到了余量线，就停下其余干活的成员。 */
+  _checkTreeLine(runId) {
+    if (this.closing || this.ledger.readonly) return;
+    const rootId = this._treeRootOf(this.getRun(runId));
+    const tree = this._treeBudget(rootId);
+    if (!tree || this._stoppedTrees.has(rootId)) return;
+    const s = this._treeSpent(rootId);
+    let reason = null;
+    if (tree.line.maxTokens !== undefined && s.tokens >= tree.line.maxTokens) {
+      reason = `整棵派工树已花 token ${s.tokens}，到了余量线 ${tree.line.maxTokens}（额度 ${tree.total.maxTokens}）`;
+    } else if (tree.line.maxCostUsd !== undefined && s.cost >= tree.line.maxCostUsd) {
+      reason = `整棵派工树已花费用 ${s.cost}，到了余量线 ${tree.line.maxCostUsd}（额度 ${tree.total.maxCostUsd}）`;
+    }
+    if (!reason) return;
+    this._stoppedTrees.add(rootId);
+    this._stopTreeWork(rootId, runId, `预算快用完：${reason}，停下来把剩下的留给交回和汇总`);
+  }
+
+  /**
+   * 整棵停：排队的活按没开跑交回（不是父回合取消，交付照常）；在飞的干活成员按预算取消，
+   * 从最深的开始，各自带着预算原因落定，交回不会被当成「父回合取消」丢掉。
+   * 根和交回的唤醒不停：它们用余量收尾，超了总额由 _budgetExceeded 收场。
+   */
+  _stopTreeWork(rootId, currentRunId, reason) {
+    const ids = this._treeRunIds(rootId);
+    for (const rec of this._delegationRecords()) {
+      if (rec.state === "queued" && ids.has(rec.parentRunId)) this._returnNotStarted(rec, reason);
+    }
+    const active = [...ids]
+      .map((id) => this.getRun(id))
+      .filter(
+        (r) =>
+          r && r.id !== currentRunId && r.id !== rootId && !r.returnOf &&
+          this.runs.has(r.id) && !isTerminalRunState(r.state),
+      )
+      .sort((x, y) => (y.depth ?? 0) - (x.depth ?? 0));
+    for (const r of active) this._background(this.cancelRun(r.id, `budget-exhausted:${reason}`));
+    this.emit("work_tree_stopped", { runId: rootId, reason, stopped: active.map((r) => r.id) });
+    this._schedulePump();
+  }
+
   /** 该 Run 的额度是否已被真实用量/墙钟时间吃掉；返回原因文本或 null。 */
   _budgetExceeded(runId) {
     const run = this.getRun(runId);
@@ -2042,6 +2219,20 @@ export class Orchestrator {
     }
     if (b.maxCostUsd !== undefined && usage.cost > b.maxCostUsd) {
       return `费用 ${usage.cost} 超出额度 ${b.maxCostUsd}`;
+    }
+    // 根和交回的唤醒负责收尾：整棵树超了总额，它们这一回合也不算做完。
+    if (!run.parentRunId) {
+      const rootId = this._treeRootOf(run);
+      const tree = this._treeBudget(rootId);
+      if (tree) {
+        const s = this._treeSpent(rootId);
+        if (tree.total.maxTokens !== undefined && s.tokens > tree.total.maxTokens) {
+          return `整棵派工树用了 ${s.tokens} token，超出额度 ${tree.total.maxTokens}`;
+        }
+        if (tree.total.maxCostUsd !== undefined && s.cost > tree.total.maxCostUsd) {
+          return `整棵派工树花了 ${s.cost}，超出费用额度 ${tree.total.maxCostUsd}`;
+        }
+      }
     }
     if (b.maxTimeMs !== undefined && Date.now() - run.createdAt > b.maxTimeMs) {
       return `墙钟时间超出额度 ${b.maxTimeMs}ms`;
@@ -2260,6 +2451,7 @@ export class Orchestrator {
       this._syncSessionIdentity(runId, runtime, usage);
       // 用真实原生用量核对额度：耗尽由调用方走取消路径（群 Run 由 Relay 循环感知）。
       if (ctrl) ctrl.budgetExceeded = this._budgetExceeded(runId);
+      this._checkTreeLine(runId);
     }
     return res;
   }
