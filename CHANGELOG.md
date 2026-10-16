@@ -12,7 +12,11 @@
 - 共享电脑默认 4 vCPU、8 GiB 内存、64 GiB 动态磁盘，可在电脑面板或 `PUT /api/computer/shared-machine` 改 CPU 和内存，下次开机生效。
 - 客机工具的路径可以写 `~`，默认工作目录从 `/work` 改成 `~/work`，附件放 `~/work/attachments`。不再限制只能写 `/work` 和 `/tmp`。
 - 新工具 `computer_install_packages` 用 apt 装系统包，每次都要用户批准，全部放手档也一样。
+- 本机的 `team/workspace` 挂到共享电脑的 `/workspace`，每个助手的 `team/bots/<id>/work` 挂到它座席的 `~/work`，两边即时可见。omp-bot 内置一个 SFTP 服务（新依赖 `ssh2`），只听 127.0.0.1，客机经 10.0.2.2 用 sshfs 连回来，不做缓存。
+- `/workspace` 只有 team 组进得去，组内都能读写；`~/work` 只有这个助手自己能读写，客机 root 也读不到。每个助手一把钥匙，登不进别人的根。越出根的路径和符号链接一律拒绝。
+- 依赖和构建产物建议放客机本地盘（新建的 team/AGENTS.md 模板里写了），挂载目录里大量小文件会慢。
 
+### 记忆
 
 - 开启记忆的助手改用 omp 自带的 mnemopi。每个助手一个 bank（`bot-<id>`），所有助手共用 `team/.memory/mnemopi.db`，私聊群聊通用。overlay 写 `scoping: global`、`bank`、`dbPath`，autolearn 关掉，default、smol、memory 三个模型角色钉在助手选定的模型上。
 - 删掉私有 agentDir、私有 `models.yml` 生成、凭据剥离和 `memory_prereq_missing` 门槛。子进程不再改 `PI_CODING_AGENT_DIR`，模型和登录沿用用户自己的 omp 配置。开记忆不再有前置条件。
