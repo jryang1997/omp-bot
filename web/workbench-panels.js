@@ -16,6 +16,8 @@ const FILTERS = [
   ["failed", "失败", (run) => ["failed", "cancelled", "interrupted", "reconciliation_required"].includes(run.state)],
 ];
 
+const SIDE_EFFECT_LABELS = { in_flight: "进行中", done: "做完了", unknown: "结果未知，要人工核对" };
+
 const DROP_REASON_LABELS = {
   parent_cancelled: "派活的任务被取消了",
   parent_bot_gone: "派活的助手已删除",
@@ -450,6 +452,18 @@ export function createPanels({ client, deps }) {
       err.append(el("div", "wb-pending-title", "错误"), el("div", "bt-note", String(run.error)));
       root.append(err);
     }
+    // 外部动作：变更类工具每次一行。「结果未知」是进程在动作中途没了，要人工去核对，不会自动重发。
+    if (Array.isArray(run.sideEffects) && run.sideEffects.length) {
+      const box = el("div", "wb-kv-list wb-effect-list");
+      for (const effect of run.sideEffects) {
+        const label = SIDE_EFFECT_LABELS[effect?.status] ?? effect?.status ?? "—";
+        const outcome = effect?.status === "done" && effect?.outcome === "error" ? "做完了，报错" : label;
+        const item = kv(effect?.tool || effect?.kind || effect?.id || "动作", effect?.error ? `${outcome}：${effect.error}` : outcome);
+        item.dataset.effectStatus = effect?.status ?? "";
+        box.append(item);
+      }
+      root.append(section("外部动作", box));
+    }
     root.append(section("任务内容", el("div", "wb-pre", String(run.text || ""))));
     if (run.reply) root.append(section("助手的回复", el("div", "wb-pre", String(run.reply))));
 
@@ -492,8 +506,14 @@ export function createPanels({ client, deps }) {
       const advanced = el("details", "ui-disclosure");
       advanced.append(el("summary", null, "原生会话（技术信息）"));
       const body = el("div", "ui-disclosure-body");
-      body.append(await nativeEntriesSection(run.botId));
-      body.append(await nativeStateSection(run.botId));
+      // 原生会话读不出来（比如 omp 不在、会话文件坏了）时只这一块报错，上面的状态和外部动作照常显示。
+      for (const [what, load] of [["原生会话条目", nativeEntriesSection], ["原生会话状态", nativeStateSection]]) {
+        try {
+          body.append(await load(run.botId));
+        } catch (error) {
+          body.append(section(what, el("div", "bt-empty", `读取失败：${error.message}`)));
+        }
+      }
       advanced.append(body);
       root.append(advanced);
     }

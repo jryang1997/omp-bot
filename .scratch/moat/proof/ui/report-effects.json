@@ -1,0 +1,32 @@
+{
+  "checks": [
+    {
+      "name": "三笔动作都列出",
+      "ok": true,
+      "detail": "done|computer_shell做完了 / done|computer_publish_file做完了，报错：目标不存在 / unknown|computer_install_packages结果未知，要人工核对"
+    },
+    {
+      "name": "未知那笔写明要人工核对",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "明确失败那笔写出原因",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "原生会话读不出来时只那一块报错",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "除原生会话外没有页面错误或失败请求",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "errors": [
+    "500 /api/bots/bot_mvaxc6j7_1/native/entries"
+  ]
+}
