@@ -1711,11 +1711,14 @@ export class Computers {
    */
   async #toolCall({ bot, runId, cid, name, signal, kind = null, mutating = false }, body) {
     let ctx = null;
+    let effectId = null;
     try {
       ctx = this.#assertAgentAction({ botId: bot.id, runId });
       // 群回合等没有 preparePrompt 前置的路径也要在动作前确认电脑真的可用（能观察就观察，不在 running 就启动）。
       await this.#ensureRunning(bot);
       const backend = await this.ensureBackend();
+      // 变更类动作先在 Run 上记一笔 in_flight：进程在动作中途没了，重启后这一笔记 unknown。
+      if (mutating) effectId = this.orch.beginSideEffect?.(runId, { tool: name, kind }) ?? null;
       const out = await body({ backend, signal, generation: ctx.generation, authority: ctx.authority, ctx });
       if (mutating) {
         // 调用后复查：动作期间发生接管（代变化）→ 变更类动作结果作废，绝不当成已生效。
@@ -1724,9 +1727,12 @@ export class Computers {
           throw ferr(409, "computer_generation_stale", "动作执行期间电脑已被人工接管，变更结果作废");
         }
       }
+      if (effectId) this.orch.endSideEffect?.(runId, effectId, { ok: true });
       return out;
     } catch (e) {
-      if (e?.effectUnknown || e?.code === "computer_effect_unknown") {
+      const unknown = !!(e?.effectUnknown || e?.code === "computer_effect_unknown");
+      if (effectId) this.orch.endSideEffect?.(runId, effectId, { ok: false, unknown, error: e?.message ?? String(e) });
+      if (unknown) {
         this.#markReconcile(cid, bot.id, { kind: "agent_action", message: `${name}${kind ? ` (${kind})` : ""}: ${e?.message ?? String(e)}` });
         this.orch.noteSideEffectUnknown?.(runId, {
           reason: "guest_effect_unknown",

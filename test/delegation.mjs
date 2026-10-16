@@ -335,5 +335,29 @@ await test("正常关停再起：跑着的按中断交回，排队的还在排�
   }
 });
 
+await test("子任务做外部动作时崩溃：交回写「外部动作结果未知」，不说成单纯中断", async () => {
+  const t = newTeam();
+  let t2;
+  try {
+    const { a, b, fa, fb } = await pair(t);
+    fb.queue = [{ kind: "hang" }];
+    fa.queue = [{ kind: "tool", tool: "delegate_bot", args: { to: b.name, message: "装依赖" } }];
+    await t.orch.waitRun(t.orch.startRun({ botId: a.id, text: "派" }).id);
+    await waitFor(() => fb.busy, { label: "B 在跑" });
+    const childId = dlgs(t.orch)[0].childRunId;
+    t.orch.beginSideEffect(childId, { tool: "computer_install_packages", kind: "install_packages" });
+    crash(t);
+    t2 = newTeam({ home: t.home });
+    const rec = await waitFor(() => t2.orch.listDelegations({}).find((d) => d.delivery === "delivered"), { label: "交回" });
+    assert.equal(rec.result.state, "reconciliation_required");
+    const wake = await t2.orch.waitRun(rec.wakeRunId);
+    assert.match(wake.text, /有外部动作结果未知，需要人工核对/);
+  } finally {
+    try {
+      await t2?.cleanup();
+    } catch {}
+  }
+});
+
 console.log(`\n${passed}/${passed + failed} PASS${failed ? `，${failed} FAIL` : ""}`);
 process.exit(failed ? 1 : 0);

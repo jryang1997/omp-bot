@@ -4,8 +4,9 @@
 // 错误都带 code（LEDGER_INVALID|LEDGER_NOT_FOUND|LEDGER_CONFLICT|LEDGER_IMMUTABLE|
 // LEDGER_READONLY|LEDGER_UNKNOWN_KIND|LEDGER_DB_MISSING|LEDGER_SCHEMA_MISSING|
 // LEDGER_SCHEMA_NEWER|LEDGER_CLOSED）与建议 status。
-// 副作用约定：调用方用 updateRun 记 sideEffects:[{id,kind,status:'in_flight'|'done'}]；
-// reconcile 遇到 in_flight 的 Run 落 reconciliation_required + recovery.status=side_effect_unknown，
+// 副作用约定：调用方用 updateRun 记 sideEffects:[{id,kind,status:'in_flight'|'done'|'unknown'}]
+// （编排器的 beginSideEffect/endSideEffect 负责写）；reconcile 遇到 in_flight 的 Run 落
+// reconciliation_required + recovery.status=side_effect_unknown，并把那一笔改成 unknown，
 // 表示外部效果未知，禁止自动重放。
 
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
@@ -490,6 +491,10 @@ export class Ledger {
           ? rec.sideEffects.some((s) => s?.status === "in_flight")
           : false;
         if (inFlight) {
+          // 动作做到一半进程没了：这一笔的结果未知，不当成没做，也不重发。
+          rec.sideEffects = rec.sideEffects.map((s) =>
+            s?.status === "in_flight" ? { ...s, status: "unknown", outcome: "unknown", endedAt: now } : s,
+          );
           rec.state = "reconciliation_required";
           rec.recovery = { status: RECOVERY_UNKNOWN, reason: "in_flight_at_reconcile", at: now };
           reconciliationRequired.push(rec.id);

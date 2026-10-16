@@ -1,0 +1,6 @@
+- 电脑工具不记 in_flight：抓到 test/computers.mjs
+- 电脑工具做完不记 done：抓到 test/computers.mjs
+- 断流不记 unknown：抓到 test/computers.mjs
+- 重启不把在飞那笔改 unknown：抓到 test/runs.mjs（外部动作做到一半崩溃：重启后 Run 记 reconciliation_required、动作记 unknown，不重跑）
+- 落定动作写回 in_flight：抓到 test/runs.mjs（外部动作做到一半崩溃：重启后 Run 记 reconciliation_required、动作记 unknown，不重跑）
+- 动作键不按次数区分：抓到 test/runs.mjs（外部动作做到一半崩溃：重启后 Run 记 reconciliation_required、动作记 unknown，不重跑）

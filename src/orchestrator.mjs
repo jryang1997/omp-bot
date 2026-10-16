@@ -93,6 +93,9 @@ const AUTHORIZATION_METHODS = new Set(["select", "confirm"]);
 /** 头像图片允许的附件类型。 */
 const AVATAR_MIMES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
+/** run.sideEffects 里最多留几条已落定的动作记录（在飞的一律保留）。 */
+const SIDE_EFFECT_KEEP = 20;
+
 /** 派活开跑或交回时遇到这些就继续等（目标在忙、被人工接管暂停），不算失败。 */
 const DELEGATION_WAIT_CODES = new Set(["target_busy", "bot_paused"]);
 
@@ -1501,6 +1504,54 @@ export class Orchestrator {
    * 还没落定的 Run 只登记，由 _finishRun 统一升级成 reconciliation_required（取消/超时/正常收尾
    * 都不会把它冲掉，也绝不假称 cancelled）；已经落定的 Run 只补记对账字段与事件。
    */
+  /**
+   * 外部动作开始前记一笔 in_flight（写进 run.sideEffects，台账 reconcile 按它判断）。
+   * 键 = 工具名 + 本 Run 里第几次调用，同一 Run 里每次动作各一个。
+   * 进程在动作中途没了，重启时这笔变 unknown、Run 落 reconciliation_required，不当成没做过。
+   * @returns {string|null} 动作键；没有 Run 或台账只读时返回 null（不挡动作本身）
+   */
+  beginSideEffect(runId, { tool, kind = null } = {}) {
+    if (!runId || this.ledger.readonly) return null;
+    try {
+      const run = this.getRun(runId);
+      if (!run) return null;
+      const list = Array.isArray(run.sideEffects) ? run.sideEffects : [];
+      const n = list.filter((s) => s?.tool === tool).length + 1;
+      const id = `${tool}#${n}`;
+      const entry = { id, tool, kind, status: "in_flight", startedAt: Date.now() };
+      // 只留最近的已落定记录，在飞的一条不丢：Run 记录不能随动作次数无限长。
+      const kept = list.filter((s, i) => s?.status === "in_flight" || i >= list.length - SIDE_EFFECT_KEEP);
+      this.ledger.updateRun(runId, { sideEffects: [...kept, entry] });
+      return id;
+    } catch (e) {
+      this.emit("side_effect_record_error", { runId, error: e?.message ?? String(e) });
+      return null;
+    }
+  }
+
+  /** 动作有了确定结果（成功或明确失败）：in_flight → done。结果未知的走 noteSideEffectUnknown。 */
+  endSideEffect(runId, id, { ok = true, error = null, unknown = false } = {}) {
+    if (!runId || !id || this.ledger.readonly) return;
+    try {
+      const run = this.getRun(runId);
+      if (!run || !Array.isArray(run.sideEffects)) return;
+      const sideEffects = run.sideEffects.map((s) =>
+        s?.id === id
+          ? {
+              ...s,
+              status: unknown ? "unknown" : "done",
+              outcome: unknown ? "unknown" : ok ? "ok" : "error",
+              ...(error ? { error: String(error).slice(0, 500) } : {}),
+              endedAt: Date.now(),
+            }
+          : s,
+      );
+      this.ledger.updateRun(runId, { sideEffects });
+    } catch (e) {
+      this.emit("side_effect_record_error", { runId, error: e?.message ?? String(e) });
+    }
+  }
+
   noteSideEffectUnknown(runId, info = {}) {
     const ctrl = runId ? this.runs.get(runId) : null;
     if (!ctrl) return false;

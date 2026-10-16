@@ -234,8 +234,12 @@ try {
   backend.nextInputGate = lostRpc;
   const unknownAgentInput = unknownTools.find((tool) => tool.name === "computer_input").handler({ action: "type", text: "UNCERTAIN_AGENT_INPUT" }, { signal: new AbortController().signal });
   await within(lostRpc.entered);
+  const midFlight = server.orch.getRun(unknownRun.id).sideEffects ?? [];
+  assert.deepEqual(midFlight.map((e) => [e.tool, e.status]), [["computer_input", "in_flight"]]);
   lostRpc.fail(Object.assign(new Error("Guest transport disconnected after dispatch"), { code: "computer_guest_rpc_failed" }));
   assert.equal((await unknownAgentInput).isError, true);
+  assert.deepEqual(server.orch.getRun(unknownRun.id).sideEffects.map((e) => [e.tool, e.status]), [["computer_input", "unknown"]]);
+  pass("变更类客机动作执行中在 Run 上记 in_flight，断流后记 unknown");
   server.orch.features.computers.releaseRunLease(unknownRun.id);
   assert.equal((await api(aPath)).data.computer.error.code, "computer_effect_unknown");
   assert.equal((await post("/api/runs", { botId: a.id, text: "cannot overlap an unconfirmed agent RPC" })).status, 409);
@@ -253,6 +257,16 @@ try {
   assert.equal((await post("/api/runs", { botId: a.id, text: "cannot overlap partial attachment upload" })).status, 409);
   assert.equal((await post(`${aPath}/stop`)).status, 200);
   pass("附件准备的 RPC 断流同样阻止自动回合，确认停机后解除");
+
+  assert.equal((await post(`${aPath}/start`)).status, 200);
+  const readRun = server.orch.ledger.createRun({ kind: "chat", botId: a.id, scope: "private", text: "settled action consumer" });
+  server.orch.features.computers.acquireRunLease({ botId: a.id, runId: readRun.id });
+  const readTools = server.orch.features.hostTools({ bot: server.orch.getBot(a.id), activeRun: { runId: readRun.id, abort: new AbortController() } });
+  const typed = await readTools.find((tool) => tool.name === "computer_input").handler({ action: "type", text: "OK" }, { signal: new AbortController().signal });
+  assert.notEqual(typed.isError, true, JSON.stringify(typed).slice(0, 200));
+  assert.deepEqual(server.orch.getRun(readRun.id).sideEffects.map((e) => [e.tool, e.status, e.outcome]), [["computer_input", "done", "ok"]]);
+  server.orch.features.computers.releaseRunLease(readRun.id);
+  pass("做完的变更类客机动作在 Run 上记 done");
 } finally {
   await server.close();
   rmSync(home, { recursive: true, force: true });

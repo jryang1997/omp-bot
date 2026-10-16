@@ -25,7 +25,7 @@ async function test(name, fn) {
   }
 }
 
-import { delay, waitFor, FakeRuntime, stubFeatures, newTeam } from "./_harness.mjs";
+import { delay, waitFor, FakeRuntime, stubFeatures, newTeam, crash } from "./_harness.mjs";
 
 const typesOf = (events) => events.map((e) => e.type);
 
@@ -1441,6 +1441,67 @@ await test("启动恢复：未落定 Run 记 interrupted，挂起审批记 expir
       await second?.shutdown();
     } catch {}
     rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// ---- 外部动作记录（02）----
+
+await test("外部动作做到一半崩溃：重启后 Run 记 reconciliation_required、动作记 unknown，不重跑", async () => {
+  const t = newTeam();
+  let t2;
+  try {
+    const bot = t.orch.addBot({ name: "EffBot" });
+    const fake = await t.orch.runtimeFor(bot.id, "private");
+    fake.queue = [{ kind: "hang" }];
+    const run = t.orch.startRun({ botId: bot.id, text: "装包" });
+    await waitFor(() => fake.busy, { label: "在跑" });
+    const done = t.orch.beginSideEffect(run.id, { tool: "computer_shell", kind: "shell" });
+    t.orch.endSideEffect(run.id, done, { ok: true });
+    const open = t.orch.beginSideEffect(run.id, { tool: "computer_shell", kind: "shell" });
+    assert.notEqual(open, done, "同一 Run 里每次动作一个键");
+    assert.deepEqual(
+      t.orch.getRun(run.id).sideEffects.map((s) => [s.id, s.status]),
+      [[done, "done"], [open, "in_flight"]],
+    );
+    crash(t);
+    t2 = newTeam({ home: t.home });
+    const after = t2.orch.getRun(run.id);
+    assert.equal(after.state, "reconciliation_required");
+    assert.equal(after.recovery.status, "side_effect_unknown");
+    const eff = after.sideEffects.find((s) => s.id === open);
+    assert.equal(eff.status, "unknown");
+    assert.equal(eff.tool, "computer_shell");
+    assert.equal(after.sideEffects.find((s) => s.id === done).status, "done");
+    await delay(30);
+    assert.equal(t2.orch.listRuns({ botId: bot.id }).length, 1, "不自动重跑");
+  } finally {
+    try {
+      await t2?.cleanup();
+    } catch {}
+  }
+});
+
+await test("外部动作都落定后再崩溃：只记 interrupted，不夸大成未知", async () => {
+  const t = newTeam();
+  let t2;
+  try {
+    const bot = t.orch.addBot({ name: "EffBot2" });
+    const fake = await t.orch.runtimeFor(bot.id, "private");
+    fake.queue = [{ kind: "hang" }];
+    const run = t.orch.startRun({ botId: bot.id, text: "发文件" });
+    await waitFor(() => fake.busy, { label: "在跑" });
+    const id = t.orch.beginSideEffect(run.id, { tool: "computer_publish_file", kind: "publish" });
+    t.orch.endSideEffect(run.id, id, { ok: false, error: "目标不存在" });
+    crash(t);
+    t2 = newTeam({ home: t.home });
+    const after = t2.orch.getRun(run.id);
+    assert.equal(after.state, "interrupted");
+    assert.equal(after.sideEffects[0].status, "done");
+    assert.equal(after.sideEffects[0].outcome, "error");
+  } finally {
+    try {
+      await t2?.cleanup();
+    } catch {}
   }
 });
 
