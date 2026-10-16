@@ -9,7 +9,7 @@ import {
   BOT_SEAT_COUNT, CHROMIUM_HOOK, GUEST_FILES, LOGIN_SEAT_ID, LOGIN_SYNC_SCRIPT, SEAT_GUEST_PORTS, SEAT_SCRIPT, SeatBackend, SeatShare,
   expandHome, readSharedMachine, seatUser, sharedMachineSpec, validatePackages, writeSharedMachine,
 } from "../src/computer-seats.mjs";
-import { guestPath, seatShareRoots, shPath } from "../src/features/computers.mjs";
+import { assertGuestRemovable, guestPath, seatShareRoots, shPath } from "../src/features/computers.mjs";
 import { FileShare, WORKSPACE_USER, probePort } from "../src/file-share.mjs";
 import { teamPaths, teamRoot } from "../src/team.mjs";
 import { startServer } from "../src/server.mjs";
@@ -423,6 +423,11 @@ test("07 功能层路径：接受 ~，shell 里展开成 \"$HOME\"，不再限�
   assert.equal(guestPath("~"), "~");
   assert.equal(guestPath("~/"), "~");
   assert.equal(guestPath("/etc/hosts"), "/etc/hosts");
+  for (const keep of ["/", "/home", "/tmp", "/workspace/", "~", "~/", "~/work"]) {
+    assert.throws(() => assertGuestRemovable(guestPath(keep)), (e) => e.code === "guest_path_readonly", keep);
+  }
+  assertGuestRemovable(guestPath("/workspace/a.txt"));
+  assertGuestRemovable(guestPath("~/work/a"));
   for (const bad of ["work/a", "~other/a", "C:\\x", "~/../x", "../x"]) {
     assert.throws(() => guestPath(bad), (e) => e.code === "invalid_path", bad);
   }

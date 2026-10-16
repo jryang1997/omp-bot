@@ -72,6 +72,11 @@ function longname(name, st) {
   return `${type}${bits} 1 ${st.uid} ${st.gid} ${st.size} ${new Date(st.mtimeMs).toISOString().slice(0, 16)} ${name}`;
 }
 
+// 只收 rwx 位：客机设不了宿主文件的 setuid、setgid 和粘滞位
+function permBits(mode) {
+  return mode & 0o777;
+}
+
 function writeSecret(file, text, mode = 0o600) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const tmp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
@@ -147,7 +152,7 @@ class ShareSession {
       // 按路径改，只读打开的句柄截断不了文件
       const real = await this.#resolve(p);
       if (Number.isInteger(attrs?.size)) await fsp.truncate(real, attrs.size);
-      if (Number.isInteger(attrs?.mode)) await fsp.chmod(real, attrs.mode & 0o7777);
+      if (Number.isInteger(attrs?.mode)) await fsp.chmod(real, permBits(attrs.mode));
       if (Number.isFinite(attrs?.atime) && Number.isFinite(attrs?.mtime)) await fsp.utimes(real, attrs.atime, attrs.mtime);
       sftp.status(id, STATUS_CODE.OK);
     });
@@ -160,7 +165,7 @@ class ShareSession {
       sftp.status(id, STATUS_CODE.OK);
     });
     on('MKDIR', async (id, p, attrs) => {
-      await fsp.mkdir(await this.#resolve(p, { follow: false, notRoot: true }), { mode: attrs?.mode ?? 0o777 });
+      await fsp.mkdir(await this.#resolve(p, { follow: false, notRoot: true }), { mode: Number.isInteger(attrs?.mode) ? permBits(attrs.mode) : 0o777 });
       sftp.status(id, STATUS_CODE.OK);
     });
     // 目标已存在时直接覆盖（POSIX rename），编辑器写临时文件再改名的保存方式才能用
@@ -266,7 +271,7 @@ class ShareSession {
 
   async #open(id, file, pflags, attrs) {
     const real = await this.#resolve(file);
-    const fh = await fsp.open(real, openFlags(pflags), attrs?.mode ?? 0o666);
+    const fh = await fsp.open(real, openFlags(pflags), Number.isInteger(attrs?.mode) ? permBits(attrs.mode) : 0o666);
     if ((await fh.stat()).isDirectory()) {
       await fh.close();
       throw Object.assign(new Error('是目录'), { code: 'EISDIR' });
@@ -295,7 +300,7 @@ class ShareSession {
 
   async #applyAttrs(fh, attrs = {}) {
     if (Number.isInteger(attrs.size)) await fh.truncate(attrs.size);
-    if (Number.isInteger(attrs.mode)) await fh.chmod(attrs.mode & 0o7777);
+    if (Number.isInteger(attrs.mode)) await fh.chmod(permBits(attrs.mode));
     if (Number.isFinite(attrs.atime) && Number.isFinite(attrs.mtime)) await fh.utimes(attrs.atime, attrs.mtime);
   }
 

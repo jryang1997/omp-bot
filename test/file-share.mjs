@@ -85,6 +85,9 @@ test("对的钥匙能读写，根目录自动建好", async () => {
     assert.equal(await call(sftp, "realpath", "."), "/");
     await call(sftp, "chmod", "/hello.txt", 0o755);
     assert.equal(statSync(join(roots.workspace, "hello.txt")).mode & 0o777, 0o755);
+    // 客机设不了宿主文件的 setuid、setgid 和粘滞位
+    await call(sftp, "chmod", "/hello.txt", 0o7755);
+    assert.equal(statSync(join(roots.workspace, "hello.txt")).mode & 0o7777, 0o755);
     // sshfs 截断文件走 SETSTAT size
     await call(sftp, "setstat", "/host.txt", { size: 4 });
     assert.equal(readFileSync(join(roots.workspace, "host.txt"), "utf8"), "from");

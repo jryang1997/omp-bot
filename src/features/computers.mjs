@@ -28,7 +28,7 @@ const PUBLIC_STATES = new Set(["starting", "running", "stopping", "stopped", "er
 const DEFAULT_GUEST_CWD = "~/work";
 const ATTACHMENT_GUEST_DIR = "~/work/attachments";
 /** remove 不删这几个路径本身。座席用户没有 sudo，系统目录本来就删不掉。 */
-const UNREMOVABLE_GUEST_PATHS = ["/", "~", "~/work"];
+const UNREMOVABLE_GUEST_PATHS = ["/", "/home", "/tmp", "/workspace", "~", "~/work"];
 
 const MAX_INSTALL_PACKAGES = 32;
 
@@ -75,6 +75,11 @@ export function guestPath(raw, { label = "path" } = {}) {
   }
   if (s.split("/").some((seg) => seg === "..")) throw ferr(400, "invalid_path", `${label} 不能包含 ..`);
   return s.replace(/\/{2,}/g, "/").replace(/\/$/, "") || "/";
+}
+
+/** 删除前检查：根、/home、/tmp、共享工作区和自己的主目录、~/work 本身不许删。path 是 guestPath 规范化过的。 */
+export function assertGuestRemovable(path) {
+  if (UNREMOVABLE_GUEST_PATHS.includes(path)) throw ferr(400, "guest_path_readonly", `拒绝删除 ${path} 本身`);
 }
 
 /** 给 /bin/sh 用的路径：`~/rest` 写成 "$HOME"/'rest'，让座席用户自己的 shell 展开主目录。 */
@@ -1595,9 +1600,7 @@ export class Computers {
               return { content: [{ type: "text", text: `已写入客机文件 ${path}（${humanBytes(Buffer.byteLength(text, "utf8"))}）` }] };
             }
             if (action === "remove") {
-              if (UNREMOVABLE_GUEST_PATHS.includes(path)) {
-                throw ferr(400, "guest_path_readonly", `拒绝删除 ${path} 本身`);
-              }
+              assertGuestRemovable(path);
               const out = await runGuest(`rm -rf -- ${shPath(path)}`, 20_000);
               if (out?.exitCode !== 0) {
                 throw ferr(409, "guest_file_error", `删除客机路径失败：${truncate(out?.stderr || out?.stdout || "unknown", 2000)}`);
