@@ -268,6 +268,9 @@ export class WorkbenchFeatures {
       R("POST", /^\/api\/computer\/login\/stop$/, async () => ({ computer: await this.computers.loginStop() })),
       R("GET", /^\/api\/computer\/login\/screen$/, async (c) => this.computers.loginScreen(c.res), { raw: true }),
       R("POST", /^\/api\/computer\/login\/input$/, async (c) => ({ computer: await this.computers.loginInput(c.body ?? {}) })),
+      R("GET", /^\/api\/computer\/old$/, async () => this.computers.oldList()),
+      R("POST", /^\/api\/computer\/old\/([A-Za-z0-9_-]{1,64})\/copy$/, async (c) => this.computers.oldCopy(c.params[0])),
+      R("POST", /^\/api\/computer\/old\/([A-Za-z0-9_-]{1,64})\/delete$/, async (c) => this.computers.oldRemove(c.params[0], c.body ?? {})),
       R("GET", /^\/api\/bots\/([^/]+)\/computer$/, async (c) =>
         ({ computer: await this.computers.status(decodeURIComponent(c.params[0])) }),
       ),

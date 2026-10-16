@@ -196,6 +196,78 @@ export function createComputerView(bot, deps = {}) {
   const controlActions = el("div", "bt-actions");
   controlActions.append(takeoverButton, releaseButton);
 
+  // 旧电脑：以前每个 Bot 一台的虚拟机，文件自动搬进座席的 ~/old-computer/，磁盘等用户点删除才删
+  let oldItems = [];
+  let oldBusy = false;
+  const oldBox = el("div", "wb-old");
+  const oldRow = row("旧电脑", "以前每个 Bot 一台的虚拟机。共享电脑开机后，它的 /work 和主目录会复制到这个 Bot 座席的 ~/old-computer/，已有的文件不覆盖，浏览器登录不复制。旧磁盘一直保留，确认不需要了再删。", oldBox);
+  oldRow.hidden = true;
+
+  function oldText(item) {
+    if (item.state === "copying") return `正在复制：${item.step ?? "准备中"}`;
+    if (item.state === "done") {
+      const files = Number.isFinite(item.files) ? `${item.files} 个文件，` : "";
+      return `已复制到 ~/old-computer/（${files}${item.copiedAt ? new Date(item.copiedAt).toLocaleString() : "时间未知"}）`;
+    }
+    if (item.state === "error") return `复制出错：${item.error?.message ?? "未知错误"}`;
+    if (item.state === "orphan") return `${item.id}：它的助手已经删了，文件没有复制`;
+    return "等共享电脑开机后自动复制";
+  }
+
+  function paintOld() {
+    const mine = oldItems.filter((x) => x.botId === bot.id || x.state === "orphan");
+    oldRow.hidden = mine.length === 0;
+    oldBox.replaceChildren();
+    for (const item of mine) {
+      const line = el("div", "wb-old-item");
+      line.dataset.state = item.state;
+      line.append(el("div", "bt-note", oldText(item)));
+      const actions = el("div", "bt-actions");
+      if (item.state === "error") {
+        actions.append(button("btn ghost", "重试复制", (ev) => void oldAction(ev.currentTarget, item, "copy", "重试中…", "已开始重新复制")));
+      }
+      if (item.state !== "copying") {
+        actions.append(button("btn ghost danger", "删除旧电脑", (ev) => void oldAction(ev.currentTarget, item, "delete", "删除中…", "旧电脑已删除",
+          `删除旧电脑 ${item.id}？它的磁盘和记录都会删掉，不能恢复。${item.state === "done" ? "已经复制到 ~/old-computer/ 的文件不受影响。" : "这台的文件还没有复制进共享电脑。"}`)));
+      }
+      line.append(actions);
+      oldBox.append(line);
+    }
+  }
+
+  async function loadOld() {
+    if (login || oldBusy) return;
+    try {
+      const out = await api("/api/computer/old");
+      if (disposed) return;
+      oldItems = Array.isArray(out?.items) ? out.items : [];
+    } catch {
+      if (disposed) return;
+      oldItems = [];
+    }
+    paintOld();
+  }
+
+  async function oldAction(control, item, action, label, success, question = null) {
+    if (oldBusy || disposed) return;
+    if (question && !confirm(question)) return;
+    oldBusy = true;
+    try {
+      const out = await busy(control, api(`/api/computer/old/${encodeURIComponent(item.id)}/${action}`, { method: "POST", body: action === "delete" ? { confirm: true } : {} }), label);
+      if (disposed) return;
+      oldItems = Array.isArray(out?.items) ? out.items : oldItems;
+      toast(success);
+      announce(success);
+    } catch (error) {
+      if (disposed) return;
+      const code = error.data?.code ? `（${error.data.code}）` : "";
+      toast(`${action === "delete" ? "删除失败" : "重试失败"}${code}：${error.message}`, true);
+    } finally {
+      oldBusy = false;
+      if (!disposed) paintOld();
+    }
+  }
+
   const statusCard = el("div", "bt-set-card");
   // 网站登录：在 Bot 的电脑面板里打开登录屏（登录屏自己不再套一层）
   const loginHost = el("div", "wb-computer-login");
@@ -229,6 +301,7 @@ export function createComputerView(bot, deps = {}) {
     row("控制", "接管后 Bot 的自动输入立即失效，你的鼠标和键盘直接操作这台电脑。每次接管或归还会更换控制代号，旧代号的输入会被拒绝，也不会重放。", controlActions),
     row("共享电脑规格", "所有 Bot 的座席共用这一台电脑。vCPU 上限是本机核数减 2。", machineBox),
     row("网站登录", "网站登录所有 Bot 共用。在登录屏上登录一次，Bot 不小心退出了也只要在这里重登一次。", loginButton),
+    oldRow,
   );
 
 
@@ -779,6 +852,7 @@ export function createComputerView(bot, deps = {}) {
     }
     if (document.hidden) return;
     void loadState();
+    void loadOld();
     if (desktopOpen) void refreshScreen();
   }
 
@@ -815,6 +889,7 @@ export function createComputerView(bot, deps = {}) {
     paintMachine();
     void loadState();
     void loadMachine();
+    void loadOld();
     void loadBotArtifacts();
   }
 

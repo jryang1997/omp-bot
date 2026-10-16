@@ -1046,6 +1046,51 @@ export class Computers {
     return sendPng(res, shot);
   }
 
+  // ---------------- 旧电脑（10）：每 bot 一台的旧虚拟机，文件搬进共享电脑的 ~/old-computer/ ----------------
+
+  #oldView(items) {
+    return (items ?? []).map((x) => {
+      const bot = x.botId ? this.orch.getBot?.(x.botId) : null;
+      return { ...x, botName: bot?.name ?? null };
+    });
+  }
+
+  async oldList() {
+    const backend = await this.ensureBackend();
+    if (typeof backend.oldComputers !== "function") return { items: [] };
+    return { items: this.#oldView(backend.oldComputers()) };
+  }
+
+  async #oldItem(backend, computerId) {
+    const id = String(computerId ?? "");
+    const item = typeof backend.oldComputers === "function" ? backend.oldComputers().find((x) => x.id === id) : null;
+    if (!item) throw ferr(404, "computer_old_not_found", `没有旧电脑 ${id}`);
+    return item;
+  }
+
+  /** 重试复制：后台跑，马上返回当前列表。 */
+  async oldCopy(computerId) {
+    const backend = await this.ensureBackend();
+    const item = await this.#oldItem(backend, computerId);
+    if (item.state === "orphan") throw ferr(409, "computer_old_orphan", "这台旧电脑的助手已经删了，没有座席可以放文件");
+    if (item.state === "done") throw ferr(409, "computer_old_done", "这台旧电脑已经复制过了");
+    backend.retryOld(item.id).catch(() => {});
+    return { items: this.#oldView(backend.oldComputers()) };
+  }
+
+  /** 删除旧电脑：磁盘和记录都删，不可逆，请求体必须带 confirm: true。 */
+  async oldRemove(computerId, body = {}) {
+    const backend = await this.ensureBackend();
+    const item = await this.#oldItem(backend, computerId);
+    if (body?.confirm !== true) throw ferr(400, "confirm_required", "删除旧电脑不可恢复，请求里要带 confirm: true");
+    if (item.state === "copying") throw ferr(409, "computer_old_busy", "这台旧电脑正在复制，等复制完再删");
+    try {
+      return { items: this.#oldView(await backend.removeOld(item.id)) };
+    } catch (e) {
+      throw backendErr(e, { code: "computer_old_remove_failed", status: 409 });
+    }
+  }
+
   // ---------------- 电脑租约（电脑×Run 粒度，覆盖整个回合与异步动作） ----------------
 
   /** 租约键：同一 Run 在同一台电脑上只算一个租约；不同电脑（群回合多成员）互不覆盖。 */
