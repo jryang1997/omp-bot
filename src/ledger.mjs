@@ -57,6 +57,7 @@ export const ITEM_KINDS = Object.freeze([
   "outbox",
   "workspaces",
   "delegations",
+  "team_proposals",
 ]);
 
 /** reconcile 时外部副作用未知的标记值（run.recovery.status）。 */

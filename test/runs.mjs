@@ -742,17 +742,18 @@ await test("chat 档的工具面：只注册受控宿主工具，原生命令一
     const chatRt = await orch.runtimeFor(chat.id, "private");
     const supRt = await orch.runtimeFor(sup.id, "private");
 
-    // chat：没有 message_bot/delegate_bot 这类执行型团队工具，只有受控宿主工具与只读名册
+    // chat：没有 message_bot/delegate_bot 这类执行型团队工具，只有受控宿主工具、只读名册，
+    // 和团队事实提议（只记一条待确认，不改文件，聊天里最常听到该记的事）。
     assert.deepEqual(
       chatRt.tools.map((t) => t.name).sort(),
-      ["list_bots", "read_doc"].sort(),
+      ["list_bots", "propose_team_fact", "read_doc"].sort(),
     );
     assert.equal(chatRt.tools.some((t) => t.name === "message_bot"), false);
     assert.equal(chatRt.tools.some((t) => t.name === "delegate_bot"), false);
     // supervised：保留委派能力
     assert.deepEqual(
       supRt.tools.map((t) => t.name).sort(),
-      ["delegate_bot", "list_bots", "message_bot", "read_doc"].sort(),
+      ["delegate_bot", "list_bots", "message_bot", "propose_team_fact", "read_doc"].sort(),
     );
     // 任何档位都不能用原生命令绕过白名单拿执行能力
     await assert.rejects(() => orch.nativeCommand(chat.id, "bash"), (e) => e.status === 403);

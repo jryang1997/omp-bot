@@ -17,6 +17,8 @@
 import { execFile } from "node:child_process";
 import { join, resolve, sep } from "node:path";
 import { readFile, mkdir } from "node:fs/promises";
+import { readFileSync, writeFileSync, renameSync } from "node:fs";
+import { applyFact, hasFact, readFacts, normalizeFact, FACT_MAX_CHARS } from "./team-facts.mjs";
 import { Store, defaultHome } from "./store.mjs";
 import { Ledger } from "./ledger.mjs";
 import { BotRuntime, runtimeDirs } from "./bot.mjs";
@@ -86,6 +88,33 @@ const DELEGATE_BOT_SCHEMA = {
 };
 
 const LIST_BOTS_SCHEMA = { type: "object", properties: {}, additionalProperties: false };
+
+/** propose_team_fact：提议一条团队事实，等用户或主助手接受。 */
+const PROPOSE_TEAM_FACT_SCHEMA = {
+  type: "object",
+  properties: {
+    fact: { type: "string", description: "一条团队都该知道的事实，一行写完，比如「周报每周五下午五点前交」" },
+    source: { type: "string", description: "这条事实从哪来，比如「私聊里用户说的」「产品群 10 月 3 日通知」" },
+    replaces: { type: "string", description: "要替换的旧事实原文（照抄 team 根下 AGENTS.md 团队事实块里那一条，不含来源括注）；新增就不填" },
+  },
+  required: ["fact", "source"],
+  additionalProperties: false,
+};
+
+/** review_team_proposals：主助手列出、接受或拒绝团队事实提议。 */
+const REVIEW_TEAM_PROPOSALS_SCHEMA = {
+  type: "object",
+  properties: {
+    action: { type: "string", enum: ["list", "accept", "reject"], description: "list 列出待确认的；accept 接受；reject 拒绝" },
+    id: { type: "string", description: "提议编号（accept/reject 必填，来自 list）" },
+    reason: { type: "string", description: "拒绝原因（可选）" },
+  },
+  required: ["action"],
+  additionalProperties: false,
+};
+
+/** 团队事实提议的状态：pending 等确认；accepted 已写进文件；rejected 被拒；conflict 接受时发现旧事实变了。 */
+const TEAM_PROPOSAL_STATES = Object.freeze(["pending", "accepted", "rejected", "conflict"]);
 
 /** 原生审批/提问里属于「授权」语义的方法（其余是信息输入）。 */
 const AUTHORIZATION_METHODS = new Set(["select", "confirm"]);
@@ -1089,6 +1118,218 @@ export class Orchestrator {
     );
   }
 
+  // ---- 团队事实提议 ----
+  //
+  // 共识层 team/AGENTS.md 只有用户和主助手改。其他成员发现团队都该知道的事，用 propose_team_fact 提议，
+  // 带来源；用户在工作台或主助手用 review_team_proposals 接受后，写进文件里的团队事实块并自动提交。
+  // 替换旧事实时按文件现状核对旧事实还在不在，不在就拒绝、提示重提，不覆盖别人刚改过的。
+  // 被纠正掉的旧说法记在已接受的记录里（replaces），之后再提同样的旧说法当场拒绝。
+
+  _teamAgentsPath() {
+    return join(this.team.root, "AGENTS.md");
+  }
+
+  _readTeamAgents() {
+    try {
+      return readFileSync(this._teamAgentsPath(), "utf8");
+    } catch (e) {
+      if (e?.code === "ENOENT") return "";
+      throw e;
+    }
+  }
+
+  _writeTeamAgents(text) {
+    const file = this._teamAgentsPath();
+    const tmp = `${file}.${process.pid}.tmp`;
+    writeFileSync(tmp, text, "utf8");
+    renameSync(tmp, file);
+  }
+
+  /** 当前团队事实（文件里的现状）。 */
+  listTeamFacts() {
+    return readFacts(this._readTeamAgents()).map(({ text, line }) => ({ text, line }));
+  }
+
+  listTeamProposals({ state = null, limit = 200 } = {}) {
+    const all = this.ledger.list("team_proposals", { limit: 1000 }) ?? [];
+    return all.filter((p) => !state || p.state === state).slice(0, Math.max(1, Math.min(1000, limit)));
+  }
+
+  getTeamProposal(id) {
+    return this.ledger.get("team_proposals", id) ?? null;
+  }
+
+  _putTeamProposal(rec) {
+    const next = { ...rec, updatedAt: Date.now() };
+    this.ledger.put("team_proposals", next);
+    this.emit("team_proposal", { proposalId: next.id, botId: next.botId ?? undefined, state: next.state });
+    return next;
+  }
+
+  /** 被纠正掉的旧说法 → 现在的说法（沿着替换链走到文件里还在的那条）。 */
+  _correctedTo(fact, agentsText) {
+    const replaced = new Map();
+    for (const p of this.listTeamProposals({ state: "accepted", limit: 1000 }).slice().reverse()) {
+      if (p.replaces) replaced.set(normalizeFact(p.replaces), normalizeFact(p.fact));
+    }
+    let cur = normalizeFact(fact);
+    if (!replaced.has(cur) || hasFact(agentsText, cur)) return null;
+    const seen = new Set();
+    while (replaced.has(cur) && !seen.has(cur)) {
+      seen.add(cur);
+      cur = replaced.get(cur);
+      if (hasFact(agentsText, cur)) return cur;
+    }
+    return cur;
+  }
+
+  /** 按文件现状核对一条事实能不能写；能写返回 null，否则返回 {code, message}。 */
+  _teamFactProblem({ fact, replaces }, agentsText, { atAccept = false } = {}) {
+    if (replaces && !hasFact(agentsText, replaces)) {
+      return atAccept
+        ? { code: "fact_changed", message: `要替换的旧事实「${replaces}」已经被改过或删掉了，这条提议作废，请按团队事实块的最新内容重提。` }
+        : { code: "fact_not_found", message: `没找到要替换的事实「${replaces}」。先读 team 根下 AGENTS.md 的团队事实块，replaces 照抄里面那一条的原文（不含来源括注）。` };
+    }
+    if (hasFact(agentsText, fact)) return { code: "fact_exists", message: `团队事实里已经有这条：「${fact}」。` };
+    const corrected = this._correctedTo(fact, agentsText);
+    if (corrected) return { code: "fact_corrected", message: `「${fact}」已经被纠正为「${corrected}」，不再写回。要改就提议替换现在那条。` };
+    return null;
+  }
+
+  _cleanTeamFactInput({ fact, source, replaces }) {
+    const raw = String(fact ?? "");
+    if (/[\r\n]/.test(raw.trim())) throw httpErr(400, "一条事实一行写完，不要换行。", "bad_fact");
+    const text = normalizeFact(raw);
+    if (!text) throw httpErr(400, "事实不能为空。", "bad_fact");
+    if (text.length > FACT_MAX_CHARS) throw httpErr(400, `一条事实最多 ${FACT_MAX_CHARS} 字。`, "bad_fact");
+    const src = normalizeFact(source);
+    if (!src) throw httpErr(400, "要写清来源：这条事实从哪来。", "bad_source");
+    const old = replaces == null || String(replaces).trim() === "" ? null : normalizeFact(replaces);
+    if (old && old === text) throw httpErr(400, "新旧事实一样，不用替换。", "bad_fact");
+    return { fact: text, source: src, replaces: old };
+  }
+
+  _assertTeamWritable() {
+    if (this.team.readonly) throw httpErr(409, "只读副本不改团队目录。", "readonly");
+  }
+
+  /** bot 提议一条团队事实。同样的提议已在等就返回那条，不重复记。 */
+  proposeTeamFact(bot, input) {
+    this._assertTeamWritable();
+    const clean = this._cleanTeamFactInput(input ?? {});
+    const problem = this._teamFactProblem(clean, this._readTeamAgents());
+    if (problem) throw httpErr(409, problem.message, problem.code);
+    const same = this.listTeamProposals({ state: "pending" }).find((p) => p.fact === clean.fact && (p.replaces ?? null) === clean.replaces);
+    if (same) return { proposal: same, duplicate: true };
+    const now = Date.now();
+    const rec = this._putTeamProposal({
+      id: genId("tfp"),
+      botId: bot?.id ?? null,
+      botName: bot?.name ?? null,
+      ...clean,
+      state: "pending",
+      createdAt: now,
+    });
+    return { proposal: rec, duplicate: false };
+  }
+
+  _deciderName(by) {
+    if (by?.kind === "bot") return this.getBot(by.botId)?.name ?? by.botId;
+    return "用户";
+  }
+
+  _assertCanDecide(by) {
+    if (by?.kind === "user") return;
+    if (by?.kind === "bot" && this.getBot(by.botId)?.isMain === true) return;
+    throw httpErr(403, "只有用户和主助手能确认团队事实。", "not_allowed");
+  }
+
+  /** 用户或主助手接受、拒绝一条提议。接受时按文件现状再核对一次，冲突就记 conflict 并报 409。 */
+  decideTeamProposal(id, { decision, by, reason = null } = {}) {
+    this._assertCanDecide(by);
+    const rec = this.getTeamProposal(id);
+    if (!rec) throw httpErr(404, `没有这条提议：${id}`, "not_found");
+    if (rec.state !== "pending") throw httpErr(409, `这条提议已经处理过了（${rec.state}）。`, "already_decided");
+    const decidedBy = by.kind === "bot" ? { kind: "bot", botId: by.botId } : { kind: "user" };
+    const decided = { decidedBy, decidedAt: Date.now() };
+    if (decision === "reject") {
+      return this._putTeamProposal({ ...rec, ...decided, state: "rejected", reason: reason ? String(reason).slice(0, 500) : null });
+    }
+    if (decision !== "accept") throw httpErr(400, "decision 只能是 accept 或 reject。", "bad_decision");
+    this._assertTeamWritable();
+    const text = this._readTeamAgents();
+    const problem = this._teamFactProblem(rec, text, { atAccept: true });
+    if (problem) {
+      this._putTeamProposal({ ...rec, ...decided, state: "conflict", reason: problem.message, conflictCode: problem.code });
+      throw httpErr(409, problem.message, problem.code);
+    }
+    this._writeTeamAgents(applyFact(text, rec));
+    const out = this._putTeamProposal({ ...rec, ...decided, state: "accepted", reason: null });
+    this.team.commit(`团队事实：${this._deciderName(by)}接受了 ${rec.botName ?? "用户"} 的提议`);
+    return out;
+  }
+
+  /** 用户（或主助手）直接加一条或纠正一条：记一条已接受的提议，冲突同样拒绝。 */
+  addTeamFact({ fact, source, replaces = null, by } = {}) {
+    this._assertCanDecide(by);
+    this._assertTeamWritable();
+    const clean = this._cleanTeamFactInput({ fact, source, replaces });
+    const text = this._readTeamAgents();
+    const problem = this._teamFactProblem(clean, text, { atAccept: true });
+    if (problem) throw httpErr(409, problem.message, problem.code);
+    this._writeTeamAgents(applyFact(text, clean));
+    const now = Date.now();
+    const name = this._deciderName(by);
+    const rec = this._putTeamProposal({
+      id: genId("tfp"),
+      botId: by.kind === "bot" ? by.botId : null,
+      botName: by.kind === "bot" ? name : null,
+      ...clean,
+      state: "accepted",
+      direct: true,
+      decidedBy: by.kind === "bot" ? { kind: "bot", botId: by.botId } : { kind: "user" },
+      decidedAt: now,
+      createdAt: now,
+    });
+    this.team.commit(`团队事实：${name}${clean.replaces ? "纠正了一条" : "加了一条"}`);
+    return rec;
+  }
+
+  _handleProposeTeamFact(bot, args) {
+    try {
+      const { proposal, duplicate } = this.proposeTeamFact(this.getBot(bot.id) ?? bot, args ?? {});
+      const what = proposal.replaces ? `替换「${proposal.replaces}」为「${proposal.fact}」` : `「${proposal.fact}」`;
+      return {
+        text: duplicate
+          ? `同样的提议已经在等确认了（编号 ${proposal.id}）：${what}。`
+          : `已提议${what}，等用户或主助手确认（编号 ${proposal.id}）。确认前不会写进团队共识。`,
+      };
+    } catch (e) {
+      return { text: e?.message ?? String(e), isError: true };
+    }
+  }
+
+  _handleReviewTeamProposals(bot, args = {}) {
+    const by = { kind: "bot", botId: bot.id };
+    try {
+      this._assertCanDecide(by);
+      if (args.action === "list") {
+        const pending = this.listTeamProposals({ state: "pending" });
+        if (!pending.length) return { text: "没有待确认的团队事实提议。" };
+        return {
+          text: pending
+            .map((p) => `- ${p.id}：${p.replaces ? `把「${p.replaces}」改成「${p.fact}」` : `新增「${p.fact}」`}（来源：${p.source}；${p.botName ?? "用户"} 提议）`)
+            .join("\n"),
+        };
+      }
+      if (!args.id) return { text: "accept/reject 要带提议编号 id（先 list）。", isError: true };
+      const out = this.decideTeamProposal(String(args.id), { decision: args.action, by, reason: args.reason ?? null });
+      return { text: out.state === "accepted" ? `已接受，写进团队共识：「${out.fact}」。` : `已拒绝：「${out.fact}」。` };
+    } catch (e) {
+      return { text: e?.message ?? String(e), isError: true };
+    }
+  }
+
   /** 团队工具集 + Features 提供的受控宿主工具（chat 档只留后者）。 */
   _buildTeamTools(bot, runtime) {
     const tools = [];
@@ -1114,6 +1355,25 @@ export class Orchestrator {
     }
     if (typeof this.features.hostTools === "function") {
       tools.push(...this.features.hostTools(runtime));
+    }
+    // 提议不改任何东西，只聊天档也给；接受只给主助手（调用时再核对一次身份）。
+    tools.push({
+      name: "propose_team_fact",
+      label: "Propose Team Fact",
+      description:
+        "提议一条团队都该知道的事实（约定、资料位置、纠正过的说法），必须写来源。用户或主助手接受后才写进 team 根下 AGENTS.md 的团队事实块。改一条已有的事实时用 replaces 照抄旧的那条。不要直接改团队 AGENTS.md。",
+      parameters: PROPOSE_TEAM_FACT_SCHEMA,
+      handler: (args) => this._handleProposeTeamFact(bot, args),
+    });
+    if (bot.isMain === true) {
+      tools.push({
+        name: "review_team_proposals",
+        label: "Review Team Proposals",
+        description:
+          "主助手专用：列出成员提议的团队事实（list），接受（accept）或拒绝（reject）。接受时如果要替换的旧事实已经被改，会被拒，让提议的成员按最新内容重提。拿不准就留给用户在工作台确认。",
+        parameters: REVIEW_TEAM_PROPOSALS_SCHEMA,
+        handler: (args) => this._handleReviewTeamProposals(bot, args),
+      });
     }
     tools.push({
       name: "list_bots",

@@ -374,6 +374,25 @@ try {
   const deviceDelegations = await raw("/api/delegations", { headers: deviceAuth });
   check("设备读派活记录被拒（可能含别的 bot 的交回内容）", deviceDelegations.status === 403, `status=${deviceDelegations.status}`);
 
+  const ownerFacts = await api("/api/team/facts");
+  check("主人能读团队事实和提议", ownerFacts.status === 200 && Array.isArray(ownerFacts.data?.facts) && Array.isArray(ownerFacts.data?.proposals), `status=${ownerFacts.status}`);
+  const deviceFacts = await raw("/api/team/facts", { headers: deviceAuth });
+  check("设备读团队事实提议被拒（来源可能是私聊）", deviceFacts.status === 403, `status=${deviceFacts.status}`);
+  const deviceAddFact = await raw("/api/team/facts", {
+    method: "POST",
+    headers: { ...deviceAuth, "Content-Type": "application/json" },
+    body: JSON.stringify({ fact: "设备写进来的", source: "手机" }),
+  });
+  check("设备不能直接写团队事实", deviceAddFact.status === 403, `status=${deviceAddFact.status}`);
+  const added = await api("/api/team/facts", { method: "POST", body: { fact: "边界测试的事实", source: "测试" } });
+  check("主人能直接加一条团队事实", added.status === 201 && added.data?.proposal?.state === "accepted", `status=${added.status}`);
+  const addedAgain = await api("/api/team/facts", { method: "POST", body: { fact: "边界测试的事实", source: "测试" } });
+  check("重复的事实 409 fact_exists", addedAgain.status === 409 && addedAgain.data?.code === "fact_exists", `status=${addedAgain.status}`);
+  const deviceAccept = await raw("/api/team/proposals/tfp_x/accept", { method: "POST", headers: { ...deviceAuth, "Content-Type": "application/json" }, body: "{}" });
+  check("设备不能接受团队事实提议", deviceAccept.status === 403, `status=${deviceAccept.status}`);
+  const missingAccept = await api("/api/team/proposals/tfp_missing/accept", { method: "POST", body: {} });
+  check("接受不存在的提议 404", missingAccept.status === 404, `status=${missingAccept.status}`);
+
   // 群建好之后重新取设备视角的状态（不能用建群之前的快照）
   const deviceStateAfter = JSON.parse((await raw("/api/state", { headers: deviceAuth })).text);
   const scopedRoom = deviceStateAfter.rooms?.find((r) => r.id === mixedRoom.data.room.id);

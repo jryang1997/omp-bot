@@ -9,7 +9,7 @@
   },
   "scripts": {
     "demo": "node ompbot.mjs demo",
-    "test": "node test/unit.mjs && node test/workbench-runs.mjs && node test/attachment-drafts.mjs && node test/shutdown.mjs && node test/ledger.mjs && node test/runs.mjs && node test/features.mjs && node test/http-boundaries.mjs && node test/mobile.mjs && node test/computers.mjs && node test/rpc-client.mjs && node test/channels.mjs && node test/team.mjs && node test/seats.mjs && node test/file-share.mjs && node test/delegation.mjs && node smoke-gui.mjs && node gate.mjs && node smoke-b2b.mjs && node smoke-group.mjs && node smoke-persist.mjs",
+    "test": "node test/unit.mjs && node test/workbench-runs.mjs && node test/attachment-drafts.mjs && node test/shutdown.mjs && node test/ledger.mjs && node test/runs.mjs && node test/features.mjs && node test/http-boundaries.mjs && node test/mobile.mjs && node test/computers.mjs && node test/rpc-client.mjs && node test/channels.mjs && node test/team.mjs && node test/seats.mjs && node test/file-share.mjs && node test/delegation.mjs && node test/team-memory.mjs && node smoke-gui.mjs && node gate.mjs && node smoke-b2b.mjs && node smoke-group.mjs && node smoke-persist.mjs",
     "serve": "node ompbot.mjs serve",
     "desktop": "electron .",
     "package:win": "node scripts/package-windows.mjs",

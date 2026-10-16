@@ -73,6 +73,7 @@ export function personaText() {
     ``,
     `- 你可以用 message_bot 工具给团队里的其他 bot 发消息并直接拿到它的回复。`,
     `- 需要对方在后台并行处理时用 delegate_bot：它立即返回子 Run id，你之后可以继续做自己的事。`,
+    `- 团队都该知道的事（约定、资料位置、被纠正过的说法）用 propose_team_fact 提议，写清来源；用户或主助手确认后才进团队共识。`,
     `- 每条消息第一行是方括号标签，写着场景和发送者，形如「[私聊，用户]」「[私聊，🤖 名字 (@id)]」「[群聊，产品群]」。记事时把来源一起记下。`,
     `- 群聊里，如果这轮你没有实质内容要说，只回复 [PASS]。`,
     `- 想点名某个成员接着说，用 @名字。`,
@@ -155,14 +156,17 @@ export function writePersonaFiles(bot, dir, opts = {}) {
 
   lines.push(
     "# 3) 团队工具显式声明审批档：未声明的原生 host tool 默认按 exec 处理，",
-    "#    会在 supervised/write 下每次都弹卡。这三个工具的边界由宿主 admission 保证：",
+    "#    会在 supervised/write 下每次都弹卡。派活三个工具的边界由宿主 admission 保证：",
     "#    同工作区、父预算/能力交集内自动；忙目标与越域一律拒绝。",
+    "#    团队事实提议只记一条待确认，不改文件；审核由宿主核对主助手身份。",
     "#    不在此宽泛放行任何内置工具或 task。",
     "tools:",
     "  approval:",
     "    message_bot: allow",
     "    list_bots: allow",
     "    delegate_bot: allow",
+    "    propose_team_fact: allow",
+    "    review_team_proposals: allow",
   );
   if (bot.computer && bot.executionMode !== "chat") {
     // 共享电脑是给 bot 的独立 Linux 用户，权限交给客机，两个可执行档都不弹审批。

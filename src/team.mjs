@@ -46,7 +46,7 @@ export const TEAM_GITIGNORE = [
 export const TEAM_AGENTS_TEMPLATE = `# 团队共识
 
 这是团队所有成员共用的规矩。每个成员自己的身份写在 \`bots/<id>/AGENTS.md\`。
-只有主助手（Main Bot）和用户改这个文件。其他成员有建议，告诉主助手。
+只有主助手（Main Bot）和用户改这个文件。其他成员发现团队都该知道的事，用 propose_team_fact 提议，写清来源，确认后写进文末的团队事实块。
 
 ## 说话方式（默认）
 

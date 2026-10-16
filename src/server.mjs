@@ -733,6 +733,22 @@ export async function startServer({ port = 3099, host = "127.0.0.1", home, bin =
       return { delegations: orch.listDelegations({ botId, limit: Number.isFinite(limit) ? limit : 100 }) };
     } },
 
+    // 团队事实：成员的提议和文件里的现状。只给主人：提议里可能带着私聊来源。接受和纠正也只有主人能做。
+    { method: "GET", path: ["api", "team", "facts"], run: () => ({
+      facts: orch.listTeamFacts(),
+      proposals: orch.listTeamProposals({ limit: 200 }),
+    }) },
+    { method: "POST", path: ["api", "team", "facts"], status: 201, run: (c) => {
+      const b = c.body ?? {};
+      return { proposal: orch.addTeamFact({ fact: b.fact, source: b.source, replaces: b.replaces ?? null, by: { kind: "user" } }) };
+    } },
+    { method: "POST", path: ["api", "team", "proposals", "*", "accept"], run: (c) => ({
+      proposal: orch.decideTeamProposal(c.segs[3], { decision: "accept", by: { kind: "user" } }),
+    }) },
+    { method: "POST", path: ["api", "team", "proposals", "*", "reject"], run: (c) => ({
+      proposal: orch.decideTeamProposal(c.segs[3], { decision: "reject", by: { kind: "user" }, reason: c.body?.reason ?? null }),
+    }) },
+
     { method: "GET", path: ["api", "approvals"], access: "any", run: (c) => {
       const all = ledger() ? ledger().list("approvals", { limit: 200 }) ?? [] : [];
       const status = c.query.get("status");
