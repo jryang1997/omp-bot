@@ -1,0 +1,30 @@
+## 场景 1：派活时目标正忙
+A 的 delegate_bot 结果: {"text":"Beta 当前无法接手：bot:bot_mvaw86y3_2:private 已有运行在跑（run_mvaw86ye_9bbc53bd），拒绝并发启动","isError":true}
+A 的 Run: completed
+B 名下的 Run 数: 1 (只有它自己那条，派的活没留下)
+结论: 目标一忙，派的活就丢了，只剩一条报错给 A。这是 01 要关的窗口
+
+## 场景 2：子任务跑到一半服务重启
+父 Run 结束: completed | 回复: "已派给 Beta 后台执行：run id=run_mvaw870g_21699112（不等待结果，可在工作台收件箱查看进展与成果）。"
+重启前子 Run: delegation running
+重启后子 Run: interrupted | recovery: null
+重启后 A 名下 Run 数: 1 | 有没有新的唤醒 Run: 没有
+A 知道结果吗: 没有任何把子结果交回 A 的记录或事件
+结论: 子任务被标 interrupted，但结果和中断都不回到 A，这是 01 要关的窗口
+
+## 场景 2b：不重启，子任务正常做完
+子 Run: completed | 回复: "周报写好了，放在 work/weekly.md"
+A 名下 Run 数: 1 | A 的会话收到的消息数: 1
+结论: 子任务做完了，A 也不会知道，只有用户去工作台看。这是 01 要关的窗口
+
+## 场景 3：挂着审批时重启
+重启前审批: pending | Run: waiting_approval
+重启后审批: expired | 原因: "process-restarted"
+重启后 Run: interrupted
+说明: 这类审批是 omp 进程里一次具体工具调用发起的，进程没了，这次调用也没了，恢复同一个请求无处可交
+结论: 现有行为是对的（明确作废并写原因，Run 标 interrupted）。02 的「重启后恢复审批」不成立，删掉
+
+## 场景 4：定时任务和渠道通知（读代码核实）
+src/channels.mjs #deliver：先写 outbox（pending），id 稳定，同一事件重放不重发；已 sent/unknown 直接跳过
+src/features/routines.mjs：只写回执（ok/missed/skipped/overlap），不对外发通知
+结论: 没有「跑完没送到却显示成功」的窗口，03 skip

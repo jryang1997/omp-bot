@@ -321,3 +321,15 @@ export function newTeam({ uiApprovalTtlMs = 60_000, features, maxConcurrency, po
     },
   };
 }
+
+/**
+ * 模拟进程崩溃：不走 shutdown 收尾，只放掉 home 租约、关掉台账，
+ * 等同于进程死后操作系统回收文件锁和句柄。之后用 newTeam({ home }) 打开新编排器。
+ */
+export function crash(team) {
+  team.orch.closing = true;
+  try {
+    team.orch.ledger.close();
+  } catch {}
+  team.orch.store.releaseLock();
+}
