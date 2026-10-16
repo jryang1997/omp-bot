@@ -237,7 +237,11 @@ export function createPanels({ client, deps }) {
     const delegationBox = el("div", "wb-approval-list wb-delegation-list hidden");
     let delegations = [];
     let delegationTimer = null;
-    root.append(approvals, delegationBox, list, empty);
+    // 团队事实：成员提议等你确认、接受时撞车的，和现在写在团队共识里的事实。都没有就整块隐藏。
+    const factBox = el("div", "wb-approval-list wb-fact-list hidden");
+    let teamFacts = { facts: [], proposals: [] };
+    let factsOpen = false;
+    root.append(approvals, factBox, delegationBox, list, empty);
 
     // 导出是低频动作，收进默认收起的「高级选项」，不占主流程。
     const exportAll = button("btn ghost", "导出全部任务", () => {
@@ -262,10 +266,80 @@ export function createPanels({ client, deps }) {
       paintDelegations();
     }
 
-    /** 任务一有变化就顺手刷新派活（落定、交回都伴随 Run 变化），合并成一次请求。 */
+    async function loadTeamFacts() {
+      try {
+        const data = await api("/api/team/facts");
+        teamFacts = { facts: Array.isArray(data?.facts) ? data.facts : [], proposals: Array.isArray(data?.proposals) ? data.proposals : [] };
+      } catch {
+        teamFacts = { facts: [], proposals: [] };
+      }
+      paintTeamFacts();
+    }
+
+    /** 任务一有变化就顺手刷新派活和团队事实提议（落定、交回、提议都发生在 Run 里），合并成一次请求。 */
     function scheduleDelegations() {
       clearTimeout(delegationTimer);
-      delegationTimer = setTimeout(() => void loadDelegations(), 300);
+      delegationTimer = setTimeout(() => { void loadDelegations(); void loadTeamFacts(); }, 300);
+    }
+
+    function paintTeamFacts() {
+      factBox.replaceChildren();
+      const pending = teamFacts.proposals.filter((p) => p.state === "pending");
+      // 撞车的只留一天：提示该重提了，过后就不占地方。
+      const dayAgo = Date.now() - 24 * 3600 * 1000;
+      const conflicts = teamFacts.proposals.filter((p) => p.state === "conflict" && (p.decidedAt ?? 0) > dayAgo);
+      const facts = teamFacts.facts;
+      factBox.classList.toggle("hidden", !pending.length && !conflicts.length && !facts.length);
+      if (pending.length || conflicts.length) {
+        factBox.append(el("div", "wb-dock-label", `团队事实待确认（${pending.length}）`));
+        for (const p of [...pending, ...conflicts]) factBox.append(proposalTile(p));
+      }
+      if (facts.length) {
+        const more = el("details", "ui-disclosure wb-fact-current");
+        // 纠正完会重画，记住展开状态，免得用户连着改几条要反复点开。
+        more.open = factsOpen;
+        more.addEventListener("toggle", () => { factsOpen = more.open; });
+        more.append(el("summary", null, `现在的团队事实（${facts.length}）`));
+        const body = el("div", "ui-disclosure-body");
+        for (const fact of facts) {
+          body.append(row(fact.text, null, button("btn ghost", "纠正", function () {
+            const next = prompt("改成什么？一行写完。", fact.text);
+            if (next == null || !next.trim() || next.trim() === fact.text) return;
+            return busy(this, api("/api/team/facts", { method: "POST", body: { fact: next, replaces: fact.text, source: "用户在工作台纠正" } })
+              .then(() => { toast("已改好，旧说法不会再被写回"); return loadTeamFacts(); })
+              .catch((error) => { toast(error.message, true); return loadTeamFacts(); }), "保存中…");
+          })));
+        }
+        more.append(body);
+        factBox.append(more);
+      }
+    }
+
+    function proposalTile(p) {
+      const tile = el("div", "wb-run-tile");
+      tile.dataset.proposalId = p.id;
+      tile.dataset.state = p.state;
+      const top = el("div", "wb-run-top");
+      top.append(el("span", "wb-run-bot", `${p.botName || "用户"} 提议`));
+      top.append(el("span", "bt-state wb-run-state", p.state === "conflict" ? "旧事实已变，要重提" : "等你确认"));
+      tile.append(top);
+      tile.append(el("div", "wb-run-text", p.replaces ? `把「${p.replaces}」改成「${p.fact}」` : `新增：${p.fact}`));
+      tile.append(el("div", "bt-note", `来源：${p.source}`));
+      if (p.state === "conflict" && p.reason) tile.append(el("div", "bt-note", String(p.reason)));
+      const foot = el("div", "wb-run-foot");
+      foot.append(el("span", "wb-run-time", fmtTime(p.createdAt)));
+      const actions = el("div", "bt-actions");
+      if (p.state === "pending") {
+        const decide = (what, label) => function () {
+          return busy(this, api(`/api/team/proposals/${encodeURIComponent(p.id)}/${what}`, { method: "POST", body: {} })
+            .then(() => { toast(label); return loadTeamFacts(); })
+            .catch((error) => { toast(error.message, true); return loadTeamFacts(); }), "处理中…");
+        };
+        actions.append(button("btn", "接受", decide("accept", "已写进团队共识")), button("btn ghost", "拒绝", decide("reject", "已拒绝")));
+      }
+      foot.append(actions);
+      tile.append(foot);
+      return tile;
     }
 
     function paintDelegations() {
@@ -384,9 +458,10 @@ export function createPanels({ client, deps }) {
 
     void draw();
     void loadDelegations();
+    void loadTeamFacts();
     return {
       node: root,
-      refresh: () => { void loadDelegations(); return draw(); },
+      refresh: () => { void loadDelegations(); void loadTeamFacts(); return draw(); },
       repaint: () => { paint(); scheduleDelegations(); },
     };
   }
