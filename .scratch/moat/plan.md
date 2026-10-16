@@ -48,7 +48,7 @@ omp-bot 的路线不变：回合内的事全交给 OMP，回合外的四本账�
 - Hermes 把执行状态和交付状态分两本账，交付用 claim 加租约，次数用完记 dropped，结果仍可查（`excerpts/P1-HE8.md`）。
 
 **我们怎么落：**
-- 新增"派活"：`message_bot` 加一个异步方式（或新工具 `assign_work`），写一条 Work（父 Run、验收标准、截止时间）。目标 bot 忙就排队，不拒绝。
+- 升级已有的 `delegate_bot`，不新开工具。它现在是发出去就不管：目标忙就报错，结果不回到派活的 bot，重启后只标 interrupted。改成写一条派活记录，目标 bot 忙就排队，不拒绝。
 - 父回合可以先结束，进入等待。子任务交回时写一条 Delivery，父 bot 下一轮被唤醒（用 OMP 的 `follow_up`），由它验收。
 - 重启恢复照 OpenMausBot 的三条规则。交回前重查目标 bot 是否还对这个会话可见。
 - bot 内部的并行拆分继续交给 OMP 的 `task`，我们不管。跨 bot 才走我们的派工树。
@@ -75,6 +75,8 @@ omp-bot 的路线不变：回合内的事全交给 OMP，回合外的四本账�
 - 批准后改参数，原批准不生效。
 
 ### 3. 交付账（借 Hermes、ZeroClaw）
+
+skip: 核实后渠道已有 outbox（稳定键，pending 到 sent 或 unknown，重启不重放），定时任务不对外发通知，没有这个窗口。派活结果的交付并进第 1 步。下面保留原想法备查。
 
 **别人怎么做：**
 - Hermes 的 cron 投递碰渠道前先把 pending 改成 delivering；owner 死了的 delivering 恢复成 unknown，不盲重发（`excerpts/P1-HE11.md`）。
@@ -139,5 +141,5 @@ omp-bot 的路线不变：回合内的事全交给 OMP，回合外的四本账�
 ## 待你定
 
 1. 顺序是否就按 0 到 6？我建议先做 0 和 1，因为"派活被拒、重启丢结果"是最直接的体验问题。
-2. 派活用 `message_bot` 加异步方式，还是新开一个 `assign_work` 工具？我倾向新工具：同步问一句和派一件活语义不同，分开更好验收。
-3. 团队记忆提案是否需要 Main Bot 也能接受，还是只有你能接受？
+2. ~~派活用新工具 `assign_work`~~。已定：升级已有的 `delegate_bot`，它本来就是异步派活。
+3. 已定：团队记忆提案你和 Main Bot 都能接受，和共识层现有规矩一致。
