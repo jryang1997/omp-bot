@@ -840,6 +840,37 @@ test("10 旧电脑接口：列出带助手名，重试和删除，删除必须�
   }
 });
 
+test("05 进客机的只有座席自己的令牌和共享目录钥匙，宿主的模型密钥和 omp-bot 令牌一个不带", async () => {
+  const home = tmp("ompbot-seat-noleak-");
+  const vm = new FakeVm();
+  vm.shareHost = "127.0.0.1";
+  const hostSecrets = {
+    OPENAI_API_KEY: "sk-host-openai-0000000000000000",
+    ANTHROPIC_API_KEY: "sk-ant-host-1111111111111111",
+    GITHUB_TOKEN: "ghp_host2222222222222222222222",
+    OMPBOT_TOKEN: "host-ompbot-token-33333333",
+  };
+  const saved = {};
+  for (const [k, v] of Object.entries(hostSecrets)) { saved[k] = process.env[k]; process.env[k] = v; }
+  const fileShare = new FileShare({ home, roots: (u) => join(home, "share", u) });
+  const seats = new SeatBackend({ home, vm, share: new SeatShare({ fileShare, botIdFor: () => "bot_a" }) });
+  try {
+    await seats.start("pc_a");
+    const allowed = /^(OMP_SEAT_TOKEN|OMP_SEAT_LISTEN|OMP_SHARE_(HOST|PORT|KNOWN_HOSTS|WORKSPACE_KEY|USER|KEY))$/;
+    const envs = vm.envs.filter(Boolean);
+    assert.ok(envs.length > 0, "座席起来时经管理通道传过 env");
+    for (const env of envs) {
+      for (const k of Object.keys(env)) assert.match(k, allowed, `不该进客机的变量 ${k}`);
+      for (const v of Object.values(env)) for (const secret of Object.values(hostSecrets)) assert.ok(!String(v).includes(secret));
+    }
+    for (const cmd of vm.commands) for (const secret of Object.values(hostSecrets)) assert.ok(!cmd.includes(secret), "命令行里也没有");
+  } finally {
+    await seats.close();
+    for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 for (const run of pending) await run();
 console.log(`\n${passed}/${passed + failed} PASS${failed ? `，${failed} FAIL` : ""}`);
 process.exit(failed ? 1 : 0);

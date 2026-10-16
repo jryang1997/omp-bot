@@ -155,6 +155,14 @@ export function writePersonaFiles(bot, dir, opts = {}) {
   }
 
   lines.push(
+    "# 2c) 秘密不进模型：OMP 在发给模型前把 secrets.yml（用户的 agent 目录和 bots/<id>/.omp/）里配的秘密、",
+    "#     名字像密钥的环境变量值、像凭据的串（sk-、ghp_ 之类）换成占位符，工具执行前再换回原文。",
+    "#     本地会话文件里仍是原文（OMP 的设计），所以 bots/*/sessions/ 和 secrets.yml 都不进 team 的 git。",
+    "secrets:",
+    "  enabled: true",
+  );
+
+  lines.push(
     "# 3) 团队工具显式声明审批档：未声明的原生 host tool 默认按 exec 处理，",
     "#    会在 supervised/write 下每次都弹卡。派活三个工具的边界由宿主 admission 保证：",
     "#    同工作区、父预算/能力交集内自动；忙目标与越域一律拒绝。",

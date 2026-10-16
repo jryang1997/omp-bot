@@ -32,6 +32,9 @@ const START_RE = /<!-- omp-bot 身份块开始[^>]*-->/;
 const END_RE = /<!-- omp-bot 身份块结束[^>]*-->/;
 const NO_ROLE = "（未设置）";
 
+/** 老团队的 .gitignore 里必须补上的行：漏了就会把密钥提交进 team 的 git。 */
+const MUST_IGNORE = ["bots/*/sessions/", "bots/*/.omp/mcp.json", "bots/*/.omp/secrets.yml"];
+
 export const TEAM_GITIGNORE = [
   "# omp-bot 生成。会话、私有文件、共享工作区和记忆库不进版本历史。",
   ".memory/",
@@ -40,6 +43,8 @@ export const TEAM_GITIGNORE = [
   "bots/*/work/",
   "# 项目级 MCP 配置可能带密钥",
   "bots/*/.omp/mcp.json",
+  "# bot 自己的秘密清单（OMP secrets），里面是原文",
+  "bots/*/.omp/secrets.yml",
   "",
 ].join("\n");
 
@@ -550,6 +555,7 @@ export class TeamDir {
       created.push(rel);
     };
     writeOnce(".gitignore", TEAM_GITIGNORE);
+    const ignoreFixed = this._ensureIgnoreLines();
     writeOnce("AGENTS.md", TEAM_AGENTS_TEMPLATE);
     const gitDir = join(this.root, ".git");
     if (!existsSync(gitDir)) {
@@ -557,6 +563,7 @@ export class TeamDir {
       else this._gitSkeleton(gitDir);
     }
     if (created.length) this.commit(`建立团队目录：${created.join("、")}`);
+    else if (ignoreFixed) this.commit("补上 .gitignore：带密钥的文件不进版本历史");
     return this;
   }
 
@@ -613,6 +620,21 @@ export class TeamDir {
     writeFileSync(join(gitDir, "HEAD"), "ref: refs/heads/main\n", "utf8");
     writeFileSync(join(gitDir, "config"), "[core]\n\trepositoryformatversion = 0\n\tfilemode = false\n\tbare = false\n", "utf8");
     writeFileSync(join(gitDir, "description"), "omp-bot 团队目录（没有 git，装上 Git 才有改动历史）\n", "utf8");
+  }
+
+  /**
+   * 老团队的 .gitignore 是当时的模板，之后加进模板的必须忽略的行（带密钥的文件）补在末尾。
+   * 用户自己加的行不动；已经有的不重复加。
+   */
+  _ensureIgnoreLines() {
+    const file = join(this.root, ".gitignore");
+    const cur = readFileSync(file, "utf8");
+    const have = new Set(cur.split(/\r?\n/).map((l) => l.trim()));
+    const missing = MUST_IGNORE.filter((l) => !have.has(l));
+    if (!missing.length) return false;
+    const sep = cur.endsWith("\n") || cur === "" ? "" : "\n";
+    writeFileSync(file, `${cur}${sep}# omp-bot 补上：带密钥的文件不进版本历史\n${missing.join("\n")}\n`, "utf8");
+    return true;
   }
 
   /**

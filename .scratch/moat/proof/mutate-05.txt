@@ -1,0 +1,6 @@
+- overlay 不打开 secrets：抓到 test/team.mjs（05 overlay 打开 OMP 的秘密占位符：发给模型前把配置的秘密和像凭据的串换成占位符）
+- 老团队不补 secrets.yml 的忽略行：抓到 test/team.mjs（05 bot 自己的 secrets.yml 不进 team 的 git；老团队的 .gitignore 补上这一行）
+- 老团队不补会话目录的忽略行：抓到 test/team.mjs（05 bot 自己的 secrets.yml 不进 team 的 git；老团队的 .gitignore 补上这一行）
+- 新团队模板漏掉 secrets.yml：抓到 test/team.mjs（05 bot 自己的 secrets.yml 不进 team 的 git；老团队的 .gitignore 补上这一行）
+- 补过忽略行不提交：抓到 test/team.mjs（05 bot 自己的 secrets.yml 不进 team 的 git；老团队的 .gitignore 补上这一行）
+- 座席 env 混进宿主环境：抓到 test/seats.mjs（05 进客机的只有座席自己的令牌和共享目录钥匙，宿主的模型密钥和 omp-bot 令牌一个不带）

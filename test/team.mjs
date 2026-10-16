@@ -692,6 +692,66 @@ test("11 接口拒绝改 Main Bot 形象、拒绝用主助手颜色、拒绝非�
   }
 });
 
+test("05 overlay 打开 OMP 的秘密占位符：发给模型前把配置的秘密和像凭据的串换成占位符", () => {
+  const dir = tmp("ompbot-persona-secrets-");
+  try {
+    for (const executionMode of ["chat", "supervised", "full"]) {
+      const bot = makeBot({ id: `bot_s_${executionMode}`, name: "S", executionMode });
+      const y = readFileSync(writePersonaFiles(bot, dir, {}).overlayPath, "utf8");
+      assert.match(y, /^secrets:\n  enabled: true$/m, executionMode);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("05 bot 自己的 secrets.yml 不进 team 的 git；老团队的 .gitignore 补上这一行", async () => {
+  const home = tmp("ompbot-team-secrets-");
+  try {
+    const root = join(home, "team");
+    assert.match(TEAM_GITIGNORE, /^bots\/\*\/\.omp\/secrets\.yml$/m);
+    // 老团队：.gitignore 是旧模板，没有 secrets 这行。
+    mkdirSync(root, { recursive: true });
+    const oldIgnore = TEAM_GITIGNORE.split("\n").filter((l) => !l.includes("secrets")).join("\n");
+    writeFileSync(join(root, ".gitignore"), `${oldIgnore}# 用户自己加的\nscratch/\n`, "utf8");
+    await withOrch(home, async (orch) => {
+      const ignore = readFileSync(join(root, ".gitignore"), "utf8");
+      assert.match(ignore, /^bots\/\*\/\.omp\/secrets\.yml$/m);
+      assert.match(ignore, /^scratch\/$/m, "用户加的行保留");
+      const bot = orch.addBot({ name: "Keeper" });
+      const omp = join(root, "bots", bot.id, ".omp");
+      mkdirSync(omp, { recursive: true });
+      writeFileSync(join(omp, "secrets.yml"), "- type: plain\n  content: hunter2-team-secret\n", "utf8");
+      orch.team.commit("测试");
+      await orch.team.flush();
+      if (orch.teamStatus().git) {
+        const tracked = execFileSync("git", ["ls-files"], { cwd: root, encoding: "utf8" });
+        assert.doesNotMatch(tracked, /secrets\.yml/);
+      }
+    });
+    // 再启动一次不重复追加。
+    await withOrch(home, async () => {});
+    const again = readFileSync(join(root, ".gitignore"), "utf8");
+    assert.equal(again.match(/^bots\/\*\/\.omp\/secrets\.yml$/gm).length, 1);
+    // 已有 git 的老团队：.gitignore 被改回更老的样子（连会话目录都没忽略）并提交过，启动时补上并单独提交。
+    if (execFileSync("git", ["--version"], { encoding: "utf8" })) {
+      const older = TEAM_GITIGNORE.split("\n").filter((l) => !l.includes("secrets") && !l.includes("sessions")).join("\n");
+      writeFileSync(join(root, ".gitignore"), older, "utf8");
+      execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "旧模板"], { cwd: root });
+      await withOrch(home, async (orch) => { await orch.team.flush(); });
+      const fixed = readFileSync(join(root, ".gitignore"), "utf8");
+      assert.match(fixed, /^bots\/\*\/sessions\/$/m, "会话目录也补上");
+      assert.match(fixed, /^bots\/\*\/\.omp\/secrets\.yml$/m);
+      const dirty = execFileSync("git", ["status", "--porcelain", ".gitignore"], { cwd: root, encoding: "utf8" });
+      assert.equal(dirty.trim(), "", "补完就提交了");
+      const log = execFileSync("git", ["log", "-1", "--format=%s"], { cwd: root, encoding: "utf8" });
+      assert.match(log, /补上 \.gitignore/);
+    }
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 for (const run of pending) await run();
 console.log(`\n${passed}/${passed + failed} PASS${failed ? `，${failed} FAIL` : ""}`);
 process.exit(failed ? 1 : 0);
