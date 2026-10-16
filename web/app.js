@@ -1360,8 +1360,8 @@ function finishRun(run, { text: streamed, botChat }) {
   }
   if (run.state === "failed") toast(`运行失败：${run.error || "未知错误"}`, true);
   if (run.state === "reconciliation_required") {
-    toast("外部效果未知：该运行需人工对账，不会自动重试或重放", true);
-    announce("运行需人工对账，未完成的副作用未知");
+    toast("有动作结果未知，要你核对一下。系统不会自动重做", true);
+    announce("有动作结果未知，要你核对一下");
   }
   announce(`运行${runStateLabel(run.state)}`);
   updateApprovalBadge();

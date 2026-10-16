@@ -146,7 +146,7 @@ export const RUN_STATES = {
   failed: "失败",
   cancelled: "已取消",
   interrupted: "已中断",
-  reconciliation_required: "需人工对账",
+  reconciliation_required: "要你核对",
 };
 export const runStateLabel = (state) => RUN_STATES[state] || state || "未知";
 const TERMINAL_STATES = new Set(["completed", "failed", "cancelled", "interrupted", "reconciliation_required"]);
@@ -182,9 +182,27 @@ export function fmtSize(bytes) {
 export function fmtDuration(ms) {
   const n = Number(ms);
   if (!Number.isFinite(n) || n < 0) return "—";
-  if (n < 1000) return `${Math.round(n)}ms`;
-  if (n < 60000) return `${(n / 1000).toFixed(1)}s`;
-  return `${Math.floor(n / 60000)}m${Math.round((n % 60000) / 1000)}s`;
+  if (n < 1000) return "不到 1 秒";
+  const sec = Math.round(n / 1000);
+  if (sec < 60) return `${sec} 秒`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return sec % 60 ? `${min} 分 ${sec % 60} 秒` : `${min} 分钟`;
+  const hour = Math.floor(min / 60);
+  if (hour < 24) return min % 60 ? `${hour} 小时 ${min % 60} 分` : `${hour} 小时`;
+  const day = Math.floor(hour / 24);
+  return hour % 24 ? `${day} 天 ${hour % 24} 小时` : `${day} 天`;
+}
+/** 给人看的时间：今天 13:44、昨天 09:02、10月16日 13:44，跨年才带年份。 */
+export function fmtWhen(at, now = new Date()) {
+  const date = new Date(at);
+  if (!Number.isFinite(date.getTime())) return "";
+  const clock = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  const day = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diff = Math.round((day(now) - day(date)) / 86400000);
+  if (diff === 0) return `今天 ${clock}`;
+  if (diff === 1) return `昨天 ${clock}`;
+  const md = `${date.getMonth() + 1}月${date.getDate()}日`;
+  return date.getFullYear() === now.getFullYear() ? `${md} ${clock}` : `${date.getFullYear()}年${md} ${clock}`;
 }
 
 /** Tab containment for a modal region. Call from a keydown handler; returns true if handled. */

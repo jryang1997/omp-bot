@@ -16,7 +16,7 @@ M = [
   ("模型看到的上限和校验不一致", O, "      maxItems: MAX_ACCEPTANCE_ITEMS,", "      maxItems: 20,", D),
   ("工具说明不讲对方看不到对话", O, "交接简报。对方看不到你和用户的对话，", "交接简报。", D),
   ("人设不提醒写全背景", "src/persona.mjs", "    `- 派活和问队友时，对方看不到你的对话：把背景、相关文件、现状和约束写全，别只丢一句「按刚才说的做」。`,\n", "", D),
-  ("工作台不显示验收标准", "web/workbench-panels.js", "    if (acceptance.length) {\n      root.append", "    if (false) {\n      root.append", UI),
+  ("工作台不显示验收标准", "web/workbench-panels.js", "    if (acceptance.length) {\n      const box", "    if (false) {\n      const box", UI),
 ]
 env = {**os.environ, "PLAYWRIGHT": "/vercel/sandbox/node_modules/playwright/index.mjs"}
 out = []

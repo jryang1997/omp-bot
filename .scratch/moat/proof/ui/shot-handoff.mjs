@@ -34,7 +34,8 @@ try {
   await page.waitForTimeout(400);
   const body = await page.textContent("body");
   check("详情有验收标准一节", body.includes("验收标准"));
-  check("逐条列出验收标准", body.includes("- [ ] 周报在 work/weekly.md") && body.includes("- [ ] 列出三条风险，每条带出处"));
+  const items = await page.$$eval(".wb-checklist > li", (els) => els.map((e) => e.textContent));
+  check("逐条列出验收标准", items.join("|") === "周报在 work/weekly.md|列出三条风险，每条带出处", items.join("|"));
   check("简报原文照常显示", body.includes("约束：只调研，不要改别的文件。"));
   await page.screenshot({ path: join(HERE, "handoff-detail.png") });
   await page.keyboard.press("Escape");

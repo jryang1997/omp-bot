@@ -35,10 +35,11 @@ try {
   await page.click("#btn-activity");
   await page.waitForSelector(`.wb-run-tile[data-run-id="${run.id}"]`, { timeout: 10_000 });
   await page.click(`.wb-run-tile[data-run-id="${run.id}"] button`);
-  await page.waitForSelector(".wb-effect-list", { timeout: 5_000 });
-  const rows = await page.$$eval(".wb-effect-list > *", (els) => els.map((e) => `${e.dataset.effectStatus}|${e.textContent}`));
+  await page.waitForSelector(".wb-effects", { timeout: 5_000 });
+  const rows = await page.$$eval(".wb-effects > .wb-effect", (els) => els.map((e) => `${e.dataset.effectStatus}|${e.dataset.tool}|${e.textContent}`));
   check("三笔动作都列出", rows.length === 3, rows.join(" / "));
-  check("未知那笔写明要人工核对", rows.some((r) => r.startsWith("unknown|") && r.includes("computer_install_packages") && r.includes("结果未知，要人工核对")));
+  check("未知那笔写明要人工核对", rows.some((r) => r.startsWith("unknown|") && r.includes("|computer_install_packages|安装软件包") && r.includes("结果未知，要人工核对")));
+  check("顶部提示有动作结果未知", (await page.textContent(".wb-callout[data-tone=warn]")).includes("有 1 个动作结果未知"));
   check("明确失败那笔写出原因", rows.some((r) => r.includes("做完了，报错：目标不存在")));
   await page.screenshot({ path: join(HERE, "effects-detail.png") });
   // 这台机器没有 omp，原生会话接口会 500。详情要照样出来，只在技术信息那块报读取失败。

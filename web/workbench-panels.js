@@ -4,7 +4,7 @@
  * Every panel is driven by a real endpoint; a missing endpoint renders an honest
  * pending note instead of a fake control.
  */
-import { el, button, toast, announce, api, apiOptional, fmtTime, fmtClock, fmtDuration, fmtSize, runStateLabel, isLiveRun, downloadText, BOT_PERMISSION_LABELS, permissionOf } from "./workbench-core.js";
+import { el, button, toast, announce, api, apiOptional, fmtTime, fmtClock, fmtDuration, fmtWhen, renderMarkdown, fmtSize, runStateLabel, isLiveRun, downloadText, BOT_PERMISSION_LABELS, permissionOf } from "./workbench-core.js";
 import { artifactCard, loadArtifacts, exportRunTranscript } from "./workbench-attach.js";
 import { createComputerView } from "./workbench-computer.js";
 
@@ -363,7 +363,7 @@ export function createPanels({ client, deps }) {
       const foot = el("div", "wb-run-foot");
       foot.append(el("span", "wb-run-time", fmtTime(rec.createdAt)));
       const actions = el("div", "bt-actions");
-      actions.append(button("btn ghost", "详情", () => void deps.openDrawer(`派活 ${rec.id.slice(0, 12)}`, () => delegationDetail(rec))));
+      actions.append(button("btn ghost", "详情", () => void deps.openDrawer(`${rec.fromName || rec.fromBotId} → ${rec.targetName || rec.targetBotId}`, () => delegationDetail(rec))));
       foot.append(actions);
       tile.append(foot);
       return tile;
@@ -437,7 +437,7 @@ export function createPanels({ client, deps }) {
       const foot = el("div", "wb-run-foot");
       foot.append(el("span", "wb-run-time", fmtTime(run.createdAt)));
       const actions = el("div", "bt-actions");
-      actions.append(button("btn ghost", "详情", () => void deps.openDrawer(`任务 ${run.id.slice(0, 12)}`, () => runDetail(run))));
+      actions.append(button("btn ghost", "详情", () => void deps.openDrawer(`${bot?.name || "助手"}的任务`, () => runDetail(run))));
       if (isLiveRun(run.state)) {
         actions.append(button("btn ghost danger", "停止", () => void client.cancel(run.id).then(() => { toast("已接受取消请求"); paint(); }).catch((error) => toast(error.message, true))));
       }
@@ -467,111 +467,163 @@ export function createPanels({ client, deps }) {
     };
   }
 
+  /* ----------------------------- detail pieces ---------------------------- */
+
+  /** 外部动作给人看的名字；没收录的工具照原名显示。 */
+  const EFFECT_TOOL_LABELS = {
+    computer_shell: "运行命令",
+    computer_install_packages: "安装软件包",
+    computer_publish_file: "发布文件",
+    computer_files: "文件操作",
+    computer_input: "键鼠操作",
+    computer_upload_attachment: "上传附件",
+    computer_screenshot: "截图",
+  };
+
+  const RUN_TONES = {
+    completed: "ok",
+    failed: "bad",
+    cancelled: "muted",
+    interrupted: "muted",
+    reconciliation_required: "warn",
+    waiting_input: "warn",
+    waiting_approval: "warn",
+  };
+  const runTone = (state) => RUN_TONES[state] ?? (isLiveRun(state) ? "live" : "muted");
+
+  function delegationTone(rec) {
+    const key = delegationStatus(rec).key;
+    if (key === "queued" || key === "running") return "live";
+    if (["failed", "reconciliation_required", "not_started"].includes(rec.result?.state)) return "bad";
+    if (key === "dropped") return "warn";
+    return key === "delivered" ? "ok" : "muted";
+  }
+
+  /** 抽屉顶部：状态胶囊和一行时间。 */
+  function detailHero(label, tone, meta) {
+    const hero = el("div", "wb-detail-hero");
+    const pill = el("span", "wb-pill", label);
+    pill.dataset.tone = tone;
+    hero.append(pill);
+    const line = meta.filter(Boolean).join(" · ");
+    if (line) hero.append(el("span", "wb-detail-meta", line));
+    return hero;
+  }
+
+  function callout(tone, title, text, alert = false) {
+    const box = el("div", "wb-callout");
+    box.dataset.tone = tone;
+    if (alert) box.setAttribute("role", "alert");
+    box.append(el("div", "wb-callout-title", title));
+    if (text) box.append(el("div", "wb-callout-text", String(text)));
+    return box;
+  }
+
+  /** 正文块：标题加一段正文。markdown 为真时按助手回复渲染。 */
+  function block(title, text, markdown = false) {
+    const box = el("section", "wb-block");
+    box.append(el("h3", "wb-block-title", title));
+    const body = el("div", markdown ? "wb-prose wb-prose-md" : "wb-prose");
+    if (markdown) renderMarkdown(body, text);
+    else body.textContent = String(text || "（没有内容）");
+    box.append(body);
+    return box;
+  }
+
+  function checklist(items) {
+    const list = el("ul", "wb-checklist");
+    for (const item of items) list.append(el("li", null, String(item)));
+    return list;
+  }
+
+  /** 技术信息：排查用，默认收起。值为空的行不显示。 */
+  function techDetails(pairs, ...extra) {
+    const box = el("details", "ui-disclosure wb-tech");
+    box.append(el("summary", null, "技术信息"));
+    const body = el("div", "ui-disclosure-body");
+    const facts = el("div", "wb-kv-list wb-tech-list");
+    for (const [key, value] of pairs) if (value != null && value !== "") facts.append(kv(key, value));
+    body.append(facts, ...extra.filter(Boolean));
+    box.append(body);
+    return box;
+  }
+
+  const spanOf = (from, to) => (from && to ? fmtDuration(ms(to) - ms(from)) : null);
+
   /* --------------------------- delegation detail -------------------------- */
 
   function delegationDetail(rec) {
     const root = el("div", "wb-detail");
     const status = delegationStatus(rec);
-    const state = el("div", "wb-detail-state");
-    state.append(el("span", "bt-state", status.label));
-    root.append(state);
-    const facts = el("div", "wb-kv-list");
-    facts.append(
-      kv("派活号", rec.id),
-      kv("派活的", rec.fromName || rec.fromBotId),
-      kv("接手的", rec.targetName || rec.targetBotId),
-      kv("派出", fmtTime(rec.createdAt)),
-      kv("开跑", rec.startedAt ? fmtTime(rec.startedAt) : null),
-      kv("结束", rec.returnedAt ? fmtTime(rec.returnedAt) : null),
-      kv("交回", rec.deliveredAt ? fmtTime(rec.deliveredAt) : null),
-      kv("子任务", rec.childRunId),
-      kv("交回的任务", rec.wakeRunId),
-      kv("没交回的原因", rec.dropReason ? DROP_REASON_LABELS[rec.dropReason] ?? rec.dropReason : null),
-    );
-    root.append(facts);
-    root.append(section("派的活", el("div", "wb-pre", String(rec.message || ""))));
+    const span = spanOf(rec.startedAt || rec.createdAt, rec.returnedAt);
+    root.append(detailHero(status.label, delegationTone(rec), [
+      rec.createdAt ? `${fmtWhen(rec.createdAt)} 派出` : null,
+      span ? `用时 ${span}` : null,
+    ]));
+    if (rec.dropReason) root.append(callout("warn", "没交回", DROP_REASON_LABELS[rec.dropReason] ?? rec.dropReason));
+    if (rec.result?.error) root.append(callout("bad", "出错了", rec.result.error, true));
+    root.append(block("派的活", rec.message));
     const acceptance = Array.isArray(rec.acceptance) ? rec.acceptance : [];
     if (acceptance.length) {
-      root.append(section("验收标准", el("div", "wb-pre", acceptance.map((x) => `- [ ] ${x}`).join("\n"))));
+      const box = el("section", "wb-block");
+      box.append(el("h3", "wb-block-title", "验收标准"), checklist(acceptance));
+      root.append(box);
     }
-    const result = rec.result;
-    if (result?.reply) root.append(section("交回的结果", el("div", "wb-pre", String(result.reply))));
-    if (result?.error) {
-      const err = el("div", "wb-error");
-      err.append(el("div", "wb-pending-title", "原因"), el("div", "bt-note", String(result.error)));
-      root.append(err);
-    }
+    if (rec.result?.reply) root.append(block("交回的结果", rec.result.reply, true));
+    root.append(techDetails([
+      ["派活号", rec.id],
+      ["派活的", rec.fromName || rec.fromBotId],
+      ["接手的", rec.targetName || rec.targetBotId],
+      ["派出", rec.createdAt ? fmtTime(rec.createdAt) : null],
+      ["开跑", rec.startedAt ? fmtTime(rec.startedAt) : null],
+      ["结束", rec.returnedAt ? fmtTime(rec.returnedAt) : null],
+      ["交回", rec.deliveredAt ? fmtTime(rec.deliveredAt) : null],
+      ["子任务", rec.childRunId],
+      ["交回的任务", rec.wakeRunId],
+    ]));
     return root;
   }
 
   /* ------------------------------ run detail ------------------------------ */
 
+  function effectList(effects) {
+    const list = el("div", "wb-effects");
+    for (const effect of effects) {
+      const tool = effect?.tool || effect?.kind || effect?.id || "";
+      const status = effect?.status ?? "";
+      const failed = status === "done" && effect?.outcome === "error";
+      const outcome = failed ? "做完了，报错" : SIDE_EFFECT_LABELS[status] ?? status ?? "—";
+      const item = el("div", "wb-effect");
+      item.dataset.effectStatus = status;
+      item.dataset.tone = status === "unknown" ? "warn" : failed ? "bad" : status === "in_flight" ? "live" : "ok";
+      if (tool) item.dataset.tool = tool;
+      item.append(el("span", "wb-effect-dot"));
+      item.append(el("span", "wb-effect-name", EFFECT_TOOL_LABELS[tool] ?? (tool || "动作")));
+      item.append(el("span", "wb-effect-state", effect?.error ? `${outcome}：${effect.error}` : outcome));
+      list.append(item);
+    }
+    return list;
+  }
+
   async function runDetail(run) {
     const root = el("div", "wb-detail");
-    const state = el("div", "wb-detail-state");
-    state.append(el("span", "bt-state", runStateLabel(run.state)));
-    root.append(state);
-    const facts = el("div", "wb-kv-list");
-    facts.append(
-      kv("任务号", run.id),
-      kv("助手", deps.botFor(run.botId)?.name || run.botId || "—"),
-      kv("类型", run.kind),
-      kv("范围", run.scope),
-      kv("创建", fmtTime(run.createdAt)),
-      kv("更新", fmtTime(run.updatedAt)),
-      kv("会话", run.sessionId),
-      kv("会话文件", run.sessionFile),
-      kv("耗时", run.createdAt && run.updatedAt ? fmtDuration(ms(run.updatedAt) - ms(run.createdAt)) : null),
-      kv("预算", run.budget != null ? JSON.stringify(run.budget) : null),
-    );
-    if (run.depth != null) facts.append(kv("深度", run.depth));
-    root.append(facts);
-    if (run.error) {
-      const err = el("div", "wb-error");
-      err.setAttribute("role", "alert");
-      err.append(el("div", "wb-pending-title", "错误"), el("div", "bt-note", String(run.error)));
-      root.append(err);
+    const span = isLiveRun(run.state) ? null : spanOf(run.createdAt, run.updatedAt);
+    root.append(detailHero(runStateLabel(run.state), runTone(run.state), [
+      run.createdAt ? fmtWhen(run.createdAt) : null,
+      span ? `用时 ${span}` : null,
+    ]));
+    if (run.error) root.append(callout("bad", "出错了", run.error, true));
+    const effects = Array.isArray(run.sideEffects) ? run.sideEffects : [];
+    // 「结果未知」是进程在动作中途没了，要人工去核对，不会自动重发。
+    const unknown = effects.filter((effect) => effect?.status === "unknown").length;
+    if (unknown) root.append(callout("warn", `有 ${unknown} 个动作结果未知`, "进程在动作中途停了，系统不会自动重做。请去核对一下实际结果。"));
+    root.append(block("任务内容", run.text));
+    if (run.reply) root.append(block("助手的回复", run.reply, true));
+    if (effects.length) {
+      const box = el("section", "wb-block");
+      box.append(el("h3", "wb-block-title", "做过的动作"), effectList(effects));
+      root.append(box);
     }
-    // 外部动作：变更类工具每次一行。「结果未知」是进程在动作中途没了，要人工去核对，不会自动重发。
-    if (Array.isArray(run.sideEffects) && run.sideEffects.length) {
-      const box = el("div", "wb-kv-list wb-effect-list");
-      for (const effect of run.sideEffects) {
-        const label = SIDE_EFFECT_LABELS[effect?.status] ?? effect?.status ?? "—";
-        const outcome = effect?.status === "done" && effect?.outcome === "error" ? "做完了，报错" : label;
-        const item = kv(effect?.tool || effect?.kind || effect?.id || "动作", effect?.error ? `${outcome}：${effect.error}` : outcome);
-        item.dataset.effectStatus = effect?.status ?? "";
-        box.append(item);
-      }
-      root.append(section("外部动作", box));
-    }
-    root.append(section("任务内容", el("div", "wb-pre", String(run.text || ""))));
-    if (run.reply) root.append(section("助手的回复", el("div", "wb-pre", String(run.reply))));
-
-    const actions = el("div", "bt-set-card");
-    if (isLiveRun(run.state)) {
-      actions.append(row("停止这个任务", "取消会级联到宿主工具与子 Run；外部动作是否发生另行对账。", button("btn ghost danger", "停止", function () { return busy(this, client.cancel(run.id).then(() => { toast("已接受取消请求"); announce("已接受取消请求"); }), "停止中…"); })));
-    }
-    if (run.botId) {
-      actions.append(row("重试", "以相同内容再发起一个任务；不会回滚已经发生的外部动作。", button("btn ghost", "重试", () => {
-        if (!confirm("重试会以相同内容发起一个新任务。已经发生的对外动作不会回滚。继续？")) return;
-        void client.start({ botId: run.botId, text: run.text, source: "retry", parentRunId: run.id })
-          .then(() => toast("已发起重试任务"))
-          .catch((error) => toast(`重试失败：${error.message}`, true));
-      })));
-      actions.append(row("新会话", "开启新的原生会话；旧会话与历史都保留，不等于清空显示。", button("btn ghost", "新会话", function () {
-        if (!confirm("开启新会话：保留旧会话历史，下一条消息进入一个新的原生会话。继续？")) return;
-        return busy(this, api(`/api/bots/${encodeURIComponent(run.botId)}/session/new`, { method: "POST", body: {} }).then(() => toast("已开启新会话")), "创建中…");
-      })));
-      actions.append(row("分叉会话", "从当前会话分叉出一个新的原生会话分支。", button("btn ghost", "分叉", function () {
-        return busy(this, api(`/api/bots/${encodeURIComponent(run.botId)}/session/fork`, { method: "POST", body: {} }).then(() => toast("已分叉会话")), "分叉中…");
-      })));
-      actions.append(row("导出这个任务", "导出为本地 Markdown 文件，包含内容、回复与错误。", button("btn ghost", "导出", () => exportRunTranscript(run))));
-      const exportLink = el("a", "btn ghost", "导出原生会话 HTML");
-      exportLink.href = `/api/bots/${encodeURIComponent(run.botId)}/session/export`;
-      exportLink.setAttribute("download", "");
-      actions.append(row("导出原生会话", "由后端调用原生导出，返回 HTML 附件；历史与外部动作不受影响。", exportLink));
-    }
-    root.append(section("操作", actions));
 
     const artifacts = await loadArtifacts({ runId: run.id });
     if (artifacts === null) root.append(section("成果", pendingNote("成果", "/api/artifacts")));
@@ -581,22 +633,58 @@ export function createPanels({ client, deps }) {
       root.append(section(`成果（${artifacts.length}）`, box));
     }
 
+    const actions = el("div", "wb-detail-actions");
+    if (isLiveRun(run.state)) {
+      actions.append(button("btn ghost danger", "停止", function () { return busy(this, client.cancel(run.id).then(() => { toast("已接受取消请求"); announce("已接受取消请求"); }), "停止中…"); }));
+    }
     if (run.botId) {
-      // 原生会话条目与状态 JSON 是排查用的技术信息，默认收起，功能保留。
-      const advanced = el("details", "ui-disclosure");
-      advanced.append(el("summary", null, "原生会话（技术信息）"));
-      const body = el("div", "ui-disclosure-body");
+      actions.append(button("btn ghost", "重试", () => {
+        if (!confirm("重试会以相同内容发起一个新任务。已经发生的对外动作不会回滚。继续？")) return;
+        void client.start({ botId: run.botId, text: run.text, source: "retry", parentRunId: run.id })
+          .then(() => toast("已发起重试任务"))
+          .catch((error) => toast(`重试失败：${error.message}`, true));
+      }));
+      actions.append(button("btn ghost", "新会话", function () {
+        if (!confirm("开启新会话：保留旧会话历史，下一条消息进入一个新的原生会话。继续？")) return;
+        return busy(this, api(`/api/bots/${encodeURIComponent(run.botId)}/session/new`, { method: "POST", body: {} }).then(() => toast("已开启新会话")), "创建中…");
+      }));
+      actions.append(button("btn ghost", "分叉", function () {
+        return busy(this, api(`/api/bots/${encodeURIComponent(run.botId)}/session/fork`, { method: "POST", body: {} }).then(() => toast("已分叉会话")), "分叉中…");
+      }));
+      actions.append(button("btn ghost", "导出", () => exportRunTranscript(run)));
+    }
+    if (actions.childElementCount) root.append(actions);
+
+    const extra = [];
+    if (run.botId) {
+      const exportLink = el("a", "btn ghost", "导出原生会话 HTML");
+      exportLink.href = `/api/bots/${encodeURIComponent(run.botId)}/session/export`;
+      exportLink.setAttribute("download", "");
+      const exportRow = el("div", "wb-detail-actions");
+      exportRow.append(exportLink);
+      extra.push(exportRow);
       // 原生会话读不出来（比如 omp 不在、会话文件坏了）时只这一块报错，上面的状态和外部动作照常显示。
       for (const [what, load] of [["原生会话条目", nativeEntriesSection], ["原生会话状态", nativeStateSection]]) {
         try {
-          body.append(await load(run.botId));
+          extra.push(await load(run.botId));
         } catch (error) {
-          body.append(section(what, el("div", "bt-empty", `读取失败：${error.message}`)));
+          extra.push(section(what, el("div", "bt-empty", `读取失败：${error.message}`)));
         }
       }
-      advanced.append(body);
-      root.append(advanced);
     }
+    root.append(techDetails([
+      ["任务号", run.id],
+      ["助手", deps.botFor(run.botId)?.name || run.botId],
+      ["类型", run.kind],
+      ["范围", run.scope],
+      ["创建", run.createdAt ? fmtTime(run.createdAt) : null],
+      ["更新", run.updatedAt ? fmtTime(run.updatedAt) : null],
+      ["会话", run.sessionId],
+      ["会话文件", run.sessionFile],
+      ["预算", run.budget != null ? JSON.stringify(run.budget) : null],
+      ["深度", run.depth],
+      ...effects.map((effect, i) => [`动作 ${i + 1}`, [effect?.tool || effect?.kind, effect?.id].filter(Boolean).join(" · ")]),
+    ], ...extra));
     return root;
   }
 
