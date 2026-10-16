@@ -16,11 +16,18 @@
 //   seatDesk(guestPort, token) → GuestDesk 连某个座席自己的 spacesd
 //   seatHealthy(guestPort) → boolean     这个座席的 spacesd 是否应答 /health
 //   seatListen                           可选，座席 spacesd 的监听地址，不给就用客机脚本的默认值
+//   shareHost                            可选，客机连回宿主 SFTP 服务的地址，不给就用客机脚本的默认值 10.0.2.2
+//
+// share 是可选的共享目录提供者（生产用 SeatShare 包 FileShare）：
+//   forSeat(computerId) → { host?, port, knownHosts, workspaceKey, user, key } 或 null（不挂）
+//   start()  共享电脑开着时确保服务在跑，客机里 sshfs 的 reconnect 才接得上
+//   close()
 import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { FileShare, WORKSPACE_USER } from './file-share.mjs';
 import { COMPUTER_ERROR, ComputerBackend, ComputerBackendError, GuestDesk, connectSpacesd, probeSpacesdHealth, redactSecrets } from './computer-backend.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -200,19 +207,22 @@ export class SeatBackend {
   #lifecycle = Promise.resolve();
   #guestFiles = null;
   #seq = 0;
+  #share;
 
   /**
    * @param {object} opts
    * @param {string} opts.home 应用数据根
    * @param {object} opts.vm 共享虚拟机接口，见文件开头
    * @param {Function|object} [opts.machine] 共享电脑规格，或返回规格的函数（每次开机前读）
+   * @param {object} [opts.share] 共享目录提供者，见文件开头；不给就不挂共享目录
    */
-  constructor({ home, vm, machine = null } = {}) {
+  constructor({ home, vm, machine = null, share = null } = {}) {
     if (typeof home !== 'string' || home.trim() === '') throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, 'SeatBackend needs the app data home');
     if (!vm || typeof vm.status !== 'function') throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, 'SeatBackend needs a shared vm');
     this.#home = path.resolve(home);
     this.#vm = vm;
     this.#machine = machine;
+    this.#share = share;
     this.#file = path.join(this.#home, 'computers', 'seats.json');
     this.#stageDir = path.join(this.#home, 'computers', 'guest-files');
   }
@@ -241,6 +251,7 @@ export class SeatBackend {
       return this.#state('error', seat, null, { code: error?.code ?? 'computer_status_failed', message: error?.message ?? String(error) });
     }
     const vmState = vm?.state ?? 'error';
+    if (vmState === 'running') this.#share?.start?.().catch(() => {});
     if (busy) return this.#state(busy, seat, vm);
     if (vmState === 'error') {
       return this.#state('error', seat, vm, vm?.error ?? { code: 'computer_shared_error', message: '共享电脑报错' });
@@ -271,6 +282,7 @@ export class SeatBackend {
     for (const desk of this.#desks.values()) desk.reset?.();
     this.#desks.clear();
     await this.#vm.close?.();
+    await this.#share?.close?.();
   }
 
   async guest(computerId) {
@@ -361,14 +373,26 @@ export class SeatBackend {
     }
     await this.#ensureGuestFiles();
     const env = { OMP_SEAT_TOKEN: seat.token };
+    const secrets = [seat.token];
     if (typeof this.#vm.seatListen === 'string' && this.#vm.seatListen) env.OMP_SEAT_LISTEN = this.#vm.seatListen;
+    const share = this.#share ? await this.#share.forSeat(computerId) : null;
+    if (share) {
+      const host = this.#vm.shareHost || share.host || null;
+      if (host) env.OMP_SHARE_HOST = host;
+      env.OMP_SHARE_PORT = String(share.port);
+      env.OMP_SHARE_KNOWN_HOSTS = share.knownHosts;
+      env.OMP_SHARE_WORKSPACE_KEY = Buffer.from(share.workspaceKey).toString('base64');
+      env.OMP_SHARE_USER = share.user;
+      env.OMP_SHARE_KEY = Buffer.from(share.key).toString('base64');
+      secrets.push(env.OMP_SHARE_WORKSPACE_KEY, env.OMP_SHARE_KEY);
+    }
     const out = await this.#manage(`exec ${SEAT_SCRIPT} up ${seat.user} ${seat.displayNumber} ${seat.port}`, {
       label: 'up',
       timeoutMs: SEAT_UP_TIMEOUT_MS,
       env,
     });
     if (out.exitCode !== 0) {
-      throw fail(COMPUTER_ERROR.START_FAILED, `座席 ${seat.user} 没有起来（退出码 ${out.exitCode ?? 'null'}）：${redactSecrets(tail(out.stderr || out.stdout), [seat.token])}`);
+      throw fail(COMPUTER_ERROR.START_FAILED, `座席 ${seat.user} 没有起来（退出码 ${out.exitCode ?? 'null'}）：${redactSecrets(tail(out.stderr || out.stdout), secrets)}`);
     }
     const info = parseKv(out.stdout);
     if (info.home && info.home.startsWith('/') && info.home !== seat.home) this.#saveSeat(computerId, { ...seat, home: info.home });
@@ -591,8 +615,59 @@ export class QemuSharedVm {
   }
 }
 
-/** 生产用的电脑后端：一台共享虚拟机加座席层。规格每次开机前从用户设置里读。 */
-export function createSharedComputer({ home, runtimeDir = null, image = null } = {}) {
+/**
+ * 座席的共享目录。/workspace 用一把钥匙，每个 bot 的 ~/work 各用一把：同一把钥匙的话，
+ * 一个座席就能用别的 bot 的用户名登进它的 ~/work。
+ * botIdFor(computerId) 给出这个座席的 bot id，不是 bot 的座席（比如登录座席）返回 null，不挂。
+ */
+export class SeatShare {
+  #files;
+  #botIdFor;
+  #host;
+
+  /**
+   * @param {object} opts
+   * @param {FileShare} opts.fileShare
+   * @param {(computerId: string) => string|null} opts.botIdFor
+   * @param {string} [opts.host] 客机连回来的地址，不给就用客机脚本的默认值
+   */
+  constructor({ fileShare, botIdFor, host = null } = {}) {
+    if (!fileShare) throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, 'SeatShare 需要 fileShare');
+    if (typeof botIdFor !== 'function') throw fail(COMPUTER_ERROR.INVALID_ARGUMENT, 'SeatShare 需要 botIdFor(computerId)');
+    this.#files = fileShare;
+    this.#botIdFor = botIdFor;
+    this.#host = host;
+  }
+
+  async forSeat(computerId) {
+    const botId = this.#botIdFor(computerId);
+    if (!botId) return null;
+    const { port } = await this.#files.start();
+    return {
+      host: this.#host,
+      port,
+      knownHosts: this.#files.knownHosts,
+      workspaceKey: this.#files.credentials(WORKSPACE_USER).privateKey,
+      user: botId,
+      key: this.#files.credentials(botId).privateKey,
+    };
+  }
+
+  async start() {
+    return await this.#files.start();
+  }
+
+  async close() {
+    await this.#files.close();
+  }
+}
+
+/**
+ * 生产用的电脑后端：一台共享虚拟机加座席层。规格每次开机前从用户设置里读。
+ * roots 和 botIdFor 给了就带上共享目录（见 SeatShare）。
+ */
+export function createSharedComputer({ home, runtimeDir = null, image = null, roots = null, botIdFor = null } = {}) {
   const backend = new ComputerBackend({ home, ...(runtimeDir ? { runtimeDir } : {}), ...(image ? { image } : {}) });
-  return new SeatBackend({ home, vm: new QemuSharedVm(backend), machine: () => readSharedMachine(home) });
+  const share = roots && botIdFor ? new SeatShare({ fileShare: new FileShare({ home, roots }), botIdFor }) : null;
+  return new SeatBackend({ home, vm: new QemuSharedVm(backend), machine: () => readSharedMachine(home), share });
 }

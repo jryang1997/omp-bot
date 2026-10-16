@@ -266,6 +266,17 @@ function publicMachine(spec) {
   };
 }
 
+/**
+ * 共享目录的根（08）：用户名 workspace 是 team/workspace，bot id 是这个 bot 的 team/bots/<id>/work。
+ * 不认识的用户名、已经删掉的 bot 返回 null，SFTP 服务就拒绝登录。
+ */
+export function seatShareRoots({ home, getBot, teamPaths, teamRoot }) {
+  return (user) => {
+    if (user === "workspace") return join(teamRoot(home), "workspace");
+    return getBot(user) ? teamPaths(home, user).workDir : null;
+  };
+}
+
 export class Computers {
   /**
    * @param {object} deps
@@ -339,7 +350,13 @@ export class Computers {
         if (typeof mod?.createSharedComputer !== "function") {
           throw ferr(503, "computer_runtime_unavailable", "电脑运行时不可用（computer-seats.mjs 没有导出 createSharedComputer）");
         }
-        const opts = { home: this.home, ...(this.runtimeDir ? { runtimeDir: this.runtimeDir } : {}) };
+        const { teamPaths, teamRoot } = await import("../team.mjs");
+        const opts = {
+          home: this.home,
+          ...(this.runtimeDir ? { runtimeDir: this.runtimeDir } : {}),
+          roots: seatShareRoots({ home: this.home, getBot: (id) => this.orch.getBot?.(id), teamPaths, teamRoot }),
+          botIdFor: (computerId) => this.#botIdForComputer(computerId),
+        };
         return mod.createSharedComputer(opts);
       })().catch((e) => {
         this._backendError = e?.message ?? String(e);
@@ -370,6 +387,14 @@ export class Computers {
 
   computerIdFor(botId) {
     return computerIdFor(botId);
+  }
+
+  /** 座席的电脑 id 反查 bot id；不是 bot 的座席返回 null。 */
+  #botIdForComputer(computerId) {
+    for (const bot of this.orch.listBots?.() ?? []) {
+      if (bot?.id && computerIdFor(bot.id) === computerId) return bot.id;
+    }
+    return null;
   }
 
   #requireBot(botId) {

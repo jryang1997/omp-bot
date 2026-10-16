@@ -6,10 +6,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { overlayCreateArgs, qemuArgs } from "../src/computer-backend.mjs";
 import {
-  BOT_SEAT_COUNT, LOGIN_SEAT_ID, SEAT_GUEST_PORTS, SEAT_SCRIPT, SeatBackend,
+  BOT_SEAT_COUNT, LOGIN_SEAT_ID, SEAT_GUEST_PORTS, SEAT_SCRIPT, SeatBackend, SeatShare,
   expandHome, readSharedMachine, seatUser, sharedMachineSpec, validatePackages, writeSharedMachine,
 } from "../src/computer-seats.mjs";
-import { guestPath, shPath } from "../src/features/computers.mjs";
+import { guestPath, seatShareRoots, shPath } from "../src/features/computers.mjs";
+import { FileShare, WORKSPACE_USER, probePort } from "../src/file-share.mjs";
+import { teamPaths, teamRoot } from "../src/team.mjs";
 import { startServer } from "../src/server.mjs";
 
 let passed = 0;
@@ -428,6 +430,83 @@ test("07 规格接口：GET 给默认值和范围，PUT 保存、越界 400", as
     await server.close();
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+// ---------------- 08 共享目录 ----------------
+test("08 座席起来时共享目录的端口和钥匙只经 env 传进客机，每个 bot 一把，登录座席不挂", async () => {
+  const home = tmp("ompbot-seat-share-");
+  const vm = new FakeVm();
+  vm.shareHost = "127.0.0.1";
+  const bots = { pc_a: "bot_a", pc_b: "bot_b" };
+  const fileShare = new FileShare({ home, roots: (u) => (u === WORKSPACE_USER || Object.values(bots).includes(u) ? join(home, "share", u) : null) });
+  const share = new SeatShare({ fileShare, botIdFor: (cid) => bots[cid] ?? null });
+  const seats = new SeatBackend({ home, vm, share });
+  try {
+    await seats.start("pc_a");
+    await seats.start("pc_b");
+    await seats.start(LOGIN_SEAT_ID);
+    const ups = vm.envs.filter((e) => e?.OMP_SEAT_TOKEN);
+    assert.equal(ups.length, 3);
+    const [a, b, login] = ups;
+    const port = fileShare.port;
+    assert.ok(port > 0, "第一个座席起来时服务就在跑");
+    const b64 = (s) => Buffer.from(s).toString("base64");
+    assert.equal(a.OMP_SHARE_HOST, "127.0.0.1");
+    assert.equal(a.OMP_SHARE_PORT, String(port));
+    assert.equal(a.OMP_SHARE_KNOWN_HOSTS, fileShare.knownHosts);
+    assert.equal(a.OMP_SHARE_USER, "bot_a");
+    assert.equal(b.OMP_SHARE_USER, "bot_b");
+    assert.equal(a.OMP_SHARE_KEY, b64(fileShare.credentials("bot_a").privateKey));
+    assert.notEqual(a.OMP_SHARE_KEY, b.OMP_SHARE_KEY, "每个 bot 一把钥匙");
+    assert.equal(a.OMP_SHARE_WORKSPACE_KEY, b.OMP_SHARE_WORKSPACE_KEY);
+    assert.notEqual(a.OMP_SHARE_WORKSPACE_KEY, a.OMP_SHARE_KEY);
+    assert.equal(Object.keys(login).filter((k) => k.startsWith("OMP_SHARE_")).length, 0, "登录座席不挂共享目录");
+    // 钥匙不进命令行，不进 seats.json
+    for (const cmd of vm.commands) assert.ok(!cmd.includes(a.OMP_SHARE_KEY) && !cmd.includes("PRIVATE KEY"));
+    const saved = readFileSync(join(home, "computers", "seats.json"), "utf8");
+    assert.ok(!saved.includes(a.OMP_SHARE_KEY) && !saved.includes("PRIVATE KEY"));
+    // 客机报错时错误信息里不带钥匙
+    await seats.stop("pc_a");
+    vm.failUp = (env) => `sshfs failed key=${env.OMP_SHARE_KEY} ws=${env.OMP_SHARE_WORKSPACE_KEY}`;
+    const err = await seats.start("pc_a").then(() => null, (e) => e);
+    assert.ok(err, "up 失败要抛出");
+    assert.ok(!err.message.includes(a.OMP_SHARE_KEY) && !err.message.includes(a.OMP_SHARE_WORKSPACE_KEY), err.message);
+    vm.failUp = null;
+  } finally {
+    await seats.close();
+  }
+  assert.equal(fileShare.port, null);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test("08 共享电脑开着时服务自动起来（omp-bot 重启后客机 sshfs 才接得上），关后端时停", async () => {
+  const home = tmp("ompbot-seat-share2-");
+  const vm = new FakeVm();
+  const fileShare = new FileShare({ home, roots: () => null });
+  const seats = new SeatBackend({ home, vm, share: new SeatShare({ fileShare, botIdFor: () => null }) });
+  await seats.status("pc_x");
+  assert.equal(fileShare.port, null, "共享电脑没开不起服务");
+  vm.state = "running";
+  await seats.status("pc_x");
+  for (let i = 0; i < 50 && !fileShare.port; i++) await sleep(20);
+  const port = fileShare.port;
+  assert.ok(port > 0);
+  assert.equal(await probePort(port), true);
+  await seats.close();
+  assert.equal(await probePort(port), false);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test("08 共享目录的根：workspace 是 team/workspace，bot 是自己的 work，删掉的 bot 不认", () => {
+  const home = "/tmp/ompbot-roots";
+  const live = new Set(["bot_a"]);
+  const roots = seatShareRoots({ home, getBot: (id) => (live.has(id) ? { id } : null), teamPaths, teamRoot });
+  assert.equal(roots("workspace"), join(teamRoot(home), "workspace"));
+  assert.equal(roots("bot_a"), teamPaths(home, "bot_a").workDir);
+  assert.equal(roots("bot_a"), join(home, "team", "bots", "bot_a", "work"));
+  assert.equal(roots("bot_gone"), null);
+  live.delete("bot_a");
+  assert.equal(roots("bot_a"), null);
 });
 
 for (const run of pending) await run();
