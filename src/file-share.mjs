@@ -79,6 +79,35 @@ function writeSecret(file, text, mode = 0o600) {
   fs.renameSync(tmp, file);
 }
 
+/**
+ * ssh2 生成的 ed25519 钥匙大约千分之二是坏的，连 OpenSSH 也读不了（3000 把里 7 把）。
+ * 生成后自己解析一遍，坏了就重来。
+ */
+function generateKeyPair(comment) {
+  for (let i = 0; i < 20; i++) {
+    const pair = utils.generateKeyPairSync('ed25519', { comment });
+    if (keyUsable(pair.private, pair.public)) return pair;
+  }
+  throw new Error('生成 SSH 钥匙失败');
+}
+
+function keyUsable(privateText, publicText) {
+  const priv = utils.parseKey(privateText);
+  const pub = utils.parseKey(publicText);
+  if (!priv || priv instanceof Error || !pub || pub instanceof Error) return false;
+  return priv.getPublicSSH().equals(pub.getPublicSSH());
+}
+
+/** 钥匙文件缺了或者坏了就重新生成。 */
+function ensureKeyPair(file, comment) {
+  try {
+    if (keyUsable(fs.readFileSync(file, 'utf8'), fs.readFileSync(`${file}.pub`, 'utf8'))) return;
+  } catch {}
+  const pair = generateKeyPair(comment);
+  writeSecret(file, pair.private);
+  writeSecret(`${file}.pub`, `${pair.public}\n`, 0o644);
+}
+
 /** 一个 SFTP 会话，所有路径都落在 root 里。 */
 class ShareSession {
   #sftp;
@@ -89,8 +118,11 @@ class ShareSession {
   constructor(sftp, root) {
     this.#sftp = sftp;
     this.#root = root;
+    // 按收到的顺序一个一个处理，跟 OpenSSH 的 sftp-server 一样。sshfs 建文件时会紧跟着 OPEN 发 LSTAT，
+    // 不排队的话 LSTAT 可能先跑完，看不到刚建的文件。
+    let queue = Promise.resolve();
     const on = (event, fn) => sftp.on(event, (reqid, ...args) => {
-      Promise.resolve()
+      queue = queue
         .then(() => fn(reqid, ...args))
         .catch(error => {
           try {
@@ -321,11 +353,7 @@ export class FileShare {
     this.#dir = path.join(path.resolve(home), 'computers', 'file-share');
     this.#roots = roots;
     const hostFile = path.join(this.#dir, 'host_ed25519');
-    if (!fs.existsSync(hostFile) || !fs.existsSync(`${hostFile}.pub`)) {
-      const pair = utils.generateKeyPairSync('ed25519', { comment: 'omp-bot file share host' });
-      writeSecret(hostFile, pair.private);
-      writeSecret(`${hostFile}.pub`, `${pair.public}\n`, 0o644);
-    }
+    ensureKeyPair(hostFile, 'omp-bot file share host');
     this.#hostKey = fs.readFileSync(hostFile, 'utf8');
     this.#hostPublic = fs.readFileSync(`${hostFile}.pub`, 'utf8').trim().split(/\s+/).slice(0, 2).join(' ');
   }
@@ -343,11 +371,7 @@ export class FileShare {
   credentials(username) {
     if (!USER_PATTERN.test(String(username ?? ''))) throw new Error(`共享目录用户名不合法：${JSON.stringify(username)}`);
     const file = path.join(this.#dir, 'clients', username);
-    if (!fs.existsSync(file) || !fs.existsSync(`${file}.pub`)) {
-      const pair = utils.generateKeyPairSync('ed25519', { comment: `omp-bot ${username}` });
-      writeSecret(file, pair.private);
-      writeSecret(`${file}.pub`, `${pair.public}\n`, 0o644);
-    }
+    ensureKeyPair(file, `omp-bot ${username}`);
     return { username, privateKey: fs.readFileSync(file, 'utf8') };
   }
 

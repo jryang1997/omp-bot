@@ -223,6 +223,40 @@ test("两个连接同时追加，一行都不丢", async () => {
   }
 });
 
+test("请求按顺序处理：紧跟 OPEN 发的 LSTAT 看得到刚建的文件（sshfs 建文件就这么发）", async () => {
+  const { home, share } = setup();
+  const { port } = await share.start();
+  const { c, sftp } = await connect(port, WORKSPACE_USER, share.credentials(WORKSPACE_USER).privateKey);
+  try {
+    for (let i = 0; i < 20; i++) {
+      const opened = call(sftp, "open", `/new-${i}.txt`, "w");
+      const seen = call(sftp, "lstat", `/new-${i}.txt`);
+      const [h, st] = await Promise.all([opened, seen]);
+      assert.ok(st.isFile());
+      await call(sftp, "close", h);
+    }
+  } finally {
+    c.end();
+    await share.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("坏掉的钥匙文件会重新生成", async () => {
+  const { home, share } = setup();
+  const first = share.credentials("bot_a").privateKey;
+  assert.equal(share.credentials("bot_a").privateKey, first, "第二次拿到同一把");
+  writeFileSync(join(home, "computers", "file-share", "clients", "bot_a"), "garbage");
+  const again = share.credentials("bot_a").privateKey;
+  assert.notEqual(again, first);
+  assert.ok(!(utils.parseKey(again) instanceof Error));
+  const { port } = await share.start();
+  const { c } = await connect(port, "bot_a", again);
+  c.end();
+  await share.close();
+  rmSync(home, { recursive: true, force: true });
+});
+
 test("用户名不合法时不发钥匙", () => {
   const { home, share } = setup();
   for (const u of ["", "../x", "a/b", "a b", "x".repeat(65)]) assert.throws(() => share.credentials(u));

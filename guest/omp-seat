@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # omp-seat：共享电脑里的座席。由管理通道（客机里 root 运行的 cua-spacesd）调用，每个子命令都可以重复执行。
 #
-#   omp-seat up <用户> <屏幕号> <端口>   建用户，起屏幕和这个用户自己的 spacesd。令牌从环境变量 OMP_SEAT_TOKEN 读。
+#   omp-seat up <用户> <屏幕号> <端口>   建用户，挂共享目录，起屏幕和这个用户自己的 spacesd。令牌从环境变量 OMP_SEAT_TOKEN 读，
+#                                        共享目录的端口和钥匙从 OMP_SHARE_* 读（见下面“共享目录”一段）。
 #   omp-seat down <用户>                 停这个座席的全部进程，用户和主目录保留。
 #   omp-seat status <用户> [端口]        打印座席状态，一行一个 key=value。
 #   omp-seat count                       打印正在运行的座席数。
@@ -56,6 +57,136 @@ clear_stale_display() {
   rm -f "$lock" "/tmp/.X11-unix/X$num"
 }
 
+# ---- 共享目录（08）----
+# 宿主 omp-bot 的 SFTP 服务经 QEMU 用户网络的 10.0.2.2 连回去，用 sshfs 挂两类目录：
+#   /workspace → 宿主 team/workspace，root 挂载，只有 team 组进得去，组内都能读写
+#   ~/work     → 宿主 team/bots/<id>/work，这个座席用户自己挂载，别的用户（包括 root）都进不去
+# up 时从环境变量读：OMP_SHARE_PORT（没有就不挂）、OMP_SHARE_HOST（默认 10.0.2.2）、
+# OMP_SHARE_KNOWN_HOSTS（"omp-bot-share ssh-ed25519 ..." 一行）、OMP_SHARE_WORKSPACE_KEY、
+# OMP_SHARE_USER、OMP_SHARE_KEY（私钥都是 base64）。挂载关掉缓存，宿主和客机读写的是同一份文件。
+SHARE_DIR=/var/lib/omp-bot/share
+SHARE_BASE=/srv/omp-share
+WORKSPACE_MNT="$SHARE_BASE/workspace"
+WORKSPACE_LINK=/workspace
+SHARE_ALIAS=omp-bot-share
+
+share_configured() { [ -n "${OMP_SHARE_PORT:-}" ]; }
+
+check_share_env() {
+  check_int "$OMP_SHARE_PORT" 共享端口
+  SHARE_HOST="${OMP_SHARE_HOST:-10.0.2.2}"
+  [[ "$SHARE_HOST" =~ ^[A-Za-z0-9.-]{1,253}$ ]] || die "共享地址不合法：$SHARE_HOST"
+  [[ "${OMP_SHARE_KNOWN_HOSTS:-}" =~ ^$SHARE_ALIAS\ ssh-ed25519\ [A-Za-z0-9+/=]+$ ]] || die "OMP_SHARE_KNOWN_HOSTS 格式不对"
+  [[ "${OMP_SHARE_USER:-}" =~ ^[A-Za-z0-9_-]{1,64}$ ]] || die "OMP_SHARE_USER 格式不对"
+  [[ "${OMP_SHARE_KEY:-}" =~ ^[A-Za-z0-9+/=]+$ ]] || die "OMP_SHARE_KEY 格式不对"
+  [[ "${OMP_SHARE_WORKSPACE_KEY:-}" =~ ^[A-Za-z0-9+/=]+$ ]] || die "OMP_SHARE_WORKSPACE_KEY 格式不对"
+}
+
+# 只读挂载表，不 stat 挂载点。root 对别人的 FUSE 挂载 stat 会被拒。
+mounted() { awk -v m="$1" '$2 == m { found = 1 } END { exit !found }' /proc/self/mounts; }
+
+# 挂载目标的指纹：地址、端口、钥匙、主机公钥任何一个变了都要重挂
+share_target() { printf '%s\n' "$SHARE_HOST:$OMP_SHARE_PORT:$1:$OMP_SHARE_KNOWN_HOSTS" | sha256sum | cut -c1-32; }
+
+sshfs_opts() {
+  local key="$1" known="$2"
+  printf '%s' "port=$OMP_SHARE_PORT,IdentityFile=$key,UserKnownHostsFile=$known,StrictHostKeyChecking=yes"
+  printf '%s' ",HostKeyAlias=$SHARE_ALIAS,BatchMode=yes,IdentitiesOnly=yes,PasswordAuthentication=no"
+  printf '%s' ",ServerAliveInterval=15,ServerAliveCountMax=3,reconnect"
+  printf '%s' ",cache=no,attr_timeout=0,entry_timeout=0,negative_timeout=0"
+}
+
+ensure_sshfs() {
+  command -v sshfs >/dev/null 2>&1 && return 0
+  echo "omp-seat: 客机里没有 sshfs，先装上" >&2
+  ( cmd_install_packages sshfs ) >&2 || die "装 sshfs 失败" 4
+}
+
+mount_workspace() {
+  local gid; gid="$(getent group "$GROUP" | cut -d: -f3)"
+  install -d -m 0700 -o root -g root "$SHARE_DIR"
+  # 挂载点的上一级只给 team 组进。挂载本身不做权限检查（chmod +x 才能用），靠这一级挡住组外用户。
+  install -d -m 0750 -o root -g "$GROUP" "$SHARE_BASE"
+  ( umask 077
+    printf '%s' "$OMP_SHARE_WORKSPACE_KEY" | base64 -d > "$SHARE_DIR/workspace-key.new"
+    mv -f "$SHARE_DIR/workspace-key.new" "$SHARE_DIR/workspace-key"
+    printf '%s\n' "$OMP_SHARE_KNOWN_HOSTS" > "$SHARE_DIR/known_hosts" )
+  local want; want="$(share_target "$OMP_SHARE_WORKSPACE_KEY")"
+  if mounted "$WORKSPACE_MNT"; then
+    if [ "$(cat "$SHARE_DIR/workspace.target" 2>/dev/null)" != "$want" ] || ! timeout 3 stat -t "$WORKSPACE_MNT/." >/dev/null 2>&1; then
+      umount -l "$WORKSPACE_MNT" 2>/dev/null || fusermount3 -uz "$WORKSPACE_MNT" 2>/dev/null || true
+    fi
+  fi
+  if ! mounted "$WORKSPACE_MNT"; then
+    mkdir -p "$WORKSPACE_MNT"
+    sshfs "workspace@$SHARE_HOST:/" "$WORKSPACE_MNT" \
+      -o "$(sshfs_opts "$SHARE_DIR/workspace-key" "$SHARE_DIR/known_hosts"),allow_other,uid=0,gid=$gid,umask=0007" \
+      || die "挂 /workspace 失败（$SHARE_HOST:$OMP_SHARE_PORT）" 3
+    printf '%s\n' "$want" > "$SHARE_DIR/workspace.target"
+  fi
+  # /workspace 是指向挂载点的链接。以前留下的空目录换成链接，有内容就停下来，不替人删东西。
+  if [ -L "$WORKSPACE_LINK" ]; then
+    [ "$(readlink "$WORKSPACE_LINK")" = "$WORKSPACE_MNT" ] || ln -sfn "$WORKSPACE_MNT" "$WORKSPACE_LINK"
+  elif [ -d "$WORKSPACE_LINK" ]; then
+    if mounted "$WORKSPACE_LINK"; then umount -l "$WORKSPACE_LINK" 2>/dev/null || true; fi
+    rmdir "$WORKSPACE_LINK" 2>/dev/null || die "$WORKSPACE_LINK 是个有内容的目录，先挪走再挂" 3
+    ln -s "$WORKSPACE_MNT" "$WORKSPACE_LINK"
+  elif [ -e "$WORKSPACE_LINK" ]; then
+    die "$WORKSPACE_LINK 已经存在，又不是目录" 3
+  else
+    ln -s "$WORKSPACE_MNT" "$WORKSPACE_LINK"
+  fi
+  # 挂载里的文件都显示成 root 所有，git 会以为 /workspace 里的仓库是别人的而拒绝。
+  # Debian 12 的 git 2.39 不认 "目录/*" 这种前缀写法，只能整体放行。别人的主目录是 0700，进不去。
+  if command -v git >/dev/null 2>&1 && ! git config --system --get-all safe.directory 2>/dev/null | grep -qxF "*"; then
+    git config --system --add safe.directory "*" || true
+  fi
+}
+
+mount_work() {
+  local user="$1" home="$2"
+  local mnt="$home/work"
+  printf '%s\n%s\n' "$OMP_SHARE_KEY" "$OMP_SHARE_KNOWN_HOSTS" | as_user "$user" bash -c '
+    set -euo pipefail
+    umask 077
+    d="$HOME/.omp-seat"
+    IFS= read -r key; IFS= read -r known
+    printf "%s" "$key" | base64 -d > "$d/share-key.new"
+    chmod 0400 "$d/share-key.new"
+    mv -f "$d/share-key.new" "$d/share-key"
+    printf "%s\n" "$known" > "$d/share-known-hosts"'
+  local want; want="$(share_target "$OMP_SHARE_USER:$OMP_SHARE_KEY")"
+  local mark="$SHARE_DIR/work-$user.target"
+  if mounted "$mnt"; then
+    if [ "$(cat "$mark" 2>/dev/null)" != "$want" ] || ! as_user "$user" timeout 3 stat -t "$mnt/." >/dev/null 2>&1; then
+      umount -l "$mnt" 2>/dev/null || true
+    fi
+  fi
+  if ! mounted "$mnt"; then
+    as_user "$user" bash -c '
+      set -euo pipefail
+      mkdir -p "$HOME/work"
+      sshfs "$1@$2:/" "$HOME/work" -o "$3,uid=$(id -u),gid=$(id -g)"' \
+      _ "$OMP_SHARE_USER" "$SHARE_HOST" "$(sshfs_opts "$home/.omp-seat/share-key" "$home/.omp-seat/share-known-hosts")" \
+      || die "挂 $mnt 失败（$SHARE_HOST:$OMP_SHARE_PORT）" 3
+    ( umask 077; printf '%s\n' "$want" > "$mark" )
+  fi
+}
+
+unmount_work() {
+  local user="$1" home="$2"
+  if mounted "$home/work"; then umount -l "$home/work" 2>/dev/null || true; fi
+  rm -f "$SHARE_DIR/work-$user.target"
+}
+
+setup_share() {
+  share_configured || return 0
+  check_share_env
+  ensure_sshfs
+  mount_workspace
+  mount_work "$1" "$2"
+}
+
 cmd_up() {
   [ $# -eq 3 ] || die "用法：omp-seat up <用户> <屏幕号> <端口>"
   local user="$1" num="$2" port="$3"
@@ -80,7 +211,9 @@ cmd_up() {
   changed="$(printf '%s\n' "$token" | as_user "$user" bash -c '
     set -euo pipefail
     umask 077
-    mkdir -p "$HOME/work" "$HOME/.omp-seat"
+    mkdir -p "$HOME/.omp-seat"
+    # ~/work 可能是断掉的挂载，stat 会报错，所以不用 mkdir -p
+    mkdir "$HOME/work" 2>/dev/null || true
     chmod 0700 "$HOME/.omp-seat"
     new="$(cat)"
     if [ -f "$HOME/.omp-seat/token" ] && [ "$(cat "$HOME/.omp-seat/token")" = "$new" ]; then echo 0; exit 0; fi
@@ -88,6 +221,8 @@ cmd_up() {
     chmod 0400 "$HOME/.omp-seat/token.new"
     mv -f "$HOME/.omp-seat/token.new" "$HOME/.omp-seat/token"
     echo 1')"
+
+  setup_share "$user" "$home"
 
   if ! running "$user" Xvfb; then
     clear_stale_display "$num"
@@ -142,6 +277,7 @@ cmd_down() {
   local user="$1"
   check_user "$user"
   if user_exists "$user"; then
+    unmount_work "$user" "$(home_of "$user")"
     pkill -TERM -u "$user" 2>/dev/null || true
     for _ in $(seq 50); do pgrep -u "$user" >/dev/null 2>&1 || break; sleep 0.1; done
     pkill -KILL -u "$user" 2>/dev/null || true
@@ -159,17 +295,20 @@ cmd_status() {
   local user="$1" port="${2:-}"
   check_user "$user"
   [ -z "$port" ] || check_int "$port" 端口
-  local exists=0 xvfb=0 spacesd=0 ready=0 home=""
+  local exists=0 xvfb=0 spacesd=0 ready=0 home="" workspace=0 work=0
   if user_exists "$user"; then
     exists=1
     home="$(home_of "$user")"
     running "$user" Xvfb && xvfb=1
     running "$user" "$SPACESD" && spacesd=1
+    if mounted "$home/work" && as_user "$user" timeout 3 stat -t "$home/work/." >/dev/null 2>&1; then work=1; fi
   fi
   if [ "$xvfb" = 1 ] && [ "$spacesd" = 1 ]; then
     if [ -z "$port" ] || healthy "$port"; then ready=1; fi
   fi
-  printf 'user=%s\nexists=%s\nhome=%s\nxvfb=%s\nspacesd=%s\nready=%s\n' "$user" "$exists" "$home" "$xvfb" "$spacesd" "$ready"
+  if mounted "$WORKSPACE_MNT" && timeout 3 stat -t "$WORKSPACE_MNT/." >/dev/null 2>&1; then workspace=1; fi
+  printf 'user=%s\nexists=%s\nhome=%s\nxvfb=%s\nspacesd=%s\nready=%s\nworkspace=%s\nwork=%s\n' \
+    "$user" "$exists" "$home" "$xvfb" "$spacesd" "$ready" "$workspace" "$work"
 }
 
 cmd_count() {
