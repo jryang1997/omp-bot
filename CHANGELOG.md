@@ -6,7 +6,13 @@
 
 团队架构重构进行中，完整说明在 12 号票落地时补齐。
 
-### 记忆
+### 电脑
+
+- 每个助手一台虚拟机改成一台共享电脑，每个助手一个座席：自己的 Linux 用户、屏幕、spacesd 和主目录。主目录 0700，没有 sudo，互相读不到。最后一个座席停掉后共享电脑自动关机。
+- 共享电脑默认 4 vCPU、8 GiB 内存、64 GiB 动态磁盘，可在电脑面板或 `PUT /api/computer/shared-machine` 改 CPU 和内存，下次开机生效。
+- 客机工具的路径可以写 `~`，默认工作目录从 `/work` 改成 `~/work`，附件放 `~/work/attachments`。不再限制只能写 `/work` 和 `/tmp`。
+- 新工具 `computer_install_packages` 用 apt 装系统包，每次都要用户批准，全部放手档也一样。
+
 
 - 开启记忆的助手改用 omp 自带的 mnemopi。每个助手一个 bank（`bot-<id>`），所有助手共用 `team/.memory/mnemopi.db`，私聊群聊通用。overlay 写 `scoping: global`、`bank`、`dbPath`，autolearn 关掉，default、smol、memory 三个模型角色钉在助手选定的模型上。
 - 删掉私有 agentDir、私有 `models.yml` 生成、凭据剥离和 `memory_prereq_missing` 门槛。子进程不再改 `PI_CODING_AGENT_DIR`，模型和登录沿用用户自己的 omp 配置。开记忆不再有前置条件。
