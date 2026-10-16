@@ -124,7 +124,7 @@ export const OLD_EXPORT = [
   `d=${OLD_EXPORT_DIR}; rm -rf "$d"; mkdir -p "$d"`,
   'pack() { out="$1"; shift; tar -czf "$out" --ignore-failed-read --warning=no-file-changed "$@" || [ $? -eq 1 ]; }',
   'if [ -d /work ]; then pack "$d/work.tgz" -C / work; else tar -czf "$d/work.tgz" -T /dev/null; fi',
-  'pack "$d/home.tgz" --exclude=./.cache --exclude=./.config/chromium --exclude=./.config/google-chrome -C "$HOME" .',
+  'pack "$d/home.tgz" --exclude=./.cache --exclude=./.config/chromium --exclude=./.config/google-chrome -C "${HOME:-/home/cua}" .',
   'stat -c "%n %s" "$d/work.tgz" "$d/home.tgz"',
 ].join('\n');
 export const OLD_INBOX = '/var/tmp/omp-old';

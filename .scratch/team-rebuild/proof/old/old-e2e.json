@@ -1,9 +1,9 @@
 {
-  "startedAt": "2026-10-16T04:33:44.799Z",
+  "startedAt": "2026-10-16T04:36:14.770Z",
   "checks": [
     {
       "name": "旧电脑打包：/work 和主目录进包，读不到的文件跳过，缓存和浏览器 profile 不带",
-      "bytes": "/tmp/omp-old-export/work.tgz 339\n/tmp/omp-old-export/home.tgz 650"
+      "bytes": "/tmp/omp-old-export/work.tgz 341\n/tmp/omp-old-export/home.tgz 650"
     },
     {
       "name": "解进座席的 ~/old-computer：文件归座席用户，已有文件不覆盖，中文和空格文件名照常，包解完就删",
@@ -17,5 +17,5 @@
     }
   ],
   "result": "4/4 PASS",
-  "finishedAt": "2026-10-16T04:33:45.554Z"
+  "finishedAt": "2026-10-16T04:36:15.493Z"
 }
