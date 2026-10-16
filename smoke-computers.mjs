@@ -162,7 +162,7 @@ try {
   // 共享电脑上隔离靠 Linux 用户：B 读不到 A 的主目录
   const homeA = (await command(pcA.id, "printf %s \"$HOME\"", "home-a")).trim();
   assert.match(homeA, /^\/home\/omp-[0-9a-f]{12}$/);
-  assert.equal(await command(pcB.id, `test ! -e ~/work/output-a.txt && ! ls ${quote(homeA)} >/dev/null 2>&1 && ! cat ${quote(`${homeA}~/work/output-a.txt`)} >/dev/null 2>&1 && printf ISOLATED_B`, "isolation-b"), "ISOLATED_B");
+  assert.equal(await command(pcB.id, `test ! -e ~/work/output-a.txt && ! ls ${quote(homeA)} >/dev/null 2>&1 && ! cat ${quote(`${homeA}/work/output-a.txt`)} >/dev/null 2>&1 && printf ISOLATED_B`, "isolation-b"), "ISOLATED_B");
   const foreign = await startRun(b.id, "读取附件", { attachmentIds: [attachment.id] });
   const foreignDone = await finished(foreign.id);
   assert.equal(foreignDone.state, "failed");
