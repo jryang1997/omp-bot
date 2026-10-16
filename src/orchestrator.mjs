@@ -81,7 +81,11 @@ const DELEGATE_BOT_SCHEMA = {
   type: "object",
   properties: {
     to: { type: "string", description: "目标 bot 的名字或 id（来自 list_bots）" },
-    message: { type: "string", description: "交给对方后台执行的任务描述" },
+    message: {
+      type: "string",
+      description:
+        "交接简报。对方看不到你和用户的对话，只拿到这段话，要写成拿来就能干的：任务（一句话说要做什么）、背景（为什么做）、相关文件（路径和用处）、现状（做到哪、哪里不行）、试过什么（为什么放弃）、已定的决定、约束（不能动什么）。任务性质原样带过去：只调研就写明不要改文件，修就写修，重构不是重写。",
+    },
   },
   required: ["to", "message"],
   additionalProperties: false,
@@ -1360,7 +1364,7 @@ export class Orchestrator {
           name: "delegate_bot",
           label: "Delegate Bot",
           description:
-            "把任务派给另一个 bot 后台执行，立即返回（不等待结果）。对方正忙就排队，空了自动开跑。做完后结果会作为一条新消息交回给你，由你验收。用于可以并行推进的工作。",
+            "把任务派给另一个 bot 后台执行，立即返回（不等待结果）。先用 list_bots 按角色挑人。对方正忙就排队，空了自动开跑。做完后结果会作为一条新消息交回给你，由你验收。用于可以并行推进的工作。",
           parameters: DELEGATE_BOT_SCHEMA,
           handler: (args, meta) => this._handleDelegateBot(bot, runtime, args, meta),
         },

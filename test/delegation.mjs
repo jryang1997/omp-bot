@@ -359,5 +359,21 @@ await test("子任务做外部动作时崩溃：交回写「外部动作结果�
   }
 });
 
+await test("派活教模型写交接简报：工具说明讲清对方看不到对话，人设也提醒", async () => {
+  const t = newTeam();
+  try {
+    const { fa } = await pair(t);
+    const tool = fa.tools.find((x) => x.name === "delegate_bot");
+    const msg = tool.parameters.properties.message.description;
+    assert.match(msg, /对方看不到你和用户的对话/);
+    for (const part of ["背景", "相关文件", "现状", "试过什么", "约束", "不要改文件"]) assert.ok(msg.includes(part), part);
+    assert.match(tool.description, /先用 list_bots 按角色挑人/);
+    const { personaText } = await import("../src/persona.mjs");
+    assert.match(personaText(), /对方看不到你的对话/);
+  } finally {
+    await t.cleanup();
+  }
+});
+
 console.log(`\n${passed}/${passed + failed} PASS${failed ? `，${failed} FAIL` : ""}`);
 process.exit(failed ? 1 : 0);
