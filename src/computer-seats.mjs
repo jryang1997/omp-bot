@@ -143,17 +143,20 @@ function writeJsonAtomic(file, value, mode = 0o600) {
 
 /** 用户保存的共享电脑规格。文件坏了或超出现在宿主的范围，就退回默认值。 */
 export function readSharedMachine(home, { hostCpus = os.cpus().length } = {}) {
-  let saved = {};
+  let saved = null;
   try {
-    saved = JSON.parse(fs.readFileSync(machineFile(home), 'utf8')) ?? {};
+    saved = JSON.parse(fs.readFileSync(machineFile(home), 'utf8'));
   } catch {
-    saved = {};
+    saved = null;
   }
-  try {
-    return { ...sharedMachineSpec(saved, { hostCpus }), saved: true };
-  } catch {
-    return { ...sharedMachineSpec({}, { hostCpus }), saved: false };
+  if (saved && typeof saved === 'object') {
+    try {
+      return { ...sharedMachineSpec(saved, { hostCpus }), saved: true };
+    } catch {
+      // 换了核数更少的宿主之类，退回默认
+    }
   }
+  return { ...sharedMachineSpec({}, { hostCpus }), saved: false };
 }
 
 /** 保存共享电脑规格，下次开机生效。 */
