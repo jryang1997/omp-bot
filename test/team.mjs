@@ -9,7 +9,7 @@ import { makeBot, normalizeBot, permissionOf, permissionModes } from "../src/dom
 import { BotRuntime } from "../src/bot.mjs";
 import { Computers } from "../src/features/computers.mjs";
 import { COMPUTER_TOOL_NAMES } from "../src/constants.mjs";
-import { MIGRATION_MARKER, OLD_MEMORY_NOTE, TEAM_AGENTS_TEMPLATE, parseIdentityBlock, renderIdentityBlock, replaceIdentityBlock, teamPaths } from "../src/team.mjs";
+import { MIGRATION_MARKER, OLD_MEMORY_NOTE, TEAM_AGENTS_TEMPLATE, parseIdentityBlock, renderIdentityBlock, replaceIdentityBlock, skillArgs, teamPaths } from "../src/team.mjs";
 import { Orchestrator } from "../src/orchestrator.mjs";
 import { permissionOf as uiPermissionOf, BOT_PERMISSION_LABELS } from "../web/workbench-core.js";
 
@@ -436,6 +436,119 @@ test("02 全新安装也留标记，不产生多余提交", async () => {
       await orch.team.flush();
       assert.ok(existsSync(join(home, "team", MIGRATION_MARKER)));
       assert.equal(gitLog(join(home, "team")).length, 1, "建目录和标记合成一次提交");
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// ---------------- 03 共享技能库 + 每 bot 白名单 ----------------
+const skillMd = (name, description = `${name} 的说明`) => `---\nname: ${name}\n${description ? `description: ${description}\n` : ""}---\n\n正文\n`;
+const putSkill = (dir, name, description) => put(join(dir, name, "SKILL.md"), skillMd(name, description));
+
+test("03 overlay 的 skills.customDirectories 指向 team/skills", () => {
+  const home = tmp("ompbot-skill-overlay-");
+  try {
+    const bot = makeBot({ id: "bot_sk", name: "技能" });
+    const rt = new BotRuntime({ bot, scope: "private", home, bin: "omp-fixture" });
+    const { args } = rt._buildArgs();
+    const overlay = readFileSync(args[args.indexOf("--config") + 1], "utf8");
+    const lib = join(home, "team", "skills");
+    assert.ok(overlay.includes(`  customDirectories:\n    - ${JSON.stringify(lib)}`), overlay);
+    assert.ok(!args.includes("--skills") && !args.includes("--no-skills"), "白名单为 null 不传 --skills");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("03 白名单为列表时并上私有技能传 --skills，并完为空传 --no-skills", () => {
+  const home = tmp("ompbot-skill-args-");
+  try {
+    const p = teamPaths(home, "bot_sk");
+    assert.deepEqual(skillArgs({ skills: null }, p), []);
+    assert.deepEqual(skillArgs({ skills: [] }, p), ["--no-skills"]);
+    assert.deepEqual(skillArgs({ skills: ["写周报"] }, p), ["--skills", "写周报"]);
+    putSkill(p.skillsDir, "私房菜");
+    assert.deepEqual(skillArgs({ skills: [] }, p), ["--skills", "私房菜"], "私有技能总是并进来");
+    assert.deepEqual(skillArgs({ skills: ["写周报", "私房菜"] }, p), ["--skills", "写周报,私房菜"], "不重复");
+    const rt = new BotRuntime({ bot: makeBot({ id: "bot_sk", name: "技能", skills: ["写周报"] }), scope: "room:r1", home, bin: "omp-fixture" });
+    const { args } = rt._buildArgs();
+    assert.equal(args[args.indexOf("--skills") + 1], "写周报,私房菜", "群聊也带上私有技能");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("03 装技能可选共享库或私有，重名、缺 description、坏名字都被拒绝并说明", async () => {
+  const home = tmp("ompbot-skill-install-");
+  try {
+    await withOrch(home, async (orch) => {
+      const a = orch.addBot({ name: "小甲" });
+      const b = orch.addBot({ name: "小乙" });
+      const lib = orch.installSkill({ botId: a.id, target: "library", content: skillMd("写周报") });
+      assert.equal(lib.name, "写周报");
+      assert.ok(existsSync(join(home, "team", "skills", "写周报", "SKILL.md")));
+      const src = join(home, "src-skill");
+      put(join(src, "SKILL.md"), skillMd("查天气"));
+      put(join(src, "scripts", "run.sh"), "echo hi");
+      const own = orch.installSkill({ botId: b.id, target: "bot", path: src });
+      assert.equal(own.files, 2, "整个目录复制过去");
+      assert.ok(existsSync(join(teamPaths(home, b.id).skillsDir, "查天气", "scripts", "run.sh")));
+
+      const reject = (input, code, pattern) =>
+        assert.throws(() => orch.installSkill(input), (e) => e.code === code && e.status >= 400 && pattern.test(e.message), code);
+      reject({ botId: b.id, target: "library", content: skillMd("写周报") }, "skill_name_taken", /共享库里已经有叫「写周报」的技能/);
+      reject({ botId: a.id, target: "bot", content: skillMd("查天气") }, "skill_name_taken", /小乙 的私有技能里.*不能重名/);
+      orch.installSkill({ botId: a.id, target: "library", content: skillMd("Weather") });
+      reject({ botId: b.id, target: "bot", content: skillMd("weather") }, "skill_name_taken", /Weather/);
+      reject({ botId: a.id, target: "library", content: skillMd("没说明", "") }, "skill_description_missing", /description/);
+      reject({ botId: a.id, target: "library", content: skillMd("a,b") }, "skill_name_invalid", /逗号/);
+      reject({ botId: a.id, target: "library", content: "没有 frontmatter" }, "skill_name_invalid", /name/);
+      reject({ botId: a.id, target: "elsewhere", content: skillMd("x") }, "skill_target_invalid", /library/);
+      reject({ botId: a.id, target: "library", path: join(home, "nope") }, "skill_source_missing", /找不到/);
+
+      await orch.team.flush();
+      const log = gitLog(join(home, "team"));
+      assert.ok(log.some((m) => m.includes("技能：装进共享库 写周报")));
+      assert.ok(log.some((m) => m.includes("技能：给 小乙 装上 查天气")));
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("03 技能面板列出库技能和私有技能，勾选写回 bot.skills，装技能后签名变", async () => {
+  const home = tmp("ompbot-skill-panel-");
+  try {
+    await withOrch(home, async (orch) => {
+      const bot = orch.addBot({ name: "小丙" });
+      const native = orch.features.native;
+      orch.installSkill({ botId: bot.id, target: "library", content: skillMd("写周报") });
+      orch.installSkill({ botId: bot.id, target: "library", content: skillMd("画图") });
+      put(join(home, "team", "skills", "缺说明", "SKILL.md"), "---\nname: 缺说明\n---\n");
+      orch.installSkill({ botId: bot.id, target: "bot", content: skillMd("私房菜") });
+      let st = await native.skillsStatus(bot.id);
+      assert.deepEqual(st.library.map((s) => [s.name, s.selected, s.loadable]), [["画图", true, true], ["缺说明", true, false], ["写周报", true, true]].sort((x, y) => x[0].localeCompare(y[0])));
+      assert.deepEqual(st.private.map((s) => s.name), ["私房菜"]);
+      assert.deepEqual(st.effective, ["画图", "私房菜", "写周报"].sort((x, y) => x.localeCompare(y)), "没写 description 的库技能不算生效");
+
+      native.putSkills(bot.id, { skills: ["写周报"] });
+      assert.deepEqual(orch.getBot(bot.id).skills, ["写周报"]);
+      st = await native.skillsStatus(bot.id);
+      assert.deepEqual(st.library.filter((s) => s.selected).map((s) => s.name), ["写周报"]);
+      assert.deepEqual(st.effective, ["私房菜", "写周报"].sort((x, y) => x.localeCompare(y)));
+
+      // 从这个 bot 的面板装进共享库：它用白名单时新技能顺手加进去
+      const out = native.installSkill(bot.id, { target: "library", content: skillMd("查天气") });
+      assert.deepEqual(out.whitelist, ["写周报", "查天气"]);
+
+      const rt = new BotRuntime({ bot: orch.getBot(bot.id), scope: "private", home, bin: "omp-fixture" });
+      assert.ok(rt.matchesPolicy(orch.getBot(bot.id)));
+      put(join(home, "team", "skills", "新来的", "SKILL.md"), skillMd("新来的"));
+      assert.equal(rt.matchesPolicy(orch.getBot(bot.id)), false, "库里多了技能，下一轮重建进程");
+
+      assert.ok(orch.features.routes.some((r) => r.method === "POST" && r.pattern.test("/api/bots/x/skills/install")));
+      assert.equal(orch.features.allowsDevice("POST", "/api/bots/x/skills/install"), false, "手机等设备不能装技能");
     });
   } finally {
     rmSync(home, { recursive: true, force: true });

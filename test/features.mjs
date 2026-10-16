@@ -774,23 +774,23 @@ test("MCP 校验对齐原生规则：stdio 需 command，不能同时给 command
   assert.strictEqual(validateMcpServer("ok.1", { url: "https://x/mcp" }).type, "http");
 });
 
-test("skills：读 Bot 私有项目 skill 目录，过滤 glob 生效", async () => {
+test("skills：私有技能总是加载，白名单只管共享库，过滤 glob 生效", async () => {
   const bot = mkBot({ name: "技能Bot" });
   const dir = join(workOf(bot.id), ".omp", "skills", "pdf-tools");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "SKILL.md"), "---\nname: pdf-tools\ndescription: 处理 PDF\n---\n\nbody\n");
   const status = await features.native.skillsStatus(bot.id, "private", ["/skill:pdf-tools"]);
-  assert.deepStrictEqual(status.discovered.map((s) => s.name), ["pdf-tools"]);
-  assert.strictEqual(status.discovered[0].selected, true);
+  assert.deepStrictEqual(status.private.map((s) => s.name), ["pdf-tools"]);
+  assert.strictEqual(status.private[0].selected, true);
   const nested = join(workOf(bot.id), ".omp", "skills", "group", "deep");
   mkdirSync(nested, { recursive: true });
   writeFileSync(join(nested, "SKILL.md"), "---\nname: deep\n---\n");
-  assert.deepStrictEqual((await features.native.skillsStatus(bot.id, "private")).discovered.map((s) => s.name), ["pdf-tools"], "非一层布局不递归发现");
+  assert.deepStrictEqual((await features.native.skillsStatus(bot.id, "private")).private.map((s) => s.name), ["pdf-tools"], "非一层布局不递归发现");
 
   const put = features.native.putSkills(bot.id, { skills: ["git-*"] });
   assert.deepStrictEqual(put.filter, ["git-*"]);
   const filtered = await features.native.skillsStatus(bot.id, "private");
-  assert.deepStrictEqual(filtered.effective, [], "过滤不匹配则无生效 skill");
+  assert.deepStrictEqual(filtered.effective, ["pdf-tools"], "白名单不匹配私有技能也照样加载");
   assert.strictEqual(features.native.constructor.matchFilter(["git-*"], "git-commit"), true);
   features.native.putSkills(bot.id, { skills: null });
 });

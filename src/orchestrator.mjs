@@ -375,6 +375,31 @@ export class Orchestrator {
     return this.team.status();
   }
 
+  /**
+   * 装技能。target=library 进共享库，target=bot 只给这个 bot；库里和各 bot 的私有技能不许重名。
+   * 从某个 bot 的面板装进共享库、而它用的是白名单时，顺手把新技能加进它的白名单。
+   * 不用手动重启：技能目录进了复用签名，下一轮对话前进程自动重建。
+   */
+  installSkill({ botId, target, path, content } = {}) {
+    const bot = botId ? this.getBot(botId) : null;
+    if (botId && !bot) throw httpErr(404, `未知 Bot：${botId}`, "bot_not_found");
+    const nameOf = (id) => this.getBot(id)?.name ?? id;
+    const result = this.team.installSkill({
+      target,
+      botId,
+      path,
+      content,
+      describe: (hit) => (hit.scope === "library" ? "共享库里" : `${nameOf(hit.botId)} 的私有技能里`),
+    });
+    let whitelist = bot?.skills ?? null;
+    if (target === "library" && bot && Array.isArray(bot.skills) && !bot.skills.includes(result.name)) {
+      whitelist = this.updateBot(bot.id, { skills: [...bot.skills, result.name] }).skills;
+    }
+    this.team.commit(target === "library" ? `技能：装进共享库 ${result.name}` : `技能：给 ${bot.name} 装上 ${result.name}`);
+    this.emit("skills_changed", { ...result, by: botId ?? null });
+    return { ...result, whitelist };
+  }
+
   removeBot(id) {
     this.store.removeBot(id);
     for (const ctrl of [...this.runs.values()]) {

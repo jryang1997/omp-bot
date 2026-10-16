@@ -241,6 +241,11 @@ export class WorkbenchFeatures {
         // 返回与 GET 同一形状（含新过滤下的生效集合），避免 UI 两条路径两套结构。
         return { ...(await this.native.skillsStatus(botId, c.scope)), restartRequired: applied.restartRequired };
       }),
+      R("POST", /^\/api\/bots\/([^/]+)\/skills\/install$/, async (c) => {
+        const botId = decodeURIComponent(c.params[0]);
+        const installed = this.native.installSkill(botId, c.body ?? {});
+        return { installed, ...(await this.native.skillsStatus(botId, c.scope)) };
+      }),
       R("GET", /^\/api\/bots\/([^/]+)\/memory$/, (c) => this.native.memoryRead(decodeURIComponent(c.params[0]), c.scope)),
       R("PUT", /^\/api\/bots\/([^/]+)\/memory$/, (c) => {
         const botId = decodeURIComponent(c.params[0]);

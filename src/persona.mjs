@@ -66,6 +66,7 @@ export function personaText() {
  * @param {string} dir 该 bot 的私有目录（放 persona 文件、overlay、session）
  * @param {object} [opts]
  * @param {string[]} [opts.extraDisabledExtensions] 额外要禁用的扩展 id（如 chat 档逐个关掉的 `mcp:<name>`）
+ * @param {string} [opts.librarySkillsDir] 共享技能库目录（team/skills），写进 skills.customDirectories
  */
 export function writePersonaFiles(bot, dir, opts = {}) {
   mkdirSync(dir, { recursive: true });
@@ -83,6 +84,11 @@ export function writePersonaFiles(bot, dir, opts = {}) {
     "skills:",
     ...USER_SOURCE_TOGGLES.map((k) => `  ${k}: false`),
   ];
+  if (opts.librarySkillsDir) {
+    // 共享技能库：每个 bot 都从 team/skills 发现，加载哪些由 --skills 白名单决定。
+    // JSON 字符串就是合法的 YAML 双引号串，Windows 路径里的反斜杠和冒号不会出问题。
+    lines.push("  customDirectories:", `    - ${JSON.stringify(opts.librarySkillsDir)}`);
+  }
 
   if (bot.memoryEnabled === true) {
     // 记忆由用户显式开启：原生 local 后端 + autolearn，根目录靠运行时环境

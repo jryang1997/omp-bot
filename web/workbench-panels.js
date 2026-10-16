@@ -1240,48 +1240,96 @@ export function createPanels({ client, deps }) {
     const commandsError = caps && typeof caps.commandsError === "string" && caps.commandsError ? caps.commandsError : null;
     const probeNote = commandsError || probeError;
 
-    const discovered = data.discovered || [];
-    const selected = new Set(discovered.filter((s) => s.selected).map((s) => s.name));
-    const box = el("div", "bt-set-card");
-    box.append(el("div", "bt-set-hint", "勾选决定原生加载哪些技能；取消勾选的技能留在目录里，只是不被加载。"));
-    if (!discovered.length) box.append(el("div", "bt-empty", "Bot 私有技能目录里还没有技能（未配置）；安装方法见下一节。"));
-    for (const skill of discovered) {
+    const library = Array.isArray(data.library) ? data.library : [];
+    const own = Array.isArray(data.private) ? data.private : [];
+    const libraryDir = data.libraryDir || null;
+    const privateDir = data.privateDir || skillsDir;
+    const saveFilter = async (next, revert) => {
+      try {
+        await api(`/api/bots/${encodeURIComponent(bot.id)}/skills`, { method: "PUT", body: { skills: next } });
+        toast("已保存，下一条消息起生效");
+        deps.rerenderPanel?.();
+      } catch (error) {
+        toast(`保存失败：${error.message}`, true);
+        revert?.();
+      }
+    };
+
+    // 共享库：所有 bot 共用 team/skills，每个 bot 勾自己要用的。
+    const libBox = el("div", "bt-set-card");
+    const useAll = data.filter === null || data.filter === undefined;
+    const allLabel = el("label", "wb-check");
+    const allInput = el("input");
+    allInput.type = "checkbox";
+    allInput.checked = useAll;
+    allInput.onchange = () => {
+      allInput.disabled = true;
+      // 关掉「全部」时从当前全部库技能起步，用户再逐个取消。
+      const next = allInput.checked ? null : library.map((s) => s.name);
+      void saveFilter(next, () => { allInput.checked = !allInput.checked; }).finally(() => { allInput.disabled = false; });
+    };
+    allLabel.append(allInput, el("span", null, "用库里全部技能（以后装进库的也自动用上）"));
+    libBox.append(allLabel);
+    if (!library.length) libBox.append(el("div", "bt-empty", "共享库里还没有技能。在下面「装技能」里选「装进共享库」。"));
+    const chosen = new Set(library.filter((s) => s.selected).map((s) => s.name));
+    for (const skill of library) {
       const label = el("label", "wb-check");
       const input = el("input");
       input.type = "checkbox";
-      input.checked = selected.has(skill.name);
-      input.onchange = async () => {
-        input.checked ? selected.add(skill.name) : selected.delete(skill.name);
-        const next = selected.size === discovered.length ? null : [...selected];
+      input.checked = chosen.has(skill.name);
+      input.disabled = useAll;
+      input.onchange = () => {
+        input.checked ? chosen.add(skill.name) : chosen.delete(skill.name);
         input.disabled = true;
-        try {
-          await api(`/api/bots/${encodeURIComponent(bot.id)}/skills`, { method: "PUT", body: { skills: next } });
-          toast("已保存；该 Bot 的原生进程重建后生效");
-        } catch (error) {
-          toast(`保存失败：${error.message}`, true);
+        void saveFilter([...chosen], () => {
           input.checked = !input.checked;
-          input.checked ? selected.add(skill.name) : selected.delete(skill.name);
-        } finally { input.disabled = false; }
+          input.checked ? chosen.add(skill.name) : chosen.delete(skill.name);
+        }).finally(() => { input.disabled = false; });
       };
       const text = el("span");
       text.append(document.createTextNode(`${skill.name}${skill.description ? ` · ${skill.description}` : ""}`));
-      if (skill.enabled === false) text.append(el("span", "bt-note", " [目录内已禁用]"));
+      if (skill.loadable === false) text.append(el("span", "bt-note", " [没写 description，omp 不会加载]"));
       label.append(input, text);
-      box.append(label);
+      libBox.append(label);
     }
-    if (data.filter?.length) box.append(el("div", "bt-note", `当前加载名单：${data.filter.join(", ")}；名单外的技能原生不加载。`));
-    else box.append(el("div", "bt-note", "当前加载名单：全部。"));
-    root.append(section(`Bot 私有技能（${discovered.length}）`, box));
+    if (libraryDir) libBox.append(el("div", "bt-note", `共享库在 ${libraryDir}，团队里每个 bot 都能勾选。`));
+    root.append(section(`共享技能库（${library.length}）`, libBox));
 
-    const how = el("div", "bt-set-card");
-    const steps = el("ol", "wb-steps");
-    steps.append(el("li", null, skillsDir
-      ? `技能装在 Bot 私有工作目录里：${skillsDir}`
-      : "技能装在 Bot 私有工作目录的 .omp/skills 里；打开「能力」页可以看到该 Bot 的工作目录绝对路径。"));
-    steps.append(el("li", null, "每个技能一个子目录，子目录里放 SKILL.md，开头用 frontmatter 写 name 与 description；enabled: false 可以先在目录里停用它。"));
-    steps.append(el("li", null, "新技能要等该 Bot 的原生进程重建后才被发现：在这里改动勾选、或改一次该 Bot 的设置都会触发重建。"));
-    how.append(steps);
-    root.append(section("安装方法", how));
+    // 私有技能：只给这个 bot，总是加载。
+    const ownBox = el("div", "bt-set-card");
+    if (!own.length) ownBox.append(el("div", "bt-empty", "还没有只给这个 Bot 的技能。"));
+    for (const skill of own) {
+      const line = el("div", "bt-set-row");
+      line.append(document.createTextNode(`${skill.name}${skill.description ? ` · ${skill.description}` : ""}`));
+      if (skill.enabled === false) line.append(el("span", "bt-note", " [目录内已禁用]"));
+      ownBox.append(line);
+    }
+    ownBox.append(el("div", "bt-note", privateDir ? `私有技能总是加载，放在 ${privateDir}。` : "私有技能总是加载。"));
+    root.append(section(`只给这个 Bot 的技能（${own.length}）`, ownBox));
+
+    // 装技能：从本机的技能目录装，或者直接贴 SKILL.md。
+    const target = select([["library", "装进共享库"], ["bot", `只给 ${bot.name || "这个 Bot"}`]], "library");
+    const path = Object.assign(el("input", "bt-input"), { placeholder: "本机技能目录，里面要有 SKILL.md" });
+    const content = Object.assign(el("textarea", "bt-textarea"), {
+      rows: 5,
+      placeholder: "或者直接贴 SKILL.md 的内容。开头的 frontmatter 要写 name 和 description。",
+    });
+    const form = el("div", "wb-form");
+    form.append(row("装到", "库里和每个 Bot 的私有技能不能重名。", target), row("目录", null, path), row("SKILL.md", null, content));
+    form.append(button("btn primary wide", "装上", function () {
+      const body = { target: target.value };
+      if (content.value.trim()) body.content = content.value;
+      else if (path.value.trim()) body.path = path.value.trim();
+      else { toast("填技能目录，或者贴上 SKILL.md", true); return; }
+      return busy(this, api(`/api/bots/${encodeURIComponent(bot.id)}/skills/install`, { method: "POST", body })
+        .then((out) => {
+          const where = out.installed?.target === "library" ? "共享库" : (bot.name || "这个 Bot");
+          toast(`已把「${out.installed?.name}」装进${where}，下一条消息起生效`);
+          deps.rerenderPanel?.();
+        })
+        .catch((error) => toast(`没装上：${error.message}`, true)), "安装中…");
+    }));
+    root.append(section("装技能", form));
 
     const nativeBox = el("div", "bt-set-card");
     if (nativeCommands === null) nativeBox.append(el("div", "bt-empty", probeNote
@@ -1289,7 +1337,7 @@ export function createPanels({ client, deps }) {
       : "还没有探测到原生技能来源：刷新页面重试；Bot 未启动时先让它跑一次会话。"));
     else if (!nativeCommands.length) nativeBox.append(el("div", "bt-empty", "原生环境没有提供技能命令。"));
     else {
-      nativeBox.append(el("div", "bt-note", "OMP 原生在当前环境里提供的技能；上面的勾选只作用于 Bot 私有目录里的技能。"));
+      nativeBox.append(el("div", "bt-note", "OMP 原生在这个 Bot 的进程里实际提供的技能。"));
       const list = el("details", "wb-raw");
       list.append(el("summary", null, "技能名称"));
       list.append(el("pre", "wb-pre", nativeCommands.join("\n")));

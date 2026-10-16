@@ -23,7 +23,7 @@ import { RpcClient } from "./rpc-client.mjs";
 import { writePersonaFiles } from "./persona.mjs";
 import { writePrivateMemoryConfig } from "./memory-config.mjs";
 import { policySignature } from "./domain.mjs";
-import { contextDigest, teamPaths } from "./team.mjs";
+import { contextDigest, skillArgs, teamPaths } from "./team.mjs";
 import {
   RPC_STARTUP_TIMEOUT_MS,
   RPC_COMMAND_TIMEOUT_MS,
@@ -188,6 +188,7 @@ export class BotRuntime extends EventEmitter {
     this.sessionDir = opts.dir ? join(this.baseDir, "sessions") : this.dirs.sessionDir;
     this.cwd = opts.cwd ?? this.dirs.cwd;
     this.workDir = opts.cwd ? join(opts.cwd, "work") : this.dirs.workDir;
+    this.skillsDir = join(this.cwd, ".omp", "skills");
     // 工作区是用户显式选的目录，通过 --add-dir 加入；bot 自己的 cwd 保持不变，
     // 这样身份、session 和原生项目配置都留在 bot 自己的目录里。
     this.workspace = assertWorkspace(this.bot.workspace ?? "");
@@ -223,9 +224,14 @@ export class BotRuntime extends EventEmitter {
     return this.bot.executionMode === "chat";
   }
 
-  /** 两层 AGENTS.md 的摘要：文件变了签名就变，下一轮重启进程续上会话，新内容进系统提示词。 */
+  /** 两层 AGENTS.md 和两处技能目录的摘要：变了签名就变，下一轮重启进程续上会话，新内容进系统提示词。 */
   _contextDigest() {
-    return contextDigest({ teamAgentsFile: this.dirs.teamAgentsFile, agentsFile: join(this.cwd, "AGENTS.md") });
+    return contextDigest({
+      teamAgentsFile: this.dirs.teamAgentsFile,
+      agentsFile: join(this.cwd, "AGENTS.md"),
+      librarySkillsDir: this.dirs.librarySkillsDir,
+      skillsDir: this.skillsDir,
+    });
   }
 
   _signature() {
@@ -268,6 +274,7 @@ export class BotRuntime extends EventEmitter {
   _buildArgs() {
     const { argv: personaArgv } = writePersonaFiles(this.bot, this.baseDir, {
       extraDisabledExtensions: this._narrowedDisabledExtensions(),
+      librarySkillsDir: this.dirs.librarySkillsDir,
     });
     const mode = this.bot.executionMode === "chat" ? "rpc" : "rpc-ui";
     const args = ["--session-dir", this.sessionDir, ...personaArgv];
@@ -279,10 +286,8 @@ export class BotRuntime extends EventEmitter {
       // --no-tools：内置工具名表为空；--no-extensions：关闭扩展发现（真实 CLI 开关）。
       args.push("--no-tools", "--no-extensions");
     }
-    if (Array.isArray(this.bot.skills)) {
-      if (this.bot.skills.length === 0) args.push("--no-skills");
-      else args.push("--skills", this.bot.skills.join(","));
-    }
+    // 白名单：null 不传（库里全部 + 私有）；列表并上私有技能传 --skills，并完为空传 --no-skills。
+    args.push(...skillArgs(this.bot, { skillsDir: this.skillsDir }));
     if (mode === "rpc-ui") args.push("--approval-mode", this.bot.approvalMode ?? "write");
     const maxTimeMs = this.bot.budget?.maxTimeMs;
     if (typeof maxTimeMs === "number" && maxTimeMs > 0) {

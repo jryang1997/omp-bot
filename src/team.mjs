@@ -22,7 +22,8 @@
 import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { copyFileSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import { ferr } from "./features/util.mjs";
 
 export const TEAM_DIRNAME = "team";
 export const IDENTITY_START = "<!-- omp-bot 身份块开始。这一段按设置表单生成，改这里会同步回表单；块外的内容 omp-bot 不碰。 -->";
@@ -109,13 +110,17 @@ export function teamPaths(home, botId, scope = "private") {
     agentsFile: join(cwd, "AGENTS.md"),
     workDir: join(cwd, "work"),
     skillsDir: join(cwd, ".omp", "skills"),
+    librarySkillsDir: join(root, "skills"),
     sessionDir: join(cwd, "sessions", safeScope(scope)),
     baseDir,
     agentDir: join(baseDir, "agent"),
   };
 }
 
-/** 两层 AGENTS.md 的内容摘要，进 runtime 复用签名：文件一变，下一轮就重启进程续上会话。 */
+/**
+ * 进 runtime 复用签名的上下文摘要：两层 AGENTS.md 的内容，加上共享库和私有技能目录的清单。
+ * 任何一样变了，下一轮就重启进程续上会话，新内容和新技能才进得了系统提示词。
+ */
 export function contextDigest(paths) {
   const h = createHash("sha256");
   for (const file of [paths.teamAgentsFile, paths.agentsFile]) {
@@ -127,7 +132,128 @@ export function contextDigest(paths) {
     }
     h.update("\0");
   }
+  for (const dir of [paths.librarySkillsDir, paths.skillsDir]) {
+    if (!dir) continue;
+    h.update(dir).update("\0");
+    for (const name of skillDirNames(dir)) {
+      try {
+        const st = statSync(join(dir, name, "SKILL.md"));
+        h.update(`${name}:${st.mtimeMs}:${st.size}\0`);
+      } catch {}
+    }
+  }
   return h.digest("hex").slice(0, 16);
+}
+
+// ---------------- 技能 ----------------
+// omp 的发现规则：技能目录下每个子目录放一个 SKILL.md，不递归，跳过点开头的目录；
+// 名字取 frontmatter 的 name，没写就用目录名。共享库走 skills.customDirectories，
+// 那里的技能必须写 description，否则 omp 不加载。
+
+/** 极简 frontmatter 读取（只取 name/description/enabled 这类单行字段，不引依赖）。 */
+export function parseSkillFrontmatter(text) {
+  const out = {};
+  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text ?? "");
+  if (!m) return out;
+  for (const line of m[1].split(/\r?\n/)) {
+    const kv = /^([A-Za-z][\w-]*)\s*:\s*(.*)$/.exec(line.trim());
+    if (!kv) continue;
+    const [, k, v] = kv;
+    out[k] = v.replace(/^["']|["']$/g, "").trim();
+  }
+  return out;
+}
+
+function skillDirNames(dir) {
+  try {
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && !e.name.startsWith("."))
+      .map((e) => e.name)
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+/** 列出一个技能目录里的技能。 */
+export function listSkills(dir) {
+  const out = [];
+  for (const dirName of skillDirNames(dir)) {
+    const file = join(dir, dirName, "SKILL.md");
+    let text;
+    try {
+      text = readFileSync(file, "utf8").slice(0, 20_000);
+    } catch {
+      continue;
+    }
+    const fm = parseSkillFrontmatter(text);
+    out.push({
+      name: fm.name || dirName,
+      dirName,
+      description: fm.description ?? "",
+      path: file,
+      enabled: fm.enabled !== "false",
+    });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** 技能名不合规的原因；合规返回 null。逗号会把 --skills 拆错，* ? [ ] { } ! 会被当成匹配符号。 */
+export function skillNameProblem(name) {
+  const n = String(name ?? "");
+  if (!n.trim()) return "技能名不能为空";
+  if (n !== n.trim()) return "技能名首尾不能有空格";
+  if (n.length > 64) return "技能名最多 64 个字";
+  if (n.startsWith(".")) return "技能名不能以点开头，omp 会跳过这种目录";
+  if (/[\\/]/.test(n)) return "技能名里不能有 / 或 \\";
+  if (/[,*?[\]{}!]/.test(n)) return "技能名里不能有逗号和 * ? [ ] { } !，omp 会把它们当成匹配符号";
+  if (/[\u0000-\u001f<>:"|]/.test(n)) return "技能名里不能有 < > : \" | 和控制字符，Windows 上没法当目录名";
+  return null;
+}
+
+/**
+ * 白名单怎么传给 omp。null 表示库里全部技能，不传 --skills；
+ * 列表时并上私有技能一起传，并完为空就 --no-skills。
+ */
+export function skillArgs(bot, paths) {
+  if (!Array.isArray(bot?.skills)) return [];
+  const names = [...new Set([...bot.skills, ...listSkills(paths.skillsDir).map((s) => s.name)])].filter(
+    (n) => n && !n.includes(","),
+  );
+  return names.length ? ["--skills", names.join(",")] : ["--no-skills"];
+}
+
+const SKILL_COPY_LIMITS = { files: 500, bytes: 20 * 1024 * 1024 };
+
+/** 把一个技能目录整个复制过去。符号链接不跟；超过上限就停，免得把大目录当技能装。 */
+function copySkillTree(src, dest) {
+  let files = 0;
+  let bytes = 0;
+  const plan = [];
+  const walk = (from, rel) => {
+    for (const ent of readdirSync(from, { withFileTypes: true })) {
+      if (ent.isSymbolicLink()) continue;
+      const a = join(from, ent.name);
+      const r = rel ? join(rel, ent.name) : ent.name;
+      if (ent.isDirectory()) {
+        if (ent.name === ".git" || ent.name === "node_modules") continue;
+        walk(a, r);
+      } else if (ent.isFile()) {
+        files += 1;
+        bytes += statSync(a).size;
+        if (files > SKILL_COPY_LIMITS.files || bytes > SKILL_COPY_LIMITS.bytes) {
+          throw ferr(413, "skill_too_large", `技能目录太大（超过 ${SKILL_COPY_LIMITS.files} 个文件或 20MB），只装技能本身需要的文件`);
+        }
+        plan.push([a, join(dest, r)]);
+      }
+    }
+  };
+  walk(src, "");
+  for (const [a, b] of plan) {
+    mkdirSync(dirname(b), { recursive: true });
+    copyFileSync(a, b, fsConstants.COPYFILE_EXCL);
+  }
+  return files;
 }
 
 const oneLine = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
@@ -518,6 +644,73 @@ export class TeamDir {
   _fail(step, e) {
     this.lastError = { step, error: e?.message ?? String(e), at: Date.now() };
     this.onEvent("team_error", this.lastError);
+  }
+
+  /** 团队里所有技能：共享库一份，每个 bot 的私有技能一份。 */
+  allSkills() {
+    const out = listSkills(join(this.root, "skills")).map((s) => ({ ...s, scope: "library", botId: null }));
+    for (const botId of skillDirNames(join(this.root, "bots"))) {
+      for (const s of listSkills(this.paths(botId).skillsDir)) out.push({ ...s, scope: "bot", botId });
+    }
+    return out;
+  }
+
+  /** 按名字找已装的技能（不分大小写，Windows 上目录名本来就不分）。 */
+  findSkill(name) {
+    const key = String(name).toLowerCase();
+    return this.allSkills().find((s) => s.name.toLowerCase() === key || s.dirName.toLowerCase() === key) ?? null;
+  }
+
+  /**
+   * 装一个技能。来源是本机的技能目录（或其中的 SKILL.md），或直接给 SKILL.md 文本。
+   * 库里和任何 bot 的私有技能都不许重名。
+   * @param {{target:"library"|"bot", botId?:string, path?:string, content?:string, describe?:(hit:object)=>string}} input
+   * @returns {{name:string, target:string, botId:string|null, dir:string, files:number}}
+   */
+  installSkill({ target, botId = null, path, content, describe } = {}) {
+    if (this.readonly) throw ferr(409, "team_readonly", "另一个 omp-bot 正在使用这份数据，这里只能看不能装");
+    if (target !== "library" && target !== "bot") throw ferr(400, "skill_target_invalid", "target 只能是 library（共享库）或 bot（只给这个 bot）");
+    if (target === "bot" && !botId) throw ferr(400, "skill_target_invalid", "只给一个 bot 装时要指明是哪个 bot");
+    let text;
+    let srcDir = null;
+    if (typeof content === "string" && content.trim()) {
+      text = content;
+    } else if (typeof path === "string" && path.trim()) {
+      const abs = resolve(path.trim());
+      let st;
+      try {
+        st = statSync(abs);
+      } catch {
+        throw ferr(400, "skill_source_missing", `找不到 ${abs}`);
+      }
+      srcDir = st.isDirectory() ? abs : basename(abs) === "SKILL.md" ? dirname(abs) : null;
+      if (!srcDir) throw ferr(400, "skill_source_invalid", "要给技能目录，或者目录里的 SKILL.md");
+      try {
+        text = readFileSync(join(srcDir, "SKILL.md"), "utf8");
+      } catch {
+        throw ferr(400, "skill_source_invalid", `${srcDir} 里没有 SKILL.md`);
+      }
+    } else {
+      throw ferr(400, "skill_source_missing", "给一个技能目录，或者贴上 SKILL.md 的内容");
+    }
+    const fm = parseSkillFrontmatter(text);
+    const name = fm.name || (srcDir ? basename(srcDir) : "");
+    const problem = skillNameProblem(name);
+    if (problem) throw ferr(400, "skill_name_invalid", fm.name || srcDir ? problem : "SKILL.md 开头的 frontmatter 要写 name");
+    if (!fm.description) throw ferr(400, "skill_description_missing", "SKILL.md 开头的 frontmatter 要写 description，omp 靠它决定什么时候用这个技能");
+    const hit = this.findSkill(name);
+    if (hit) {
+      const where = describe ? describe(hit) : hit.scope === "library" ? "共享库里" : `${hit.botId} 的私有技能里`;
+      throw ferr(409, "skill_name_taken", `${where}已经有叫「${hit.name}」的技能了。库里和每个 bot 的私有技能不能重名，换个名字再装。`, { name: hit.name, scope: hit.scope, botId: hit.botId });
+    }
+    const dest = target === "library" ? join(this.root, "skills", name) : join(this.paths(botId).skillsDir, name);
+    let files = 1;
+    if (srcDir) files = copySkillTree(srcDir, dest);
+    else {
+      mkdirSync(dest, { recursive: true });
+      writeFileSync(join(dest, "SKILL.md"), text, { encoding: "utf8", flag: "wx" });
+    }
+    return { name, target, botId: target === "bot" ? botId : null, dir: dest, files };
   }
 
   /**

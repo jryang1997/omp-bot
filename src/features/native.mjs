@@ -13,7 +13,7 @@ import { memoryPrereqStatus } from "../memory-config.mjs";
 import { buildRuntimeEnv } from "../bot.mjs";
 import { COMPUTER_TOOL_NAMES } from "./computers.mjs";
 import { computerIdFor, permissionOf } from "../domain.mjs";
-import { teamPaths } from "../team.mjs";
+import { listSkills, parseSkillFrontmatter, teamPaths } from "../team.mjs";
 
 /**
  * 记忆路径必须在 Bot 私有目录内，且链路上不能有符号链接/junction。
@@ -197,19 +197,8 @@ export function validateMcpServer(name, cfg) {
   return { ...cfg, type };
 }
 
-/** 极简 frontmatter 读取（只取 name/description/enabled，不引依赖）。 */
-export function parseSkillFrontmatter(text) {
-  const out = {};
-  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text ?? "");
-  if (!m) return out;
-  for (const line of m[1].split(/\r?\n/)) {
-    const kv = /^([A-Za-z][\w-]*)\s*:\s*(.*)$/.exec(line.trim());
-    if (!kv) continue;
-    const [, k, v] = kv;
-    out[k] = v.replace(/^["']|["']$/g, "").trim();
-  }
-  return out;
-}
+/** frontmatter 读取放在团队目录模块里，这里转出去给老调用方用。 */
+export { parseSkillFrontmatter };
 
 export class NativeFeatures {
   /** @param {{orch:object, home:string, bin?:string}} deps */
@@ -415,34 +404,17 @@ export class NativeFeatures {
     };
   }
 
-  // ---------------- Skills（原生发现 + 过滤） ----------------
+  // ---------------- Skills（共享库 + 私有技能 + 每 bot 白名单） ----------------
 
-  /** Bot 私有项目里的原生 skill 目录（team/bots/<id>/.omp/skills/<name>/SKILL.md）。 */
+  /** Bot 的私有技能（team/bots/<id>/.omp/skills/<name>/SKILL.md），总是加载。 */
   localSkills(botId, scope = "private") {
-    const { cwd } = this.paths(botId, scope);
-    const root = join(cwd, ".omp", "skills");
-    if (!existsSync(root)) return [];
-    const out = [];
-    let entries = [];
-    try {
-      entries = readdirSync(root, { withFileTypes: true });
-    } catch {
-      return [];
-    }
-    for (const ent of entries) {
-      if (!ent.isDirectory()) continue;
-      const file = join(root, ent.name, "SKILL.md");
-      if (!existsSync(file)) continue;
-      const fm = parseSkillFrontmatter(readText(file, 20_000) ?? "");
-      out.push({
-        name: fm.name || ent.name,
-        description: fm.description ?? "",
-        source: "bot-project",
-        path: file,
-        enabled: fm.enabled !== "false",
-      });
-    }
-    return out.sort((a, b) => a.name.localeCompare(b.name));
+    const { skillsDir } = this.paths(botId, scope);
+    return listSkills(skillsDir).map((s) => ({ ...s, source: "bot-project" }));
+  }
+
+  /** 共享库（team/skills/<name>/SKILL.md），按 bot.skills 白名单加载。 */
+  librarySkills() {
+    return listSkills(join(teamPaths(this.home, "_").teamRoot, "skills")).map((s) => ({ ...s, source: "team-library" }));
   }
 
   /** 原生过滤 glob（与 --skills 的语义一致；这里只做匹配展示，不复制注册表）。 */
@@ -456,24 +428,37 @@ export class NativeFeatures {
     });
   }
 
+  /**
+   * 技能状态。filter 为 null 表示库里全部；为列表时只加载列表里的库技能。私有技能总是加载。
+   * 共享库里没写 description 的技能 omp 不加载，这里如实标出来。
+   */
   async skillsStatus(botId, scope = "private", commands = null) {
     const bot = this.#requireBot(botId);
-    const mine = this.localSkills(botId, scope);
+    const mine = this.localSkills(botId, scope).map((s) => ({ ...s, selected: true, loadable: true, always: true }));
     const filter = Array.isArray(bot.skills) ? bot.skills : null;
+    const library = this.librarySkills().map((s) => {
+      const selected = filter === null || (filter.length > 0 && NativeFeatures.matchFilter(filter, s.name));
+      return { ...s, selected, loadable: Boolean(s.description) };
+    });
     const skillCommands = Array.isArray(commands)
       ? commands.filter((c) => typeof c === "string" && c.includes("skill"))
       : null;
+    const effective = [...library.filter((s) => s.selected && s.loadable), ...mine].map((s) => s.name);
     return {
-      nativeSource: "get_available_commands + Bot 私有项目 skill 目录",
+      nativeSource: "team/skills 共享库 + Bot 私有 .omp/skills + get_available_commands",
       commands: skillCommands,
       filter,
-      discovered: mine.map((s) => ({ ...s, selected: NativeFeatures.matchFilter(filter, s.name) })),
-      effective: mine.filter((s) => NativeFeatures.matchFilter(filter, s.name)).map((s) => s.name),
-      note: "不复制 skill registry；真实装载仍由 OMP 原生 --skills / 发现流程完成。",
+      library,
+      private: mine,
+      discovered: [...library, ...mine],
+      effective: [...new Set(effective)].sort((a, b) => a.localeCompare(b)),
+      libraryDir: join(teamPaths(this.home, botId).teamRoot, "skills"),
+      privateDir: this.paths(botId, scope).skillsDir,
+      note: "共享库按白名单加载，私有技能总是加载；真实装载由 OMP 原生 skills.customDirectories 与 --skills 完成。",
     };
   }
 
-  /** 更新 Bot 的 skill 过滤（写花名册字段，由 CoreOwner 的策略签名触发 runtime 重建）。 */
+  /** 更新 Bot 的库技能白名单（写花名册字段，由 CoreOwner 的策略签名触发 runtime 重建）。 */
   putSkills(botId, body = {}) {
     this.#requireBot(botId);
     const raw = body?.skills;
@@ -483,6 +468,13 @@ export class NativeFeatures {
     const next = raw === null || raw === undefined ? null : raw.map((s) => String(s).trim()).filter(Boolean);
     const updated = this.orch.updateBot(botId, { skills: next });
     return { botId: updated?.id ?? botId, filter: updated?.skills ?? next, restartRequired: true };
+  }
+
+  /** 装技能：target=library 进共享库，target=bot 只给这个 bot。重名直接拒绝。 */
+  installSkill(botId, body = {}) {
+    this.#requireBot(botId);
+    if (typeof this.orch.installSkill !== "function") throw ferr(501, "skill_install_unavailable", "当前编排器不支持装技能");
+    return this.orch.installSkill({ ...body, botId });
   }
 
   // ---------------- Memory（原生 local 后端，只管理 scoped 文件） ----------------

@@ -1,0 +1,52 @@
+{
+  "omp": "omp/18.10.3",
+  "at": "2026-10-16T02:09:16.959Z",
+  "checks": {
+    "nullSeesWholeLibrary": true,
+    "whitelistPlusPrivate": true,
+    "newLibrarySkillNextTurn": true,
+    "installerWhitelistGrows": true,
+    "allCompleted": true
+  },
+  "turns": {
+    "all1": {
+      "state": "completed",
+      "skills": [
+        "周报",
+        "画图"
+      ]
+    },
+    "picky": {
+      "state": "completed",
+      "skills": [
+        "周报",
+        "私房菜"
+      ]
+    },
+    "all2": {
+      "state": "completed",
+      "skills": [
+        "周报",
+        "画图",
+        "天气"
+      ]
+    },
+    "picky2": {
+      "state": "completed",
+      "skills": [
+        "周报",
+        "私房菜",
+        "天气"
+      ]
+    }
+  },
+  "overlay": [
+    "  customDirectories:",
+    "    - \"<home>/team/skills\""
+  ],
+  "gitLog": [
+    "技能：装进共享库 天气",
+    "建立团队目录：.gitignore、AGENTS.md；记下旧数据已检查；身份：新建 全都要；身份：新建 挑着用；技能：装进共享库 周报；技能：装进共享库 画图；技能：给 挑着用 装上 私房菜"
+  ],
+  "pass": true
+}
