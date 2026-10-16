@@ -84,7 +84,7 @@ bot 继续住在 Windows 本机，所有 bot 共用一台 Linux 共享电脑，�
 - 群头像用成员的吉祥物拼，开会或有未读时座位一起动。
 - 详情页新增"形象"折叠区：预览可以拖动、滚轮或方向键调焦点；选身体、颜色、表情；上传或去掉图片，选裁切和缩放；有"撤销改动"和"保存形象"。用图片时身体和表情收起。主助手只显示一句说明。
 - `scripts/build-mascot.mjs`（`OMS_DIR=<上游检出目录> npm run build:mascot`）从上游固定提交 `330b098` 生成 `web/vendor/mascot/omp-mascot.js`，同时写 `NOTICE`、复制上游 `LICENSE`。上游检出不在这个提交、或者要改写的片段找不到，脚本就停下。生成结果可复现。新增开发依赖 `esbuild`，只在重新生成时用，运行时不需要。
-- 吉祥物形象是 Supamaus Software Private Limited 的商标，Apache-2.0 不授予商标权。界面里不出现上游产品名，吉祥物不当 omp-bot 的图标。发布前要等上游对商标问题的回复。
+- 吉祥物形象是 Supamaus Software Private Limited 的商标，Apache-2.0 不授予商标权。界面里不出现上游产品名，吉祥物不当 omp-bot 的图标。不再去问上游：下一步自己画身体和表情，换掉上游的形象，渲染代码保留。换完之前不正式发布。
 - 证据：`.scratch/team-rebuild/proof/avatar/`，截图脚本 34 项全过，含各状态、编辑器、图片裁切、详情页、主助手、群头像和深色模式。
 
 ### 安全
