@@ -2913,6 +2913,8 @@ export class Orchestrator {
       text,
       attachmentIds: Array.isArray(run.attachmentIds) ? run.attachmentIds : [],
       source: "resume",
+      // 原来的额度跟着走；已花的部分按 bot 的已花费再扣一遍，续跑只会更紧不会更松。
+      ...(run.budget ? { budget: run.budget } : {}),
       ...(run.taskId ? { taskId: run.taskId } : {}),
     });
     this._patchRun(run.id, { resumedBy: next.id });

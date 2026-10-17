@@ -12,12 +12,12 @@ async function test(name, fn) {
 }
 
 /** 起一个挂住的 Run，然后模拟进程崩溃重启。返回新团队和那个 Run 的 id。 */
-async function interruptedRun(text = "整理本周的 issue") {
+async function interruptedRun(text = "整理本周的 issue", budget = null) {
   const t = newTeam();
   const bot = t.orch.addBot({ name: "Worker" });
   const fake = await t.orch.runtimeFor(bot.id, "private");
   fake.queue = [{ kind: "hang" }];
-  const run = t.orch.startRun({ botId: bot.id, text });
+  const run = t.orch.startRun({ botId: bot.id, text, ...(budget ? { budget } : {}) });
   await waitFor(() => fake.busy, { label: "在跑" });
   crash(t);
   const t2 = newTeam({ home: t.home });
@@ -39,6 +39,16 @@ await test("中断的 Run 续一次：新 Run 带原要求和核对提示，两�
     const prompt = t2.fake(bot.id).calls.at(-1).text;
     assert.match(prompt, /做完的不要重做/);
     assert.match(prompt, /整理本周的 issue/);
+  } finally { await t2.cleanup(); }
+});
+
+await test("续跑不丢原来的额度：调用方给的 token 和时间上限照样管着新 Run", async () => {
+  const { t2, runId } = await interruptedRun("跑个大活", { maxTokens: 300, maxTimeMs: 60_000 });
+  try {
+    const out = t2.orch.resumeRun(runId);
+    assert.ok(out.run.budget?.maxTokens > 0 && out.run.budget.maxTokens <= 300, JSON.stringify(out.run.budget));
+    assert.equal(out.run.budget.maxTimeMs, 60_000);
+    await t2.orch.waitRun(out.run.id);
   } finally { await t2.cleanup(); }
 });
 
