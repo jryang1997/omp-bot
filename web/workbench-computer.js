@@ -13,6 +13,8 @@ const STATE_LABELS = {
 const HOLDER_LABELS = { agent: "助手在用", human: "你在操作" };
 
 const POLL_MS = 3000;
+/** 主人接管时桌面画面每秒刷一次，平时跟状态一起 3 秒一次。 */
+const TAKEOVER_FRAME_MS = 1000;
 const MOVE_MIN_MS = 150;
 const MAX_QUEUED_INPUTS = 8;
 const SCROLL_MAX = 1200;
@@ -456,6 +458,9 @@ export function createComputerView(bot, deps = {}) {
     stateHint.textContent = stateHintText(state);
 
     errorBox.replaceChildren();
+    if (computer?.help?.reason && !login) {
+      errorBox.append(warnBlock("助手请你帮忙", `${computer.help.reason}。点「接管控制」去处理，做完点「归还」，助手会自己接着做。`));
+    }
     if (computer?.error) errorBox.append(warnBlock("电脑报错", `${computer.error.code}：${computer.error.message}`));
     if (lastError) errorBox.append(warnBlock(lastError.title, lastError.text));
 
@@ -844,6 +849,7 @@ export function createComputerView(bot, deps = {}) {
   }
 
 
+  let ticks = 0;
   function tick() {
     if (disposed) return;
     if (!root.isConnected) {
@@ -851,9 +857,12 @@ export function createComputerView(bot, deps = {}) {
       return;
     }
     if (document.hidden) return;
-    void loadState();
-    void loadOld();
-    if (desktopOpen) void refreshScreen();
+    const slow = ticks++ % Math.round(POLL_MS / TAKEOVER_FRAME_MS) === 0;
+    if (slow) {
+      void loadState();
+      void loadOld();
+    }
+    if (desktopOpen && (slow || computer?.holder === "human")) void refreshScreen();
   }
 
   function dispose() {
@@ -879,7 +888,7 @@ export function createComputerView(bot, deps = {}) {
   }
 
   paint();
-  pollTimer = setInterval(tick, POLL_MS);
+  pollTimer = setInterval(tick, TAKEOVER_FRAME_MS);
   if (login) {
     // 「登录网站」点开就直接打开登录屏，不用再点一次
     void loadState().then(() => {

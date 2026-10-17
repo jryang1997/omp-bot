@@ -96,6 +96,7 @@ export const DEFAULT_PERMISSION = "ask";
 /** 共享电脑的客机工具名（与合同一致；工具 schema 里没有 computerId/endpoint/token/localPath）。 */
 export const COMPUTER_TOOL_NAMES = Object.freeze([
   "computer_screenshot",
+  "computer_request_help",
   "computer_input",
   "computer_shell",
   "computer_files",

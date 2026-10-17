@@ -16,3 +16,6 @@ ts	phase	decision	why	evidence	result
 2026-10-17T01:15:54Z	05	不自动续，改成用户点"接着做"	原设计约定重启后不自动重放；自动开跑会吓到用户	web/workbench-panels.js 1409 行提示文案	adopted
 2026-10-17T01:15:54Z	05	不用 OMP --continue	每 bot 常驻会话，新 Run 已接同一会话	orchestrator startRun	adopted
 2026-10-17T01:15:54Z	05	验证	单测+两个变异+回归	resume 5/5，变异 4/5、3/5，runs/http/workbench/delegation/unit 绿	done
+2026-10-17T01:21:04Z	04	不做原地等待态，归还时开新 Run	接管让代号+1、旧租约永久作废；原地等待要复活旧租约	computers.mjs takeover/acquireRunLease	adopted
+2026-10-17T01:21:04Z	04	不做 VNC 视频流，接管期间前端每秒截图	成本低，够处理验证码和登录	web/workbench-computer.js	adopted
+2026-10-17T01:21:04Z	04	验证	单测+四个变异+回归	computer-help 7/7，变异全抓到；computers/team/features/http/runs/unit/delegation 绿；smoke-gui 55/56 同基线	done

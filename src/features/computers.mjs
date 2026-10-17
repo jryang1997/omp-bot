@@ -281,6 +281,23 @@ const PUBLISH_SCHEMA = {
   additionalProperties: false,
 };
 
+const HELP_SCHEMA = {
+  type: "object",
+  properties: {
+    reason: { type: "string", description: "要主人做什么，一两句话，例如「网页要扫码登录，请扫一下」" },
+  },
+  required: ["reason"],
+  additionalProperties: false,
+};
+
+/** 主人处理完、归还电脑后，发给 bot 的继续消息。 */
+export function helpResumeText(reason) {
+  return (
+    `[继续] 你刚才请主人帮忙：${reason}\n` +
+    "主人已经接管电脑处理过，现在电脑归还给你了。先截图看清现在的状态，确认那一步真的过了，再接着做原来的事。"
+  );
+}
+
 function publicMachine(spec) {
   return {
     cpus: spec.cpus,
@@ -529,6 +546,7 @@ export class Computers {
         human: rec.human ?? null,
         reconcile: rec.reconcile && typeof rec.reconcile === "object" ? rec.reconcile : null,
         lastReconcile: rec.lastReconcile ?? null,
+        help: rec.help && typeof rec.help === "object" && typeof rec.help.reason === "string" ? rec.help : null,
         updatedAt: Number.isFinite(rec.updatedAt) ? rec.updatedAt : Date.now(),
       };
       if (ctrl.holder === "agent") {
@@ -584,6 +602,7 @@ export class Computers {
       os: binding ? "linux" : null,
       state: binding ? "stopped" : "unbound",
       holder: binding ? ctrl.holder : null,
+      help: binding && ctrl.help ? { reason: ctrl.help.reason, runId: ctrl.help.runId ?? null, at: ctrl.help.at ?? null } : null,
       generation: ctrl.generation,
       persistent: !!binding,
       display: null,
@@ -749,6 +768,11 @@ export class Computers {
         throw backendErr(e, { code: "computer_stop_failed", status: 503 });
       }
       this.#clearReconcile(cid, bot.id, "computer-stopped");
+      if (ctrl.help) {
+        // 关机等于放弃这次求助：不再自动叫 bot 回来。
+        ctrl.help = null;
+        this.#persist(ctrl);
+      }
       this.orch.emit?.("computer_stopped", { botId: bot.id, computerId: cid });
       return this.status(bot.id);
     } finally {
@@ -823,6 +847,7 @@ export class Computers {
     this.#requireBound(bot);
     const cid = computerIdFor(bot.id);
     const endTransition = this.#beginTransition(cid, "release");
+    let help = null;
     try {
       const ctrl = this.#control(cid, bot.id);
       if (ctrl.holder !== "human") throw ferr(409, "not_taken_over", "该电脑当前不在人工接管中");
@@ -863,9 +888,58 @@ export class Computers {
         generation: ctrl.generation,
         drained,
       });
-      return this.status(bot.id);
+      help = ctrl.help ?? null;
+      return await this.status(bot.id);
     } finally {
       endTransition();
+      // 转换结束后才叫 bot：开新 Run 要取电脑租约，转换期间取不到。
+      if (help) this.#resumeAfterHelp(bot, cid, help);
+    }
+  }
+
+  /** bot 求助、主人处理完归还后，自动开一次继续的 Run。每次求助只叫一次。 */
+  #resumeAfterHelp(bot, cid, help) {
+    const ctrl = this.#control(cid, bot.id);
+    if (ctrl.help !== help) return;
+    ctrl.help = null;
+    ctrl.updatedAt = Date.now();
+    this.#persist(ctrl);
+    try {
+      const run = this.orch.startRun?.({ botId: bot.id, text: helpResumeText(help.reason), source: "computer_help" });
+      this.orch.emit?.("computer_help_resumed", { botId: bot.id, computerId: cid, runId: run?.id ?? null, helpRunId: help.runId ?? null });
+    } catch (e) {
+      this.orch.emit?.("computer_help_resume_failed", {
+        botId: bot.id,
+        computerId: cid,
+        helpRunId: help.runId ?? null,
+        error: e?.message ?? String(e),
+      });
+    }
+  }
+
+  /** bot 卡在必须由人做的地方：记下求助，通知主人。只有本回合持有电脑租约的 Run 能求助。 */
+  #requestHelp({ bot, runId, cid, reason }) {
+    try {
+      this.#assertAgentAction({ botId: bot.id, runId });
+      const text = String(reason ?? "").replace(/\s+/g, " ").trim().slice(0, 500);
+      if (!text) throw ferr(400, "invalid_field", "reason 必填：说清要主人做什么");
+      const ctrl = this.#control(cid, bot.id);
+      ctrl.help = { runId, reason: text, at: Date.now() };
+      ctrl.updatedAt = Date.now();
+      this.#persist(ctrl);
+      this.orch.emit?.("computer_help_requested", { botId: bot.id, computerId: cid, runId, reason: text });
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              "已请主人来接管这台电脑。现在别再操作电脑。用一两句话告诉主人要做什么，然后结束这一回合。" +
+              "主人处理完点「归还」后，你会自动收到一条继续的消息。",
+          },
+        ],
+      };
+    } catch (e) {
+      return { content: [{ type: "text", text: `电脑工具 computer_request_help 未完成：${e?.message ?? String(e)}` }], isError: true };
     }
   }
 
@@ -1481,6 +1555,16 @@ export class Computers {
               ],
             };
           }),
+      },
+      {
+        name: "computer_request_help",
+        label: "Computer Request Help",
+        description:
+          "在 Linux 共享电脑里卡在必须由人来做的地方（验证码、扫码或密码登录、二次验证、付款确认）时调用，会请主人来接管这台电脑。" +
+          "调用后别再操作电脑，用一两句话告诉主人要做什么，然后结束本回合。主人处理完点「归还」，你会自动收到一条继续的消息。" +
+          "自己能解决的别调用；不要让主人把密码告诉你。",
+        parameters: HELP_SCHEMA,
+        handler: (args) => this.#requestHelp({ bot, runId: runId(), cid, reason: args?.reason }),
       },
       {
         name: "computer_input",
