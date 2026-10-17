@@ -42,11 +42,15 @@ await test("中断的 Run 续一次：新 Run 带原要求和核对提示，两�
   } finally { await t2.cleanup(); }
 });
 
-await test("续跑不丢原来的额度：调用方给的 token 和时间上限照样管着新 Run", async () => {
+await test("续跑不丢原来的额度：扣掉上一次花的，时间上限照样管着新 Run", async () => {
   const { t2, runId } = await interruptedRun("跑个大活", { maxTokens: 300, maxTimeMs: 60_000 });
   try {
+    // 上一次已经花了 120：续跑只剩 180
+    const real = t2.orch._usageByRun.bind(t2.orch);
+    t2.orch._usageByRun = () => new Map([...real(), [runId, { tokens: 120, cost: 0 }]]);
     const out = t2.orch.resumeRun(runId);
-    assert.ok(out.run.budget?.maxTokens > 0 && out.run.budget.maxTokens <= 300, JSON.stringify(out.run.budget));
+    t2.orch._usageByRun = real;
+    assert.equal(out.run.budget?.maxTokens, 180, JSON.stringify(out.run.budget));
     assert.equal(out.run.budget.maxTimeMs, 60_000);
     await t2.orch.waitRun(out.run.id);
   } finally { await t2.cleanup(); }

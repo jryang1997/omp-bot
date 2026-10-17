@@ -1993,6 +1993,15 @@ export class Orchestrator {
     return runtimeDirs(this.home, botId, scope);
   }
 
+  /** 一个 Run 的额度减去它自己已花的（token、费用；用完记 0，准入时按耗尽拒绝）。 */
+  _leftOf(run) {
+    const used = this._usageByRun().get(run.id) ?? { tokens: 0, cost: 0 };
+    const out = { ...run.budget };
+    if (out.maxTokens !== undefined) out.maxTokens = Math.max(0, out.maxTokens - used.tokens);
+    if (out.maxCostUsd !== undefined) out.maxCostUsd = Math.max(0, out.maxCostUsd - used.cost);
+    return out;
+  }
+
   // ---- 预算与并发（真实额度，不是标签）----
   // 额度 = Bot 预算 ∩ 父 Run 预算 ∩ 本次请求；可派发额度 = 额度 − 真实已花费
   // （来自 Ledger 的原生用量差值，含整棵子 Run 树），因此并行子 Run 不能重复用同一份额度。
@@ -2068,27 +2077,23 @@ export class Orchestrator {
           ? this._spent(parentRunId ? { subtreeOf: parentRunId } : { botId })
           : { tokens: 0, cost: 0 };
       const reserved = reserveKey ? (this._reserved.get(reserveKey) ?? { tokens: 0, cost: 0 }) : { tokens: 0, cost: 0 };
-      if (limits.maxTokens !== undefined) {
-        const left = limits.maxTokens - spent.tokens - reserved.tokens;
-        if (left <= 0) {
-          throw httpErr(
-            409,
-            `预算耗尽：token 额度 ${limits.maxTokens} 已用完（已花 ${spent.tokens}，在飞预留 ${reserved.tokens}）`,
-            "budget_exhausted",
-          );
+      // 用户直接发起的回合：bot 预算是累计上限，扣 bot 已花和在飞预留；调用方给的是这一回合自己的上限，
+      // 不扣别的回合花的。子 Run 的额度整份都从父 Run 子树里扣。
+      const root = !parentRunId && botId;
+      const pool = root ? (this.getBot(botId)?.budget ?? {}) : limits;
+      const own = root ? (requested ?? {}) : {};
+      for (const [key, used, held, unit] of [
+        ["maxTokens", spent.tokens, reserved.tokens, "token"],
+        ["maxCostUsd", spent.cost, reserved.cost, "费用"],
+      ]) {
+        if (limits[key] === undefined) continue;
+        const poolLeft = pool[key] === undefined ? Infinity : pool[key] - used - held;
+        if (poolLeft <= 0) {
+          throw httpErr(409, `预算耗尽：${unit}额度 ${pool[key]} 已用完（已花 ${used}，在飞预留 ${held}）`, "budget_exhausted");
         }
-        budget.maxTokens = left;
-      }
-      if (limits.maxCostUsd !== undefined) {
-        const left = limits.maxCostUsd - spent.cost - reserved.cost;
-        if (left <= 0) {
-          throw httpErr(
-            409,
-            `预算耗尽：费用额度 ${limits.maxCostUsd} 已用完（已花 ${spent.cost}，在飞预留 ${reserved.cost}）`,
-            "budget_exhausted",
-          );
-        }
-        budget.maxCostUsd = left;
+        const left = Math.min(poolLeft, own[key] ?? Infinity);
+        if (!(left > 0)) throw httpErr(409, `预算耗尽：这一回合的${unit}额度为 0`, "budget_exhausted");
+        budget[key] = left;
       }
       if (limits.maxTimeMs !== undefined && !(limits.maxTimeMs > 0)) {
         throw httpErr(409, "预算耗尽：时间额度为 0", "budget_exhausted");
@@ -2914,8 +2919,8 @@ export class Orchestrator {
       text,
       attachmentIds: Array.isArray(run.attachmentIds) ? run.attachmentIds : [],
       source: "resume",
-      // 原来的额度跟着走；已花的部分按 bot 的已花费再扣一遍，续跑只会更紧不会更松。
-      ...(run.budget ? { budget: run.budget } : {}),
+      // 原来的额度跟着走，扣掉上一次已经花掉的。
+      ...(run.budget ? { budget: this._leftOf(run) } : {}),
       ...(run.taskId ? { taskId: run.taskId } : {}),
     });
     this._patchRun(run.id, { resumedBy: next.id });

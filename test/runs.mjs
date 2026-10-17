@@ -546,10 +546,20 @@ await test("预算可派发额度已扣已花：子 Run 拿不到父 Run 用过�
     assert.equal(first.budget.maxTokens, 100);
     await t.orch.waitRun(first.id);
 
-    // 已花 15（夹具用量）→ 第二次只剩 85
+    // bot 累计 1000 已花 15（夹具用量）：这一回合自己的 100 不受别的回合影响
     const second = t.orch.startRun({ botId: bot.id, text: "第二次", budget: { maxTokens: 100 } });
-    assert.equal(second.budget.maxTokens, 85);
+    assert.equal(second.budget.maxTokens, 100);
     await t.orch.waitRun(second.id);
+    // bot 累计额度只剩 970，回合上限取小的
+    const third = t.orch.startRun({ botId: bot.id, text: "第三次", budget: { maxTokens: 5000 } });
+    assert.equal(third.budget.maxTokens, 970);
+    await t.orch.waitRun(third.id);
+
+    // bot 不设限：每一回合的上限都是自己的，不被历史花费吃掉
+    const free = t.orch.addBot({ name: "FreeBot" });
+    await t.orch.runtimeFor(free.id, "private");
+    await t.orch.waitRun(t.orch.startRun({ botId: free.id, text: "先花点", budget: { maxTokens: 10 } }).id);
+    assert.equal(t.orch.startRun({ botId: free.id, text: "再来", budget: { maxTokens: 10 } }).budget.maxTokens, 10);
 
     // 零额度直接拒绝
     const zeroBot = t.orch.addBot({ name: "ZeroBudget", budget: { maxTokens: 0 } });
@@ -562,7 +572,7 @@ await test("预算可派发额度已扣已花：子 Run 拿不到父 Run 用过�
     const timed = t.orch.startRun({ botId: bot.id, text: "时间额度", budget: { maxTimeMs: 5000, maxTokens: 1000 } });
     assert.equal(timed.budget.maxTimeMs, 5000);
     assert.equal((await t.orch.waitRun(timed.id)).state, "completed");
-    assert.equal(fake.calls.length, 3);
+    assert.equal(fake.calls.length, 4);
   } finally {
     await t.cleanup();
   }
