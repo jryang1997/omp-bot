@@ -2,3 +2,6 @@ ts	phase	decision	why	evidence	result
 2026-10-17T00:48:27Z	plan	开 gaps 分支，从 master 起	moat 已并进 master，同一 SHA eb492cc；没有 main 分支	list_branches	ok
 2026-10-17T00:48:27Z	plan	审批分级改用 OMP 原生 bash.patterns	零 token、OMP 内按真实参数判、无需宿主分类器	OMP docs approval 设置	adopted
 2026-10-17T00:49:21Z	plan	推送受阻，先本地提交	GitHub 连接的令牌对该仓库只读（create_branch、push_files、create_or_update_file 都 403）；沙箱 git 无凭据	API 403 Resource not accessible by personal access token	blocked: 等授权后按提交顺序补推
+2026-10-17T00:53:46Z	01	只读白名单走 OMP bash.patterns，不写宿主分类器	规则在 OMP 内按真实参数判，零 token，一处真相	bash.ts main@eb74cf84 的 allow 语义	adopted
+2026-10-17T00:53:46Z	01	白名单剔除 git	write 档可改 .git/config，git status 会跑 fsmonitor，绕过 exec 审批	git core.fsmonitor/diff.external 文档行为	discarded git
+2026-10-17T00:53:46Z	01	验证	照抄 OMP 匹配函数做正反例，变异去掉档位判断	test/approval-tiers 5/5，变异 4/5，回归全绿	done

@@ -26,6 +26,18 @@ import { COMPUTER_PROMPT_TOOLS, COMPUTER_TOOL_NAMES, DEFAULT_TASK_CONCURRENCY } 
 export const MEMORY_EMBEDDING_VARIANT = "multilingual";
 
 /**
+ * 「要我同意」档自动放行的只读命令（OMP bash.patterns，`*` 是唯一通配）。
+ * 只收不会再起别的程序的命令；写文件在 write 档本来就自动放行，这里管的是 exec。
+ * 不收 git：write 档能直接改 .git/config 和 .gitattributes，git status/diff 会因此跑
+ * core.fsmonitor、diff.external、textconv 指向的程序，等于绕过 exec 审批。
+ */
+export const READ_ONLY_BASH_PATTERNS = Object.freeze([
+  "pwd", "ls", "ls *", "cat *", "head *", "tail *", "wc *", "stat *", "file *",
+  "du *", "df", "df *", "tree", "tree *", "which *", "whoami", "date", "uname", "uname *",
+  "echo *", "grep *",
+]);
+
+/**
  * `<provider>/<model-id>[:<effort>]` 的显式选择。没有 provider 前缀返回 null（不猜 provider）。
  */
 export function splitSelector(model) {
@@ -200,6 +212,20 @@ export function writePersonaFiles(bot, dir, opts = {}) {
       "# 4a) chat 档：用真实原生设置关掉项目 MCP 来源（SDK 选项实测被忽略，不再使用）。",
       "mcp:",
       "  enableProjectConfig: false",
+    );
+  }
+
+  if (bot.executionMode === "supervised" && (bot.approvalMode ?? "write") === "write") {
+    // 4c) 「要我同意」档：只读命令不弹卡。走 OMP 原生 bash.patterns，规则在 OMP 里按真实参数判：
+    //     allow 只认整条简单命令，带 ; | & > $ ` ( 等控制符或 -c/-e 重解释参数的一律不算命中；
+    //     rm -rf / 这类关键模式照样强制弹卡。命中后按 write 档放行，和改文件同一级。
+    //     刻意不收 rg（--pre 能跑程序）、find（-exec/-delete）、sed（e 命令）、awk（system()）、xargs、env、git。
+    lines.push(
+      "# 4c) 要我同意档：只读命令直接放行（OMP 原生 bash.patterns，零 token）。",
+      "bash:",
+      "  allowCompoundCommands: true",
+      "  patterns:",
+      ...READ_ONLY_BASH_PATTERNS.map((match) => `    - { match: ${JSON.stringify(match)}, approval: allow }`),
     );
   }
 
