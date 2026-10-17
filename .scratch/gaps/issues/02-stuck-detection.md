@@ -20,3 +20,6 @@
 - 已知旧问题，与本改动无关：`test/shutdown.mjs` 崩、`test/channels.mjs` 28/34，在 master eb492cc 上一样。
 - skip OMP advisor 当默认哨兵：每次评审花 token；确定性检测零成本。需要时可在 overlay 开 `advisor.enabled`。
 - OMP 没有自带的重复调用检测（在 can1357/oh-my-pi 搜 doom loop、repeated tool call、loop detect 都是 0 条）。
+- 更正：上一条说 OMP 没有自带重复检测，不对。真装 OMP 18.11.3 跑出来两样原生的：同样的 read 结果第 3 次起在结果后面加一句「[You have received this identical output N times…]」；`model.toolCallLoopGuard` 默认开，同参数连续 5 次发 `tool_call_loop_detected` 打断。当时只搜了源码关键词，没跑二进制。
+- 真 omp 测出的 bug：那句提示每次数字不同，指纹含结果，重复 read 永远对不上。修：`stripRepeatNote` 先去掉这句再算指纹。新测试用 18.11.3 的原文，8/8；去掉 strip 的变异 7/8。
+- 原生的只管连续同参，不取消。我们的还管 A、B 交替，第 6 次硬取消。真 omp 交替 read 实测：steer、steer、取消，原因「stuck-loop: 同样的 read 调用重复 6 次…」。

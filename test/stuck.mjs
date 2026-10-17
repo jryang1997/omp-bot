@@ -64,6 +64,15 @@ await test("指纹：键顺序无关，details 里的耗时不影响，isError �
   assert.notEqual(toolFingerprint("t", { a: 1 }, r, false), toolFingerprint("u", { a: 1 }, r, false));
 });
 
+await test("OMP 给重复读加的计数提示不影响指纹（真 omp 18.11.3 的原文）", async () => {
+  const base = "[/data/realtest/proj/x.txt#7E92]\n1:same";
+  const note = (n) => `${base}\n\n[You have received this identical output ${n} times. Re-reading '/data/realtest/proj/x.txt' will not change it \u2014 use a narrower selector (path:A-B), or proceed with the edit.]`;
+  const fp = (text) => toolFingerprint("read", { path: "x.txt" }, { content: [{ type: "text", text }] }, false);
+  assert.equal(fp(note(3)), fp(base));
+  assert.equal(fp(note(4)), fp(note(5)));
+  assert.notEqual(fp(`${base}\n2:other`), fp(base));
+});
+
 await test("编排器：重复 3 次插一句换策略，Run 还在跑", async () => {
   const t = newTeam();
   try {

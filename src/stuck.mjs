@@ -15,6 +15,17 @@ function stable(value) {
   return `{${Object.keys(value).sort().map((k) => `${JSON.stringify(k)}:${stable(value[k])}`).join(",")}}`;
 }
 
+// OMP 18.11 起，同一文件读到第 3 次一样的内容会在结果末尾加一句计数提示（"[You have received this
+// identical output N times...]"）。计数每次都变，不去掉的话真重复永远对不上指纹。真 omp 上测出来的。
+const OMP_REPEAT_NOTE = /\n*\[You have received this identical output \d+ times[^\]]*\]\s*$/;
+
+function stripRepeatNote(content) {
+  if (!Array.isArray(content)) return content;
+  return content.map((part) =>
+    part && part.type === "text" && typeof part.text === "string" ? { ...part, text: part.text.replace(OMP_REPEAT_NOTE, "") } : part,
+  );
+}
+
 export function toolFingerprint(toolName, args, result, isError) {
   const h = createHash("sha256");
   h.update(String(toolName ?? ""));
@@ -22,7 +33,7 @@ export function toolFingerprint(toolName, args, result, isError) {
   h.update(stable(args));
   h.update("\0");
   // 只取模型看到的 content；details 里常有耗时、时间戳，会让真重复看起来不一样。
-  h.update(stable(result && typeof result === "object" && "content" in result ? result.content : result));
+  h.update(stable(result && typeof result === "object" && "content" in result ? stripRepeatNote(result.content) : result));
   h.update(isError ? "\0E" : "\0");
   return h.digest("hex").slice(0, 32);
 }
