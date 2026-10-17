@@ -2,89 +2,25 @@
 // 模型换成 test/real/mock-llm.mjs 的脚本模型，用独立的 PI_CODING_AGENT_DIR，不碰用户自己的 omp 配置。
 // 没装 omp 就 SKIP。REAL_SLOW=1 时多跑计划任务检查（要等约 2.5 分钟，最短间隔是 60 秒）。
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { appendFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { startMockLlm, mockModelsYml } from "./real/mock-llm.mjs";
-import { readServerDescriptor } from "../src/server.mjs";
+import { world, tester, ompVersion as getOmpVersion, DONE, sleep, toolEnds, textOf, toolText } from "./real/harness.mjs";
 import { parseNativeFrame, planFromTool } from "../web/workbench-native.js";
 
-const REPO = fileURLToPath(new URL("..", import.meta.url));
-try { execFileSync("omp", ["--version"], { stdio: "ignore" }); } catch { console.log("SKIP 没装 omp"); process.exit(0); }
-const ompVersion = execFileSync("omp", ["--version"], { encoding: "utf8" }).trim();
-
-const root = mkdtempSync(join(homedir(), ".ompbot-real-")); // 不放系统临时目录：那里是写文件边界的放行区
-const home = join(root, "home");
-const agentDir = join(root, "agent");
-const proj = join(root, "proj");
-const outside = join(root, "outside");
-for (const d of [agentDir, proj, outside]) mkdirSync(d, { recursive: true });
+const ompVersion = getOmpVersion();
+if (!ompVersion) { console.log("SKIP 没装 omp"); process.exit(0); }
 const llm = await startMockLlm();
-writeFileSync(join(agentDir, "models.yml"), mockModelsYml(llm.port));
-const env = { ...process.env, OMPBOT_HOME: home, PI_CODING_AGENT_DIR: agentDir, NODE_NO_WARNINGS: "1" };
-const cli = (...args) => execFileSync(process.execPath, ["ompbot.mjs", ...args], { cwd: REPO, env, encoding: "utf8" });
-
-const ada = /\((bot_[^)]+)\)/.exec(cli("bots", "add", "Ada", "--role", "测试", "--main", "--model", "mock/scripted"))[1];
-cli("settings", "set", "Ada", "--permission", "ask", "--workspace", proj);
-cli("bots", "add", "Bo", "--role", "便宜跑腿", "--model", "mock/scripted");
-
-let server = null;
-let desc = null;
-async function startServer() {
-  server = spawn(process.execPath, ["ompbot.mjs", "serve", "--no-open", "--port", "0"], { cwd: REPO, env, detached: true, stdio: "ignore" });
-  for (let i = 0; i < 100 && !desc; i++) { await sleep(200); desc = await readServerDescriptor(home); }
-  assert.ok(desc, "服务没起来");
-}
-function killServer() {
-  try { process.kill(-server.pid, "SIGKILL"); } catch {}
-  desc = null;
-}
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-async function api(method, path, body) {
-  const r = await fetch(desc.url + path, { method, headers: { Authorization: `Bearer ${desc.token}`, "content-type": "application/json", origin: desc.url }, body: body ? JSON.stringify(body) : undefined });
-  const t = await r.text();
-  if (!r.ok) throw Object.assign(new Error(`${method} ${path} ${r.status} ${t.slice(0, 300)}`), { status: r.status });
-  return JSON.parse(t);
-}
-const DONE = new Set(["completed", "failed", "cancelled", "interrupted", "timed_out"]);
-const getRun = async (id) => (await api("GET", `/api/runs/${id}`)).run;
-const events = async (id) => (await api("GET", `/api/events/history?runId=${id}&limit=5000`)).events;
-/** 跑一次，碰到审批卡就交给 answer(card) 决定回什么。 */
-async function run(text, answer = () => null) {
-  const { run: r } = await api("POST", "/api/runs", { botId: ada, text });
-  const cards = [];
-  for (let i = 0; i < 400; i++) {
-    for (const a of (await api("GET", "/api/approvals")).approvals) {
-      if (a.runId !== r.id || cards.some((c) => c.id === a.id)) continue;
-      cards.push(a);
-      const resp = answer(a);
-      if (resp) await api("POST", `/api/approvals/${a.id}/respond`, resp);
-    }
-    const now = await getRun(r.id);
-    if (DONE.has(now.state)) return { run: now, cards, events: await events(r.id) };
-    await sleep(250);
-  }
-  await api("POST", `/api/runs/${r.id}/cancel`, {}).catch(() => {}); // 别让后面的用例撞上 target_busy
-  throw new Error(`run ${r.id} 没结束`);
-}
+const w = await world({ modelsYml: mockModelsYml(llm.port), model: "mock/scripted" });
+const { home, proj, outside, ada, api, run, getRun, startServer } = w;
+const killServer = w.killServer;
 const call = (name, args) => `[[tool:${name} ${JSON.stringify(args)}]] `;
-const toolEnds = (evs, name) => evs.filter((e) => e.event?.type === "tool_execution_end" && (!name || e.event.toolName === name));
-const textOf = (c) => (typeof c === "string" ? c : Array.isArray(c) ? c.map((p) => p?.text ?? "").join("") : "");
-const toolText = (e) => (e.event.result?.content ?? []).map((p) => p.text ?? "").join("");
-
-let passed = 0;
-let failed = 0;
-async function test(name, fn) {
-  if (process.env.REAL_ONLY && !name.includes(process.env.REAL_ONLY)) return;
-  try { await fn(); passed++; console.log(`PASS  ${name}`); }
-  catch (e) { failed++; console.log(`FAIL  ${name}\n      ${e?.stack ?? e}`); }
-}
+const t = tester();
+const test = t.test;
 
 try {
   await startServer();
-  console.log(`omp ${ompVersion}，服务 ${desc.url}`);
+  console.log(`omp ${ompVersion}，服务 ${w.desc.url}`);
 
   await test("01+09 要我同意档：只读命令和目录内写入不弹卡；目录外写入弹卡，拒绝就不写，同意才写；rm 照样弹卡", async () => {
     const out1 = join(outside, "no.txt");
@@ -110,7 +46,7 @@ try {
     assert.deepEqual(r.cards, [], "硬拦不弹卡");
     for (const name of ["bash", "read"]) assert.match(toolText(toolEnds(r.events, name).at(-1)), /没执行。.*任何档位都不读不写/s, name);
     const seen = JSON.stringify(llm.requests.slice(-3).map((q) => q.messages));
-    assert.ok(!seen.includes(desc.token), "服务 token 没进模型上下文");
+    assert.ok(!seen.includes(w.desc.token), "服务 token 没进模型上下文");
   });
 
   await test("密钥硬拦管到 OMP 原生子任务：子代理 read ~/.ssh 也被拦", async () => {
@@ -198,9 +134,8 @@ try {
     });
   }
 } finally {
-  if (server) killServer();
+  w.close();
   await llm.close();
-  rmSync(root, { recursive: true, force: true });
 }
-console.log(`\n${passed}/${passed + failed} ${failed ? "FAIL" : "PASS"}（omp ${ompVersion}）`);
-process.exit(failed ? 1 : 0);
+console.log(`\n${t.passed}/${t.passed + t.failed} ${t.failed ? "FAIL" : "PASS"}（omp ${ompVersion}）`);
+process.exit(t.failed ? 1 : 0);
