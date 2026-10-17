@@ -38,7 +38,7 @@ await test("各种写法都抠得出目标路径，正文行不算", () => {
   const sloppy = "*** edit file: a.ts all\n*** Find\nx\n*** Replace\ny\n*** Edit File:\n*** Find\nz\n*** Replace\n";
   assert.deepEqual(writeTargets("edit", { input: sloppy }).paths, ["a.ts"]);
   assert.deepEqual(writeTargets("ast_edit", { paths: ["src/**/*.ts", "/etc/*.conf"] }).paths, ["src/", "/etc/"]);
-  assert.deepEqual(writeTargets("ast_edit", {}), { paths: [], unknown: false });
+  assert.deepEqual(writeTargets("ast_edit", {}), { paths: ["."], unknown: false });
   assert.equal(writeTargets("edit", { input: "PUT 3.=3:\n+x\n" }).unknown, true);
   assert.equal(writeTargets("write", { content: "x" }).unknown, true);
 });

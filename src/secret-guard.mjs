@@ -29,6 +29,10 @@ const RECURSIVE_READERS = new Set(["grep", "egrep", "fgrep", "rg", "ag", "ack", 
 const RECURSIVE_TOOLS = new Set(["grep", "ast_grep"]);
 const GLOB = /[*?[{]/;
 const TOKEN_SPLIT = /[\s"'`;|&<>()=,]+/;
+/** 不带路径参数时默认搜 cwd 的递归命令：`grep -rn token`、`rg token`。cp/tar 不给路径什么也不做。 */
+const DEFAULT_CWD_SEARCH = /(?:^|[\s;|&(])(?:rg|ag|ack|(?:e|f)?grep\s+(?:[^;|&]*\s)?(?:-[a-zA-Z]*[rR][a-zA-Z]*|--recursive|--dereference-recursive))(?=\s|$)/;
+/** omp-bot 数据目录里整棵都是凭据的子目录：电脑的 token、control.key、seats.json、文件共享的 SSH 私钥。 */
+const OMPBOT_SECRET_DIRS = ["computers"];
 
 /**
  * 启动时算一次要保护的路径。
@@ -39,6 +43,7 @@ export function secretPaths(where = {}) {
   const home = where.home ?? homedir();
   const paths = HOME_SECRETS.map((p) => join(home, p));
   for (const d of where.agentDirs ?? []) if (typeof d === "string" && d) paths.push(d);
+  if (where.ompbotHome) for (const d of OMPBOT_SECRET_DIRS) paths.push(join(where.ompbotHome, d));
   return {
     paths: [...new Set(paths.map((p) => realish(resolve(p))))],
     ompbotHome: where.ompbotHome ? realish(resolve(where.ompbotHome)) : null,
@@ -81,7 +86,7 @@ function hits(raw, ctx, ancestors) {
   if (g >= 0) {
     // 通配：取到第一个通配符所在段之前的目录，剩下的半截名字当前缀比。
     const head = abs.slice(0, g);
-    const cut = head.lastIndexOf("/");
+    const cut = Math.max(head.lastIndexOf("/"), head.lastIndexOf("\\"));
     const dir = realish(resolve(head.slice(0, cut + 1) || "/"));
     const partial = head.slice(cut + 1);
     const prefix = dir.endsWith(sep) ? dir + partial : dir + sep + partial;
@@ -112,6 +117,18 @@ function strings(value, out = []) {
   return out;
 }
 
+/**
+ * 按分隔符拆开会把带空格的路径拆碎（/home/John Doe/.netrc）。
+ * 别的工具的参数整串就可能是路径；bash 里补上引号里的整段和 `\ ` 转义的整段。
+ */
+function wholePaths(s, bash) {
+  if (!bash) return [s.trim()];
+  const out = [];
+  for (const m of s.matchAll(/"([^"]+)"|'([^']+)'/g)) out.push(m[1] ?? m[2]);
+  if (s.includes("\\ ")) for (const t of s.split(/(?<!\\)\s+/)) if (t.includes("\\ ")) out.push(t.replace(/\\ /g, " "));
+  return out;
+}
+
 /** 这次调用碰到的密钥路径（原样）。空数组就放行。 */
 export function secretHits(toolName, input, opts) {
   if (TEXT_ONLY_TOOLS.has(toolName) || toolName.startsWith("computer")) return [];
@@ -125,9 +142,11 @@ export function secretHits(toolName, input, opts) {
     // 写类工具只看目标路径，正文里写到 ~/.ssh 的文档不算。
     return writeTargets(toolName, input).paths.filter((p) => hits(p, ctx, false));
   }
-  const tokens = strings(input).flatMap((s) => s.split(TOKEN_SPLIT)).filter(Boolean);
-  const ancestors = RECURSIVE_TOOLS.has(toolName) || (toolName === "bash" && tokens.some((t) => RECURSIVE_READERS.has(t)));
-  if (RECURSIVE_TOOLS.has(toolName)) tokens.push("."); // 不给 path 就搜 cwd
+  const bash = toolName === "bash";
+  const tokens = strings(input).flatMap((s) => [...s.split(TOKEN_SPLIT), ...wholePaths(s, bash)]).filter(Boolean);
+  const ancestors = RECURSIVE_TOOLS.has(toolName) || (bash && tokens.some((t) => RECURSIVE_READERS.has(t)));
+  // 不给 path 就搜 cwd
+  if (RECURSIVE_TOOLS.has(toolName) || (bash && strings(input).some((s) => DEFAULT_CWD_SEARCH.test(s)))) tokens.push(".");
   return [...new Set(tokens.filter((t) => hits(t, ctx, ancestors)))];
 }
 

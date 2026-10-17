@@ -96,6 +96,33 @@ await test("全部放手档和一直问档也挂；生成的扩展真的拦", as
   }
 });
 
+await test("带空格的家目录：整串路径和引号里的路径都看", () => {
+  const h = join(sandbox, "John Doe");
+  const o = { cwd: join(h, "proj"), home: h, env: {}, secrets: secretPaths({ home: h, ompbotHome: join(h, ".ompbot") }) };
+  assert.ok(secretHits("read", { path: join(h, ".netrc") }, o).length, "read 带空格路径");
+  assert.ok(secretHits("read", { path: join(h, ".ompbot", "runtime.json") }, o).length, "read 带空格 runtime.json");
+  assert.ok(secretHits("bash", { command: `cat "${join(h, ".netrc")}"` }, o).length, "双引号");
+  assert.ok(secretHits("bash", { command: `cat '${join(h, ".netrc")}'` }, o).length, "单引号");
+  assert.ok(secretHits("bash", { command: `cat ${join(h, ".netrc").replace(/ /g, "\\ ")}` }, o).length, "反斜杠转义");
+  assert.deepEqual(secretHits("bash", { command: `cat "${join(h, "proj", "a b.txt")}"` }, o), []);
+});
+
+await test("电脑和文件共享的凭据在数据目录里一层以下，也拦", () => {
+  for (const rel of ["computers/seats.json", "computers/file-share/host_ed25519", "computers/c1/control.key"]) {
+    assert.ok(secretHits("read", { path: join(ompbotHome, rel) }, opts).length, rel);
+  }
+  blocked("grep -r token ${OMPBOT_HOME}/computers");
+});
+
+await test("不给路径的递归搜索按 cwd 算", () => {
+  const atHome = { ...opts, cwd: home };
+  assert.ok(secretHits("bash", { command: "grep -rn token" }, atHome).length, "grep -rn");
+  assert.ok(secretHits("bash", { command: "rg token" }, atHome).length, "rg");
+  assert.ok(secretHits("bash", { command: "grep -rn token", cwd: home }, opts).length, "bash 的 cwd 参数");
+  assert.deepEqual(secretHits("bash", { command: "grep -n token notes.md" }, atHome), [], "不递归就只看给的文件");
+  assert.deepEqual(secretHits("bash", { command: "grep -rn token" }, { ...opts, cwd: join(home, "proj") }), []);
+});
+
 rmSync(sandbox, { recursive: true, force: true });
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

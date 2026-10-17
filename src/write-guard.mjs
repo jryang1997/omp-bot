@@ -68,11 +68,12 @@ export function writeTargets(toolName, input) {
     return { paths, unknown: false };
   }
   if (toolName === "ast_edit") {
-    // 没给 paths 就是在 cwd 里改，不用拦。
     for (const p of Array.isArray(args.paths) ? args.paths : []) {
       if (typeof p !== "string") return { paths, unknown: true };
       paths.push(globBase(p) || ".");
     }
+    // 没给 paths 就是改整个 cwd：按 "." 交给边界判断，cwd 不在工作区时照样弹卡。
+    if (!paths.length) paths.push(".");
     return { paths, unknown: false };
   }
   if (toolName === "edit") {
