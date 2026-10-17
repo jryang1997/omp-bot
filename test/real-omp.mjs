@@ -79,6 +79,12 @@ try {
     assert.ok(!seen.includes(w.desc.token), "服务 token 没进模型上下文");
   });
 
+  await test("密钥硬拦：引号里的路径、数据目录下的电脑凭据也拦", async () => {
+    const r = await run(call("bash", { command: `cat "${join(home, "computers", "seats.json")}"` }) + call("read", { path: join(home, "computers", "file-share", "host_ed25519") }));
+    assert.deepEqual(r.cards, [], "硬拦不弹卡");
+    for (const name of ["bash", "read"]) assert.match(toolText(toolEnds(r.events, name).at(-1)), /没执行。.*任何档位都不读不写/s, name);
+  });
+
   await test("密钥硬拦管到 OMP 原生子任务：子代理 read ~/.ssh 也被拦", async () => {
     const sub = `SUB-${Date.now()}`;
     await run(call("task", { i: "读钥匙", context: sub, tasks: [{ task: `${sub} ${call("read", { path: "~/.ssh/id_rsa" })}${call("yield", { data: "done" })}`, solutionSpace: "one read" }] }), (a) => (a.method === "confirm" ? { confirmed: true } : { value: "Approve" }));
