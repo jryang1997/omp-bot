@@ -3070,6 +3070,11 @@ export class Orchestrator {
     if (rec.status !== "pending") {
       throw httpErr(409, `审批已处于 ${rec.status}，不能再次应答`, "approval_not_pending");
     }
+    if (Number.isFinite(rec.expiresAt) && Date.now() >= rec.expiresAt) {
+      // 定时器可能被事件循环拖后：到点了就按到期处理，不让迟到的点击把已经算过期的卡批掉。
+      await this._expireApproval(id);
+      throw httpErr(409, "审批已过期，不能再应答", "approval_expired");
+    }
     if (rec.runId) {
       const run = this.getRun(rec.runId);
       if (!run || isTerminalRunState(run.state)) {

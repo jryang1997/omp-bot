@@ -244,6 +244,26 @@ await test("授权类审批到期：按原生 cancel/deny 处理，Run 不因过
   }
 });
 
+await test("到点的审批定时器还没跑：迟到的批准按过期处理，原生收到 cancel", async () => {
+  const t = newTeam({ uiApprovalTtlMs: 60_000 });
+  try {
+    const bot = t.orch.addBot({ name: "LateProbe" });
+    const fake = await t.orch.runtimeFor(bot.id, "private");
+    fake.queue = [
+      { kind: "ui", frame: { type: "extension_ui_request", id: "native_late_1", method: "confirm", title: "允许执行？" } },
+    ];
+    const run = t.orch.startRun({ botId: bot.id, text: "执行" });
+    const approval = await waitFor(() => t.orch.ledger.list("approvals")[0], { label: "审批记录" });
+    t.orch.ledger.put("approvals", { ...t.orch.ledger.get("approvals", approval.id), expiresAt: Date.now() - 1 });
+    await assert.rejects(t.orch.answerUi(approval.id, { confirmed: true }), (e) => e.code === "approval_expired");
+    assert.equal(t.orch.ledger.get("approvals", approval.id).status, "expired");
+    assert.deepEqual(fake.responses, [{ nativeId: "native_late_1", payload: { cancelled: true } }]);
+    assert.equal((await t.orch.waitRun(run.id)).state, "completed");
+  } finally {
+    await t.cleanup();
+  }
+});
+
 // ---- 3. 取消级联 ----
 
 await test("cancelRun：cancelling → 原生 abort → cancelled，随后可再起新 Run", async () => {
