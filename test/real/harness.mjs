@@ -72,11 +72,11 @@ export async function world({ modelsYml, model, cheapModel = model }) {
   return w;
 }
 
-/** REAL_ONLY=片段 只跑名字里带它的用例。 */
+/** REAL_ONLY=片段[,片段] 只跑名字里带其中一个的用例。 */
 export function tester() {
   const s = { passed: 0, failed: 0 };
   s.test = async (name, fn) => {
-    if (process.env.REAL_ONLY && !name.includes(process.env.REAL_ONLY)) return;
+    if (process.env.REAL_ONLY && !process.env.REAL_ONLY.split(",").some((f) => name.includes(f))) return;
     try { await fn(); s.passed++; console.log(`PASS  ${name}`); }
     catch (e) { s.failed++; console.log(`FAIL  ${name}\n      ${e?.stack ?? e}`); }
   };
