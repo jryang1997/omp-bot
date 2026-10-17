@@ -20,7 +20,7 @@
 |---|------|----------|
 | 01 | 审批分级：只读命令自动放行 | 不写宿主分类器。用 OMP 原生 `bash.patterns` + `tools.approval`，由 persona 写进配置覆盖层。零 token，OMP 内部按真实参数判 |
 | 02 | 卡住/死循环检测 | 宿主侧确定性指纹（工具名+参数+结果），连续重复先 steer 换策略，再重复就取消。OMP advisor 当可选项，不默认开（每次评审花 token） |
-| 03 | 事件触发的例行任务 | 复用 routines 的账本和调度，只加 `kind:"event"` 和一个签名 webhook 入口；可选零 LLM 预检脚本 |
+| 03 | 事件触发的例行任务 | 不开 webhook（服务只听回环）。计划加宿主侧检查命令，没变化不叫 bot，零 token |
 | 04 | 电脑求助 | `computer_request_help` 工具 + 等待态 + 通知；接管期间截图加快 |
 | 05 | 中断 Run 的安全续跑 | 没有进行中副作用才续，最多一次，走 OMP `--continue` |
 | 06 | 派活分档 | `delegate_bot` 加 `tier`，映射到 OMP 模型角色 |

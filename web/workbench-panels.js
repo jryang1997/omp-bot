@@ -1783,8 +1783,11 @@ export function createPanels({ client, deps }) {
       const line = el("div", "bt-set-row");
       const copy = el("div", "bt-set-copy");
       copy.append(el("div", null, routine.name || routine.id));
-      copy.append(el("div", "bt-set-hint", `${scheduleText(routine.schedule)}${routine.paused ? " · 已暂停" : ""}${routine.nextRunAt ? ` · 下次 ${fmtWhen(routine.nextRunAt)}` : ""}${routine.missedPolicy === "record" && routine.missedCount ? ` · 错过 ${routine.missedCount} 次` : ""}${routine.lastStatus ? ` · 上次${runStateLabel(routine.lastStatus)}` : ""}`));
+      copy.append(el("div", "bt-set-hint", `${scheduleText(routine.schedule)}${routine.check ? " · 先检查" : ""}${routine.paused ? " · 已暂停" : ""}${routine.nextRunAt ? ` · 下次 ${fmtWhen(routine.nextRunAt)}` : ""}${routine.missedPolicy === "record" && routine.missedCount ? ` · 错过 ${routine.missedCount} 次` : ""}${routine.lastStatus ? ` · 上次${runStateLabel(routine.lastStatus)}` : ""}`));
       if (routine.lastError) copy.append(el("div", "bt-set-hint", `错误：${routine.lastError}`));
+      const CHECK_REASONS = { baseline: "检查：已记下基线", no_change: "检查：没有变化，没叫助手", check_false: "检查：条件不满足，没叫助手" };
+      const lastReason = routine.receipts?.[0]?.reason;
+      if (routine.check && CHECK_REASONS[lastReason]) copy.append(el("div", "bt-set-hint", CHECK_REASONS[lastReason]));
       line.append(copy);
       const actions = el("div", "bt-set-control");
       actions.append(button("btn ghost", routine.paused ? "启用" : "暂停", function () {
@@ -1817,6 +1820,8 @@ export function createPanels({ client, deps }) {
     const interval = Object.assign(el("input", "bt-input"), { type: "number", min: "1", step: "1", placeholder: "至少 1 分钟" });
     const at = Object.assign(el("input", "bt-input"), { type: "datetime-local" });
     const enable = checkbox(false, () => { });
+    const check = Object.assign(el("input", "bt-input"), { placeholder: "可选，如 gh pr list --state open" });
+    const checkMode = select([["changed", "输出变了才跑"], ["exit0", "退出码为 0 才跑"]], "changed");
     const rowOf = (node) => node.closest(".bt-set-row");
     const sync = () => {
       rowOf(time).hidden = kind.value !== "daily";
@@ -1834,6 +1839,8 @@ export function createPanels({ client, deps }) {
       row("时区", null, timezone),
       row("每隔几分钟", null, interval),
       row("执行时刻", "要晚于现在", at),
+      row("先检查", "到点先在本机跑这条命令，不花 token；没变化就不叫助手。第一次只记基线。", check),
+      row("检查规则", null, checkMode),
       row("创建后立即启用", "不勾就先暂停。", enable),
     );
     // 行建好后再同步可见性：隐藏行的查找依赖控件已经挂进对应的行。
@@ -1854,7 +1861,7 @@ export function createPanels({ client, deps }) {
         schedule = { kind: "once", at: atMs };
       }
       if (!name.value.trim() || !text.value.trim() || !target.value) { toast("助手、名称和任务必填", true); return; }
-      return busy(this, api("/api/routines", { method: "POST", body: { botId: target.value, name: name.value.trim(), text: text.value.trim(), schedule, paused: !enable.checked } })
+      return busy(this, api("/api/routines", { method: "POST", body: { botId: target.value, name: name.value.trim(), text: text.value.trim(), schedule, paused: !enable.checked, ...(check.value.trim() ? { check: { command: check.value.trim(), mode: checkMode.value } } : {}) } })
         .then(() => { toast("已创建计划"); deps.rerenderPanel?.(); })
         .catch((error) => toast(`创建失败：${error.message}`, true)), "创建中…");
     }));
