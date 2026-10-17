@@ -25,7 +25,7 @@ import { BotRuntime, runtimeDirs } from "./bot.mjs";
 import { TeamDir, identityFields } from "./team.mjs";
 import { WorkbenchFeatures } from "./features.mjs";
 import { Relay } from "./relay.mjs";
-import { createStuckDetector, stuckSteerText } from "./stuck.mjs";
+import { createStuckDetector, stuckCancelReason, stuckNotice, stuckSteerText } from "./stuck.mjs";
 import {
   genId,
   makeBot,
@@ -183,6 +183,11 @@ function byShutdown(run) {
   return /(^|:)shutdown$/.test(String(run?.error ?? ""));
 }
 
+/** 用户在工作台或配对设备上直接发起的私聊：这种 Run 的往来记进聊天记录。 */
+function isDirectChat(run) {
+  return run?.kind === "chat" && (run.source === "user" || String(run.source ?? "").startsWith("device:"));
+}
+
 /** 交回给父 bot 的那条消息：子结果、子 Run id、原任务，最后提醒验收。 */
 function delegationReturnText(rec, targetName) {
   const r = rec.result ?? {};
@@ -196,7 +201,13 @@ function delegationReturnText(rec, targetName) {
   const list = rec.acceptance ?? [];
   if (list.length) lines.push("验收标准：", ...acceptanceLines(list));
   if (r.reply) lines.push(`结果：\n${String(r.reply).slice(0, 8000)}`);
-  if (r.error) lines.push(`原因：${String(r.error).slice(0, 1000)}`);
+  const stuck = stuckNotice(r.error);
+  if (r.error && !stuck) lines.push(`原因：${String(r.error).slice(0, 1000)}`);
+  if (stuck) {
+    // 原样再派只会让下一个人接着打转。
+    lines.push("它是因为原地打转被停下的：别把同样的活原样再派。先换办法、补上缺的信息，或者自己做；还是做不到，就如实告诉用户卡在哪、需要什么。");
+    return lines.join("\n");
+  }
   lines.push(
     list.length
       ? "请按上面的验收标准逐条核对：没满足的再派或自己补上；已经做完的不要重复派。"
@@ -1149,7 +1160,7 @@ export class Orchestrator {
       );
     } else {
       this._background(
-        this.cancelRun(runId, `stuck-loop: 同样的 ${hit.toolName} 调用重复 ${hit.count} 次，结果没变，已停止`),
+        this.cancelRun(runId, stuckCancelReason(hit.toolName, hit.count)),
       );
     }
   }
@@ -2364,7 +2375,7 @@ export class Orchestrator {
         return await this._finishRun(runId, RUN_STATES.CANCELLED, { error: "启动前已取消" });
       }
       if (run.kind === "room") return await this._driveRoomRun(runId, prepared);
-      const directChat = run.kind === "chat" && (run.source === "user" || run.source?.startsWith("device:"));
+      const directChat = isDirectChat(run);
 
       if (directChat) {
         this.store.appendChat(run.botId, { role: "user", text: run.text, at: Date.now() });
@@ -2698,6 +2709,15 @@ export class Orchestrator {
     }
     if (ctrl) ctrl.finished = true;
     const merged = { ...patch };
+    // 卡住被停：别让用户和父助手对着一个不说话的「已取消」。那句人话当回复，私聊里也记一条。
+    const notice = state === RUN_STATES.CANCELLED && !merged.reply ? stuckNotice(merged.error) : null;
+    if (notice) {
+      merged.reply = notice;
+      if (isDirectChat(current)) {
+        this.store.appendChat(current.botId, { role: "assistant", text: notice, at: Date.now() });
+        this.emit("bot_to_user", { runId, botId: current.botId, text: notice });
+      }
+    }
     if (ctrl?.cancelErrors?.length) {
       merged.error = [merged.error, ...ctrl.cancelErrors].filter(Boolean).join("; ");
     }

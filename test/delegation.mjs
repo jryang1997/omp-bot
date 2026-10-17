@@ -431,6 +431,27 @@ await test("不带验收标准：对方只收到简报原文，交回照旧", as
   }
 });
 
+await test("对方原地打转被停：交回写清别原样再派，不写「再派或自己补上」", async () => {
+  const t = newTeam();
+  try {
+    const { a, b, fa, fb } = await pair(t);
+    const frames = [1, 2, 3, 4, 5, 6].flatMap((i) => [
+      { type: "tool_execution_start", toolCallId: `s${i}`, toolName: "bash", args: { command: "ls nope" } },
+      { type: "tool_execution_end", toolCallId: `s${i}`, toolName: "bash", result: { content: [{ type: "text", text: "No such file" }] }, isError: true },
+    ]);
+    fb.queue = [{ kind: "frames", frames, hang: true }];
+    fa.queue = [{ kind: "tool", tool: "delegate_bot", args: { to: b.name, message: "找文件", acceptance: ["找到 x.txt"] } }];
+    await t.orch.waitRun(t.orch.startRun({ botId: a.id, text: "派活" }).id);
+    const rec = await waitFor(() => dlgs(t.orch).find((d) => d.delivery === "delivered"), { timeoutMs: 8000, label: "已交回" });
+    const wake = await t.orch.waitRun(rec.wakeRunId);
+    assert.match(wake.text, /结果：\n我先停下了：同样的 bash 调用做了 6 次/);
+    assert.match(wake.text, /别把同样的活原样再派/);
+    assert.doesNotMatch(wake.text, /再派或自己补上|原因：stuck-loop/);
+  } finally {
+    await t.cleanup();
+  }
+});
+
 await test("验收标准不合规：当场拒绝，不记派活、不开跑", async () => {
   const t = newTeam();
   try {

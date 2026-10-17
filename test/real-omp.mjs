@@ -90,6 +90,7 @@ try {
     const r = await run((call("read", { path: join(proj, "a.txt") }) + call("read", { path: join(proj, "b.txt") })).repeat(8));
     assert.equal(r.run.state, "cancelled");
     assert.match(r.run.error, /stuck-loop/);
+    assert.match(r.run.reply, /^我先停下了：同样的 read 调用做了 6 次/, "取消后用户看到的是人话");
     assert.deepEqual(r.events.filter((e) => e.type === "run_stuck").map((e) => e.action), ["steer", "steer", "cancel"]);
   });
 

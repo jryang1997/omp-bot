@@ -7,6 +7,22 @@
 import { createHash } from "node:crypto";
 import { STUCK_STEER_AT, STUCK_CANCEL_AT } from "./constants.mjs";
 
+/** 取消原因的机器前缀；后面跟给人看的那句话。 */
+export const STUCK_CODE = "stuck-loop";
+
+// 超时、限流、5xx、断连：等一等可能就好了，同样的报错多几次不一定是打转，阈值翻倍。
+const TRANSIENT = /timed?\s*out|timeout|rate[\s_-]?limit|too many requests|\b429\b|\b50[234]\b|bad gateway|service unavailable|ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|socket hang up|temporarily unavailable/i;
+
+function resultText(result) {
+  const content = result && typeof result === "object" ? result.content : null;
+  if (!Array.isArray(content)) return typeof result === "string" ? result : "";
+  return content.map((p) => (p && typeof p.text === "string" ? p.text : "")).join("\n");
+}
+
+export function isTransientError(result, isError) {
+  return isError === true && TRANSIENT.test(resultText(result));
+}
+
 /** 键排序的 JSON，保证同样的对象得到同样的串。 */
 function stable(value) {
   if (value === undefined) return "null";
@@ -60,11 +76,12 @@ export function createStuckDetector({ steerAt = STUCK_STEER_AT, cancelAt = STUCK
       const fp = toolFingerprint(frame.toolName, args, frame.result, frame.isError === true);
       const count = (counts.get(fp) ?? 0) + 1;
       counts.set(fp, count);
-      if (count >= cancelAt) {
+      const slack = isTransientError(frame.result, frame.isError) ? 2 : 1;
+      if (count >= cancelAt * slack) {
         cancelled = true;
         return { action: "cancel", toolName: frame.toolName ?? null, count };
       }
-      if (count >= steerAt && !steered.has(fp)) {
+      if (count >= steerAt * slack && !steered.has(fp)) {
         steered.add(fp);
         return { action: "steer", toolName: frame.toolName ?? null, count };
       }
@@ -75,4 +92,19 @@ export function createStuckDetector({ steerAt = STUCK_STEER_AT, cancelAt = STUCK
 
 export function stuckSteerText(toolName, count) {
   return `【omp-bot 提示】你已经用同样的参数调用 ${toolName} ${count} 次，结果都没变。不要再重复这一步。换个办法；如果确实做不到，就停下来说明卡在哪、需要谁做什么。`;
+}
+
+/** 停下时给用户（和父助手）看的那句话。 */
+export function stuckStopText(toolName, count) {
+  return `我先停下了：同样的 ${toolName} 调用做了 ${count} 次，结果一直没变，再做下去也不会有进展。可以补充信息、换个说法，或者告诉我换什么办法，我再接着做。`;
+}
+
+export function stuckCancelReason(toolName, count) {
+  return `${STUCK_CODE}: ${stuckStopText(toolName, count)}`;
+}
+
+/** 卡住取消的原因里抠出人话；不是卡住取消返回 null。 */
+export function stuckNotice(error) {
+  const s = typeof error === "string" ? error : "";
+  return s.startsWith(`${STUCK_CODE}: `) ? s.slice(STUCK_CODE.length + 2).split("; ")[0] : null;
 }

@@ -93,7 +93,21 @@ await test("编排器：重复 3 次插一句换策略，Run 还在跑", async (
   }
 });
 
-await test("编排器：重复 6 次取消 Run，错误里写清原因", async () => {
+await test("超时、限流这类报错：阈值翻倍，第 6 次只 steer，第 12 次才 cancel", async () => {
+  for (const text of ["Request timed out after 30s", "HTTP 429 Too Many Requests", "502 Bad Gateway", "read ECONNRESET"]) {
+    const d = createStuckDetector();
+    const hits = [];
+    for (let i = 1; i <= 12; i++) hits.push(...feed(d, call("fetch", { url: "u" }, text, { isError: true })).map((h) => ({ i, action: h.action })));
+    assert.deepEqual(hits, [{ i: 6, action: "steer" }, { i: 12, action: "cancel" }], text);
+  }
+  // 同样的字眼出现在成功结果里不算可恢复报错。
+  const d = createStuckDetector();
+  const hits = [];
+  for (let i = 1; i <= 6; i++) hits.push(...feed(d, call("read", { path: "log" }, "timeout=30")).map((h) => h.action));
+  assert.deepEqual(hits, ["steer", "cancel"]);
+});
+
+await test("编排器：重复 6 次取消 Run，用户收到一句人话，不是沉默的「已取消」", async () => {
   const t = newTeam();
   try {
     const bot = t.orch.addBot({ name: "LoopKill" });
@@ -104,8 +118,32 @@ await test("编排器：重复 6 次取消 Run，错误里写清原因", async (
     // 有界等：检测没接上时这里会挂住，要让它明确失败而不是吊着进程。
     await waitFor(() => t.orch.getRun(run.id).state === "cancelled", { timeoutMs: 5000, label: "Run 被取消" });
     const done = t.orch.getRun(run.id);
-    assert.match(done.error, /stuck-loop: 同样的 bash 调用重复 6 次/);
+    assert.match(done.error, /^stuck-loop: 我先停下了：同样的 bash 调用做了 6 次/);
     assert.ok(fake.abortCalls >= 1, "原生 abort 被调用");
+    assert.match(done.reply, /^我先停下了：同样的 bash 调用做了 6 次，结果一直没变/);
+    assert.doesNotMatch(done.reply, /stuck-loop/);
+    const last = t.orch.store.getChat(bot.id).at(-1);
+    assert.equal(last?.role, "assistant");
+    assert.equal(last?.text, done.reply);
+    assert.ok(t.events.some((e) => e.type === "bot_to_user" && e.runId === run.id && e.text === done.reply));
+  } finally {
+    await t.cleanup();
+  }
+});
+
+await test("编排器：普通取消不冒充回复", async () => {
+  const t = newTeam();
+  try {
+    const bot = t.orch.addBot({ name: "PlainCancel" });
+    const fake = await t.orch.runtimeFor(bot.id, "private");
+    fake.queue = [{ kind: "frames", frames: call("bash", { command: "ls" }, "a"), hang: true }];
+    const run = t.orch.startRun({ botId: bot.id, text: "看看" });
+    await waitFor(() => t.orch.getRun(run.id).state === "running", { label: "跑起来" });
+    await t.orch.cancelRun(run.id, "用户在工作台上点了取消，想换个问法再来");
+    const done = await t.orch.waitRun(run.id);
+    assert.equal(done.state, "cancelled");
+    assert.ok(!done.reply);
+    assert.notEqual(t.orch.store.getChat(bot.id).at(-1)?.role, "assistant");
   } finally {
     await t.cleanup();
   }
