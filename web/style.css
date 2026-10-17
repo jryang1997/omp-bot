@@ -15,7 +15,7 @@ body {
   --bt-card: #fff;
   --bt-ink: #1d1d1f;
   --bt-ink-2: #626570;
-  --bt-ink-3: #747783;
+  --bt-ink-3: #6e717d;
   --bt-line: #e7e8ed;
   --bt-line-2: #d8dae2;
   --bt-hover: #e9ebf1;
@@ -731,4 +731,28 @@ button:focus-visible { outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) {
   #chat-log .is-new { transition: opacity 160ms linear; }
   @starting-style { #chat-log .is-new { transform: none; } }
+}
+
+/* ui 6：暗色和手机收尾 */
+/* 设置里的开关：标题在左、开关在右，不再是一个居中的小方框。 */
+#drawer-body .bt-set-row:has(> .bt-set-control > input[type=checkbox]) { flex-direction: row; align-items: center; justify-content: space-between; }
+#drawer-body .bt-set-row:has(> .bt-set-control > input[type=checkbox]) > .bt-set-control { width: auto; }
+.bt-set-control > input[type=checkbox] {
+  appearance: none; flex: none; width: 40px !important; height: 24px; margin: 0; border-radius: 999px; cursor: pointer;
+  background: var(--bt-line-2) radial-gradient(circle at 12px 50%, #fff 0 9px, transparent 9.5px) no-repeat;
+  background-position: 0 0; transition: background-color 200ms cubic-bezier(.23, 1, .32, 1), background-position 200ms cubic-bezier(.23, 1, .32, 1);
+}
+.bt-set-control > input[type=checkbox]:checked { background-color: var(--bt-accent); background-position: 16px 0; }
+.bt-set-control > input[type=checkbox]:active { transform: scale(.97); }
+.bt-set-control > input[type=checkbox]:disabled { opacity: .5; cursor: default; }
+/* 电脑规格两个下拉框跟其它输入框一个样子，只是矮一点。 */
+.bt-actions:has(> .bt-select) { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.bt-actions > .bt-select { flex: 1 1 110px; width: auto; height: 36px; min-height: 36px; padding: 0 10px; }
+@media (max-width: 600px) {
+  /* 手机上五个页签平分一行，不再被截掉一半。 */
+  .wb-task-bar > .bt-tabs { width: 100%; overflow: visible; }
+  .wb-task-bar .bt-tab { flex: 1 1 auto; justify-content: center; padding: 7px 6px; gap: 4px; white-space: nowrap; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bt-set-control > input[type=checkbox] { transition: none; }
 }

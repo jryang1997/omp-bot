@@ -131,9 +131,9 @@ export function createComputerView(bot, deps = {}) {
 
   // 共享电脑规格：所有座席共用一台虚拟机，改了下次开机生效
   let machine = null;
-  const cpuSelect = el("select");
+  const cpuSelect = el("select", "bt-select");
   cpuSelect.setAttribute("aria-label", "共享电脑 vCPU 个数");
-  const memorySelect = el("select");
+  const memorySelect = el("select", "bt-select");
   memorySelect.setAttribute("aria-label", "共享电脑内存");
   const machineNote = el("div", "bt-note");
   const saveMachineButton = button("btn ghost", "保存规格", () => void saveMachine());
