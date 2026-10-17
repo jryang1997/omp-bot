@@ -94,8 +94,8 @@ button:disabled { cursor: default; }
 #main { position: relative; flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bt-main); }
 #empty-state { flex: 1; min-height: 0; align-items: center; justify-content: center; padding: 48px 32px; overflow-y: auto; }
 .welcome-copy { width: 100%; max-width: 680px; text-align: center; margin: auto; }
-.welcome-symbol { display: grid; place-items: center; width: 88px; height: 88px; margin: 0 auto 28px; border-radius: 25px; background: var(--bt-card); border: 1px solid var(--bt-line); box-shadow: var(--ui-shadow); }
-.welcome-symbol img { border-radius: 16px; }
+.welcome-symbol { width: 88px; height: 88px; margin: 0 auto 28px; }
+.welcome-symbol img { display: block; width: 100%; height: 100%; filter: drop-shadow(0 10px 24px rgba(20, 24, 40, .22)); }
 .welcome-eyebrow { display: block; font-size: 12px; letter-spacing: .12em; color: var(--bt-ink-2); margin-bottom: 14px; }
 .welcome-copy h1 { margin: 0 0 20px; font-size: clamp(2.2rem, 4vw, 3.5rem); line-height: 1.25; letter-spacing: -.055em; font-weight: 650; }
 .welcome-copy p { margin: 0 0 28px; color: var(--bt-ink-2); font-size: 15px; line-height: 1.85; }

@@ -89,6 +89,14 @@ bot 继续住在 Windows 本机，所有 bot 共用一台 Linux 共享电脑，�
 - `scripts/build-notion-avatar.mjs`（`NA_DIR=<上游检出目录>`）从上游固定提交 `d59791d` 生成 `web/vendor/notion-avatar/parts.js`（271 KB，gzip 后 88 KB）和 `NOTICE`。部件张数和 `NOTION_PARTS` 对不上，脚本就停下。
 - 证据：`.scratch/team-rebuild/proof/notion-avatar/`，`shot.mjs` 起真服务和真浏览器，12 项全过：侧栏和群头像画出来、新建时捏的脸存进花名册、主助手改形象保存、运行中晃动、减少动态效果时不晃、页面无报错。
 
+### 图标
+
+- 应用图标重画：深色圆角底座（渐变、细颗粒、蓝色光晕、顶部高光），上面 5 个捏脸人物圆章挤在一起合影，底色用助手的黄、绿、粉、蓝，正中最前面是主助手的蓝。人物素材和头像同一套（Noto avatar，CC0）。
+- 32px 及以下改用单人版 `web/assets/app-mark.svg`：群像在这个尺寸糊成一团。网页 favicon 和侧栏 24px 图标用单人版，欢迎页用群像并去掉外面那层白框，ICO 的 16/24/32 帧也是单人版。
+- 安卓启动图标改成 `drawable-nodpi` 里的背景和前景 PNG：自适应图标的矢量格式不支持颗粒和投影滤镜。通知图标改成三个圆的白色剪影。删掉旧的矢量前景和没人用的 `colors.xml`。
+- `scripts/build-icons.mjs` 生成以上全部文件（SVG、PNG、ICO、安卓前景背景和通知图标），栅格化要 sharp。
+- 证据：`.scratch/logo/shot.mjs` 起真服务和真浏览器，侧栏、欢迎页、favicon 都画出来，页面无报错。安卓图标没有在真机上看过。
+
 ### 派活
 
 - `delegate_bot` 不再在目标忙时报错丢活：排队，空了按派活顺序开跑。预算和并发上限的当场拒绝不变。
