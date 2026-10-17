@@ -11,3 +11,5 @@ ts	phase	decision	why	evidence	result
 2026-10-17T01:04:03Z	03	事件触发改为宿主侧检查命令，放弃签名 webhook	服务只听回环，开公网入口违背现有设计；检查命令零 token 且复用调度和回执	server.mjs hostOk；channels.mjs 头注释	adopted
 2026-10-17T01:04:03Z	03	变化才触发时 Run 开起来才记新基线	忙时不丢事件	test/routine-check 第 2 条	adopted
 2026-10-17T01:04:03Z	03	验证	单元+真实子进程+真实 HTTP	routine-check 6/6，两个变异都抓到，回归绿；smoke-gui 唯一失败是沙箱无 omp	done
+2026-10-17T01:05:42Z	06	不加 tier 参数，list_bots 带上模型	每 bot 一个模型一个常驻会话，分档就是挑人；按次切模型打乱缓存	orchestrator _handleListBots	adopted
+2026-10-17T01:05:42Z	06	验证	单测+变异	delegation 18/18，变异 17/18，回归绿	done

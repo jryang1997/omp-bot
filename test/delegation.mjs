@@ -375,6 +375,22 @@ await test("派活教模型写交接简报：工具说明讲清对方看不到�
   }
 });
 
+await test("list_bots 带上队友的模型，方便把简单活派给便宜模型", async () => {
+  const t = newTeam();
+  try {
+    const a = t.orch.addBot({ name: "Lead" });
+    t.orch.addBot({ name: "Cheap", role: "整理", model: "openai/gpt-5-mini" });
+    t.orch.addBot({ name: "Plain" });
+    const fa = await t.orch.runtimeFor(a.id, "private");
+    const out = await fa.tools.find((x) => x.name === "list_bots").handler({});
+    assert.match(out.text, /- Cheap \(@[^)]+\) — 整理 · 模型 openai\/gpt-5-mini/);
+    assert.match(out.text, /- Plain \(@[^)]+\)$/m, "没设模型就不写");
+    assert.match(fa.tools.find((x) => x.name === "delegate_bot").description, /便宜模型/);
+  } finally {
+    await t.cleanup();
+  }
+});
+
 await test("带验收标准派活：对方看到清单，交回原样带回让派活方逐条核对", async () => {
   const t = newTeam();
   try {

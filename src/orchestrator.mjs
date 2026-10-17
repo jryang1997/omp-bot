@@ -1430,7 +1430,7 @@ export class Orchestrator {
           name: "delegate_bot",
           label: "Delegate Bot",
           description:
-            "把任务派给另一个 bot 后台执行，立即返回（不等待结果）。先用 list_bots 按角色挑人。对方正忙就排队，空了自动开跑。做完后结果会作为一条新消息交回给你，由你验收。用于可以并行推进的工作。",
+            "把任务派给另一个 bot 后台执行，立即返回（不等待结果）。先用 list_bots 按角色挑人；简单、量大的活优先派给用便宜模型的队友。对方正忙就排队，空了自动开跑。做完后结果会作为一条新消息交回给你，由你验收。用于可以并行推进的工作。",
           parameters: DELEGATE_BOT_SCHEMA,
           handler: (args, meta) => this._handleDelegateBot(bot, runtime, args, meta),
         },
@@ -1461,7 +1461,7 @@ export class Orchestrator {
     tools.push({
       name: "list_bots",
       label: "List Bots",
-      description: "列出团队里所有 bot 的名字、id、角色和工作区，供你决定 message_bot/delegate_bot 的收件人。",
+      description: "列出团队里所有 bot 的名字、id、角色、模型和工作区，供你决定 message_bot/delegate_bot 的收件人。",
       parameters: LIST_BOTS_SCHEMA,
       handler: () => this._handleListBots(bot),
     });
@@ -1475,7 +1475,9 @@ export class Orchestrator {
         const sameWorkspace = (b.workspace ?? "") === (self.workspace ?? "");
         // 不输出别的工作区的目录路径（那是私有上下文），只如实标注可否委派。
         const scopeNote = sameWorkspace ? "" : " [其他工作区：不共享上下文，不可委派]";
-        return `- ${b.name} (@${b.id})${b.role ? ` — ${b.role}` : ""}${scopeNote}`;
+        // 带上模型：简单活派给便宜模型的队友，难活派给强模型的。模型名不是私有信息。
+        const modelNote = b.model ? ` · 模型 ${b.model}` : "";
+        return `- ${b.name} (@${b.id})${b.role ? ` — ${b.role}` : ""}${modelNote}${scopeNote}`;
       });
     return { text: rows.length ? rows.join("\n") : "（团队里没有其他 bot）" };
   }
