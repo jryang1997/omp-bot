@@ -591,7 +591,12 @@ button:focus-visible { outline-offset: 2px; }
 }
 /* 头像：吉祥物或裁切好的图片（workbench-avatar.js） */
 .omp-avatar { display: inline-flex; align-items: center; justify-content: center; flex: none; position: relative; line-height: 0; }
-.omp-avatar > omp-mascot { display: block; }
+.omp-avatar-face { display: block; width: 100%; height: 100%; overflow: hidden; border-radius: 50%; }
+.omp-avatar-face > img { display: block; width: 100%; height: 100%; user-select: none; -webkit-user-drag: none; }
+/* 在干活或有未读时轻轻晃，代替原来吉祥物的表情动画。 */
+.omp-avatar.is-moving > * { animation: omp-avatar-sway 1.6s ease-in-out infinite; transform-origin: 50% 90%; }
+@keyframes omp-avatar-sway { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-6deg); } 75% { transform: rotate(6deg); } }
+@media (prefers-reduced-motion: reduce) { .omp-avatar.is-moving > * { animation: none; } }
 .omp-avatar-pic { display: block; width: 100%; height: 100%; overflow: hidden; background: var(--bt-bubble); }
 .omp-avatar-pic > img { display: block; width: 100%; height: 100%; max-width: none; object-fit: cover; user-select: none; -webkit-user-drag: none; }
 .wb-unread { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--bt-accent); }
@@ -607,11 +612,19 @@ button:focus-visible { outline-offset: 2px; }
 .omp-avatar-choice:hover:not(:disabled) { background: var(--bt-hover); }
 .omp-avatar-choice[aria-pressed="true"] { border-color: var(--bt-accent); background: var(--bt-active); box-shadow: inset 0 0 0 1px var(--bt-accent); }
 .omp-avatar-choice:disabled { opacity: .45; cursor: not-allowed; }
-.omp-avatar-choice.omp-avatar-text, .omp-avatar-auto { padding: 4px 12px; font-size: 13px; line-height: 20px; }
+.omp-avatar-choice.omp-avatar-text { padding: 4px 12px; font-size: 13px; line-height: 20px; }
 .omp-avatar-swatch { display: block; width: 28px; height: 28px; border-radius: 50%; }
 .omp-avatar-zoom { display: flex; align-items: center; gap: 10px; }
 .omp-avatar-zoom > input { flex: 1; min-width: 0; }
 .omp-avatar-zoom-value { min-width: 40px; font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
+.omp-avatar-stage-row { display: flex; align-items: center; justify-content: center; gap: 14px; }
+.omp-avatar-parts { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px 16px; }
+.omp-avatar-part { display: flex; align-items: center; gap: 6px; }
+.omp-avatar-part-name { flex: 1; font-size: 13px; }
+.omp-avatar-step { width: 32px; height: 32px; border: 1px solid var(--bt-line); border-radius: 10px; background: var(--bt-card); color: var(--bt-ink); font: inherit; font-size: 16px; line-height: 1; cursor: pointer; }
+.omp-avatar-step:hover { background: var(--bt-hover); }
+.omp-avatar-step:focus-visible { outline: 2px solid var(--bt-accent); outline-offset: 1px; }
+.omp-avatar-part-value { min-width: 48px; font-size: 12px; text-align: center; font-variant-numeric: tabular-nums; }
 .omp-avatar-actions { display: flex; justify-content: flex-end; gap: 8px; }
 @media (prefers-reduced-motion: reduce) {
   /* 减少动效：不要位移和缩放，只留短淡入淡出帮助看清变化。 */

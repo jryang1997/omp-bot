@@ -1,0 +1,9 @@
+parts.js（Notion 风格头像素材）
+
+来源：https://github.com/Mayandev/notion-avatar
+提交：d59791d24db741e307d8c91ac9f38f92e033ad46
+取用范围：public/avatar/preview/ 下除 festival 以外的部件 SVG，去掉外层 <svg>、标题、注释、id 和空白。
+
+插画：Felix Wong 的 Noto avatar 素材包（https://abstractlab.gumroad.com/l/noto-avatar），
+按 CC0 1.0 公有领域贡献使用（https://creativecommons.org/publicdomain/zero/1.0/）。
+这是仿 Notion 风格的插画，不是 Notion 官方素材，和 Notion Labs 无关。

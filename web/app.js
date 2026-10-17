@@ -5,10 +5,10 @@
  * Source SHA bdc5fda64e2ea1e83a4d146440072a2413025df4.
  * Modified for native DOM, omp_bot HTTP/SSE endpoints, and accessible local forms.
  * See vendor/ds-bot/LICENSE and vendor/ds-bot/NOTICE.
- * Bot avatars come from workbench-avatar.js; see vendor/mascot/NOTICE.
+ * Bot avatars come from workbench-avatar.js; see vendor/notion-avatar/NOTICE.
  */
 import { inkText } from "./vendor/ds-bot/inks.js";
-import { avatarNode, updateAvatar, colorOf, avatarEditor } from "./workbench-avatar.js";
+import { avatarNode, updateAvatar, colorOf, avatarEditor, randomParts, AVATAR_COLOR_IDS } from "./workbench-avatar.js";
 import {
   $, el, button, toast, announce, api, bootstrapAuth, markdownFragment, runStateLabel, trapTab, svgIcon, BOT_PERMISSION_LABELS, permissionOf, fmtDay,
 } from "./workbench-core.js";
@@ -795,6 +795,14 @@ function botForm(bot, onSave) {
   const name = field(form, "助手名称", Object.assign(el("input"), { value: bot?.name || "", placeholder: "如 Ada", required: true }));
   const role = field(form, "擅长什么", Object.assign(el("input"), { value: bot?.role || "", placeholder: "如 查资料、写周报" }), "一句话概括，会显示在名单和聊天标题上。");
   const instructions = field(form, "工作偏好与专属指令", Object.assign(el("textarea"), { value: bot?.instructions || "", rows: 5 }));
+  // 新建时就能捏脸；建好以后在详情页的「形象」里改，或者换成图片。
+  let look = null;
+  if (!bot) {
+    look = { parts: randomParts(), color: AVATAR_COLOR_IDS[Math.floor(Math.random() * AVATAR_COLOR_IDS.length)] };
+    const face = disclosure("形象", "随手捏一张脸，建好以后还能改。");
+    face.body.append(avatarEditor({ avatar: look }, { onChange: (draft) => { look = { parts: draft.parts, color: draft.color }; } }));
+    form.append(face.node);
+  }
   const advanced = disclosure("高级设置", "换模型、调思考程度，或者把它设为主助手。");
   const model = el("select");
   option(model, "", "（默认模型）");
@@ -815,7 +823,7 @@ function botForm(bot, onSave) {
   form.append(advanced.node);
   saveForm(form, bot ? { kind: "bot", id: bot.id } : null, bot ? "保存" : "创建", () => {
     if (!name.value.trim()) { name.focus(); toast("助手名称必填", true); return null; }
-    return { name: name.value.trim(), role: role.value.trim(), model: model.value, thinking: thinking.value, instructions: instructions.value, isMain: main.checked };
+    return { name: name.value.trim(), role: role.value.trim(), model: model.value, thinking: thinking.value, instructions: instructions.value, isMain: main.checked, ...(look ? { avatar: look } : {}) };
   }, onSave);
   return form;
 }
@@ -900,11 +908,10 @@ function detailProfile(target) {
   return profile;
 }
 
-/** 形象：主助手固定，其他助手在折叠区里选身体、颜色、表情或换成图片。 */
+/** 形象：折叠区里捏脸、换底色或换成图片，主助手也一样。 */
 function avatarSection(target) {
   const bot = itemOf(target);
-  if (bot.isMain) return avatarEditor(bot, {});
-  const section = disclosure("形象", "选身体、颜色和表情，也可以换成一张图片。", "avatarOpen");
+  const section = disclosure("形象", "捏一张脸、换底色，也可以换成一张图片。", "avatarOpen");
   section.body.append(avatarEditor(bot, {
     onSave: async (data) => {
       await api(`/api/bots/${encodeURIComponent(target.id)}`, { method: "PATCH", body: data });

@@ -1,52 +1,93 @@
 /*
- * Bot 头像：<omp-mascot> 吉祥物（vendor/mascot，来源和许可见那里的 NOTICE），或者裁切好的上传图片。
+ * Bot 头像：Notion 风格的捏脸（vendor/notion-avatar，来源和 CC0 许可见那里的 NOTICE），或者裁切好的上传图片。
  * 形象存在花名册的 bot.avatar 里，取值规则以服务端 src/domain.mjs 为准，这里只负责画和编辑。
  */
-import { MASCOT_BODY_IDS, MASCOT_COLORS, MASCOT_COLOR_IDS, MASCOT_EXPRESSIONS, gradientOf } from "./vendor/mascot/omp-mascot.js";
+import { PARTS } from "./vendor/notion-avatar/parts.js";
 import { el, button, toast, api, fmtSize } from "./workbench-core.js";
 
-export const BODY_NAMES = {
-  cursor: "光标", blob: "团子", circle: "圆", squircle: "圆角方", capsule: "胶囊",
-  drop: "水滴", shield: "盾牌", hexagon: "六边形", diamond: "菱形", star: "星星",
+/** 叠放顺序和服务端 NOTION_PARTS 一致。 */
+export const PART_IDS = Object.keys(PARTS);
+export const PART_NAMES = {
+  face: "脸型", nose: "鼻子", mouth: "嘴巴", eyes: "眼睛", eyebrows: "眉毛",
+  glasses: "眼镜", hair: "发型", accessories: "配饰", details: "细节", beard: "胡子",
 };
+/** 这几种的 0 号是空白。 */
+const SPARSE = new Set(["glasses", "accessories", "details", "beard"]);
+export const AVATAR_COLORS = {
+  green: "#009957", blue: "#377FE6", red: "#D94B52", orange: "#E78531", purple: "#8057C8",
+  cyan: "#0EA5C6", pink: "#D84F8B", yellow: "#D8A729", teal: "#01A492", coral: "#E5634E",
+};
+export const AVATAR_COLOR_IDS = Object.keys(AVATAR_COLORS);
+export const MAIN_AVATAR_COLOR = "#4D6BFE";
 export const COLOR_NAMES = {
   green: "绿", blue: "蓝", red: "红", orange: "橙", purple: "紫",
   cyan: "青", pink: "粉", yellow: "黄", teal: "松石绿", coral: "珊瑚",
 };
-export const EXPRESSION_NAMES = {
-  idle: "平静", happy: "开心", curious: "好奇", drowsy: "犯困", working: "干活",
-  thinking: "思考", listening: "倾听", sleeping: "睡觉", suspicious: "怀疑", proud: "得意",
-};
-export const CROP_NAMES = { mascot: "吉祥物", circle: "圆形", rounded: "圆角", square: "方形" };
+export const CROP_NAMES = { notion: "捏的脸", circle: "圆形", rounded: "圆角", square: "方形" };
 const CROP_RADIUS = { circle: "50%", rounded: "22%", square: "0" };
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
-/** 小于这个尺寸的吉祥物降到 30 帧，看不出差别，省一半绘制。 */
-const SMALL = 48;
-const FALLBACK = { body: "cursor", color: "green", expression: null, crop: "mascot", url: null, zoom: 1, focusX: 0.5, focusY: 0.5 };
-/** 这几个运行状态算「工作中」：头像动起来，固定表情也让位给 working。 */
+const FALLBACK_PARTS = Object.fromEntries(PART_IDS.map((id) => [id, 0]));
+const FALLBACK = { parts: FALLBACK_PARTS, color: "green", crop: "notion", url: null, zoom: 1, focusX: 0.5, focusY: 0.5 };
+/** 这几个运行状态算「工作中」。 */
 export const BUSY_FACES = new Set(["thinking", "working", "alerting"]);
 
-export const lookOf = (bot) => ({ ...FALLBACK, ...(bot?.avatar || {}) });
-const hexOf = (color) => MASCOT_COLORS[color] || (/^#[0-9a-f]{6}$/i.test(color) ? color : MASCOT_COLORS.green);
+export const lookOf = (bot) => {
+  const look = { ...FALLBACK, ...(bot?.avatar || {}) };
+  return { ...look, parts: { ...FALLBACK_PARTS, ...(look.parts || {}) } };
+};
+const hexOf = (color) => AVATAR_COLORS[color] || (/^#[0-9a-f]{6}$/i.test(color) ? color : AVATAR_COLORS.green);
 /** 名字等文字用的颜色。 */
 export const colorOf = (bot) => hexOf(lookOf(bot).color);
 
-/** 运行状态到表情。用户固定了表情时，只在工作中换成 working。 */
-export function faceFor(look, runFace = "idle") {
-  if (!look.expression) return runFace || "idle";
-  return BUSY_FACES.has(runFace) ? "working" : look.expression;
+function mix(hex, toward, t) {
+  const a = parseInt(hex.slice(1), 16);
+  const b = parseInt(toward.slice(1), 16);
+  const ch = (s) => Math.round(((a >> s) & 255) + ((((b >> s) & 255) - ((a >> s) & 255)) * t));
+  return `#${[ch(16), ch(8), ch(0)].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+}
+/** 头像底色：助手颜色调淡，黑色线条在上面看得清。 */
+export const tintOf = (color) => mix(hexOf(color), "#ffffff", 0.62);
+
+/** 随机捏一张脸：空白部件大多不带，和服务端的默认分布一样。 */
+export function randomParts() {
+  const pick = (n) => Math.floor(Math.random() * n);
+  return Object.fromEntries(PART_IDS.map((id) => {
+    const n = PARTS[id].length;
+    return [id, SPARSE.has(id) ? (Math.random() < 0.7 ? 0 : 1 + pick(n - 1)) : pick(n)];
+  }));
 }
 
-function mascot(look, size, face, animate) {
-  const node = document.createElement("omp-mascot");
-  node.setAttribute("body", look.body);
-  node.setAttribute("color", look.color);
-  node.setAttribute("size", String(size));
-  node.setAttribute("state", face);
-  if (size < SMALL) node.setAttribute("fps", "30");
-  if (!animate) node.setAttribute("paused", "");
-  return node;
+// 白色描边滤镜和上游一样：线条外面一圈白，放在彩色底上不糊。
+const FILTER = '<defs><filter id="f" x="-20%" y="-20%" width="140%" height="140%" filterUnits="objectBoundingBox" primitiveUnits="userSpaceOnUse" color-interpolation-filters="linearRGB"><feMorphology operator="dilate" radius="20 20" in="SourceAlpha" result="m"/><feFlood flood-color="#fff" result="w"/><feComposite in="w" in2="m" operator="in" result="c"/><feMerge><feMergeNode in="c"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>';
+const faceCache = new Map();
+
+/** 一张脸的图片地址。每张脸画成独立的 SVG 图片：一页几十个头像也不会让 id 和滤镜互相串。 */
+export function faceUrl(parts) {
+  const key = PART_IDS.map((id) => parts[id] ?? 0).join(".");
+  let url = faceCache.get(key);
+  if (!url) {
+    const layers = PART_IDS.map((id) => {
+      const svg = PARTS[id][parts[id]] ?? PARTS[id][0];
+      return id === "face" ? `<g fill="#fff">${svg}</g>` : svg;
+    }).join("");
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" fill="none">${FILTER}<g filter="url(#f)">${layers}</g></svg>`;
+    url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+    faceCache.set(key, url);
+  }
+  return url;
+}
+
+function face(look) {
+  const frame = el("span", "omp-avatar-face");
+  frame.style.background = tintOf(look.color);
+  const img = el("img");
+  img.alt = "";
+  img.draggable = false;
+  img.decoding = "async";
+  img.src = faceUrl(look.parts);
+  frame.append(img);
+  return frame;
 }
 
 function picture(look, onError) {
@@ -64,31 +105,33 @@ function picture(look, onError) {
   return frame;
 }
 
+function mark(node, faceName, animate) {
+  node.dataset.face = faceName || "idle";
+  node.classList.toggle("is-moving", !!animate);
+}
+
 /**
- * 头像节点。图片头像不动；吉祥物按 face 显示表情，animate 为假时静止。
- * 图片加载失败（例如附件被删）时退回吉祥物。
+ * 头像节点。animate 为真时轻轻晃动（在干活、有未读）；face 写在 data-face 上，样式按它区分工作中。
+ * 图片加载失败（例如附件被删）时退回捏的脸。
  */
-export function avatarNode(bot, { size = 36, face = "idle", animate = false } = {}) {
+export function avatarNode(bot, { size = 36, face: faceName = "idle", animate = false } = {}) {
   const look = lookOf(bot);
   const wrap = el("span", "bt-mark omp-avatar");
   wrap.style.width = `${size}px`;
   wrap.style.height = `${size}px`;
   wrap.setAttribute("aria-hidden", "true");
-  if (look.crop !== "mascot" && look.url) {
-    wrap.append(picture(look, () => wrap.replaceChildren(mascot(look, size, faceFor(look, face), animate))));
+  if (look.crop !== "notion" && look.url) {
+    wrap.append(picture(look, () => wrap.replaceChildren(face(look))));
   } else {
-    wrap.append(mascot(look, size, faceFor(look, face), animate));
+    wrap.append(face(look));
   }
+  mark(wrap, faceName, animate);
   return wrap;
 }
 
-/** 已经画出来的头像跟着运行状态换表情、动或停，不重建节点，动画不断。 */
-export function updateAvatar(node, bot, { face = "idle", animate = false } = {}) {
-  const m = node.querySelector("omp-mascot");
-  if (!m) return;
-  const next = faceFor(lookOf(bot), face);
-  if (m.getAttribute("state") !== next) m.setAttribute("state", next);
-  if (m.hasAttribute("paused") === animate) m.toggleAttribute("paused", !animate);
+/** 已经画出来的头像跟着运行状态动或停，不重建节点。 */
+export function updateAvatar(node, bot, { face: faceName = "idle", animate = false } = {}) {
+  mark(node, faceName, animate);
 }
 
 async function readBase64(file) {
@@ -124,23 +167,25 @@ function choice(row, key, label, selected, onPick, content) {
 }
 
 /**
- * 头像编辑：身体、颜色、表情、上传图片、裁切和缩放。拖动预览里的图片换焦点，滚轮缩放。
- * 改动先停在草稿里，点「保存形象」才提交 { avatar }。主助手的形象固定，不给编辑。
+ * 头像编辑：捏脸（每种部件左右翻、随机一张）、底色、上传图片、裁切和缩放。拖动预览里的图片换焦点，滚轮缩放。
+ * 有 onSave 时改动先停在草稿里，点「保存形象」才提交 { avatar }。
+ * 新建助手时传 onChange：每次改动都交出草稿，没有保存按钮；助手还不存在，不能传图片。
  */
-export function avatarEditor(bot, { onSave }) {
+export function avatarEditor(bot, { onSave, onChange } = {}) {
   const root = el("div", "omp-avatar-editor");
-  if (bot.isMain) {
-    root.append(el("p", "hint", "主助手的形象固定，一眼就能认出。"));
-    return root;
-  }
+  const creating = !onSave;
   const saved = lookOf(bot);
   let draft = { ...saved };
   const stage = el("div", "omp-avatar-stage");
-  const body = choiceGroup("身体");
-  const color = choiceGroup("颜色");
-  const face = choiceGroup("表情", "选「跟着状态」时会随思考、干活、等你处理、出错和完成变化；固定表情只在工作中换成干活的样子。");
+  const shuffle = button("btn ghost", "随机一张", () => set({ parts: randomParts() }));
+  shuffle.type = "button";
+  const stageRow = el("div", "omp-avatar-stage-row");
+  stageRow.append(stage, shuffle);
+  const partsGroup = choiceGroup("捏脸", "每一项左右翻着挑。");
+  partsGroup.row.classList.add("omp-avatar-parts");
+  const color = choiceGroup("底色", "名字也用这个颜色。");
   const pic = choiceGroup("图片", "PNG、JPEG、GIF 或 WebP，不超过 12MB。拖动预览里的图片调整位置，滚轮缩放。");
-  const crop = choiceGroup("裁切");
+  const crop = choiceGroup("用哪个");
   const zoomWrap = el("div", "field omp-avatar-group");
   const zoomLabel = el("label", "omp-avatar-legend", "缩放");
   const zoom = Object.assign(el("input"), { type: "range", min: "1", max: "3", step: "0.05" });
@@ -157,21 +202,27 @@ export function avatarEditor(bot, { onSave }) {
   reset.type = "button";
   const actions = el("div", "omp-avatar-actions");
   actions.append(reset, save);
-  root.append(stage, body.group, color.group, face.group, pic.group, crop.group, zoomWrap, file, actions);
+  root.append(stageRow, partsGroup.group, color.group);
+  if (!creating) root.append(pic.group, crop.group, zoomWrap, file, actions);
 
-  const isPicture = () => draft.crop !== "mascot" && !!draft.url;
+  const isPicture = () => draft.crop !== "notion" && !!draft.url;
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-  // 缩放和拖动只重画预览；其他改动重画整个编辑区，并把焦点还给刚点的那个选项。
+  // 缩放和拖动只重画预览；其他改动重画整个编辑区，并把焦点还给刚点的那个按钮。
   const set = (patch, all = true) => {
     draft = { ...draft, ...patch };
+    onChange?.({ ...draft });
     if (!all) { paintStage(); paintState(); return; }
     const key = root.contains(document.activeElement) ? document.activeElement.dataset.key : null;
     paint();
     if (key) root.querySelector(`[data-key="${CSS.escape(key)}"]`)?.focus();
   };
+  const step = (id, by) => {
+    const n = PARTS[id].length;
+    set({ parts: { ...draft.parts, [id]: (draft.parts[id] + by + n) % n } });
+  };
 
   function paintStage() {
-    stage.replaceChildren(avatarNode({ avatar: draft }, { size: 112, face: draft.expression || "idle", animate: true }));
+    stage.replaceChildren(avatarNode({ avatar: draft }, { size: 112 }));
     stage.classList.toggle("is-picture", isPicture());
   }
   function paintState() {
@@ -184,33 +235,43 @@ export function avatarEditor(bot, { onSave }) {
   }
   function paint() {
     paintStage();
-    // 用图片时身体和表情不起作用，先收起来；颜色还用在名字上，留着。
-    body.group.hidden = isPicture();
-    face.group.hidden = isPicture();
-    body.row.replaceChildren();
-    for (const id of MASCOT_BODY_IDS) {
-      choice(body.row, `body:${id}`, BODY_NAMES[id] || id, draft.body === id, () => set({ body: id }),
-        avatarNode({ avatar: { ...draft, body: id, crop: "mascot" } }, { size: 32 }));
+    // 用图片时捏脸不起作用，先收起来；底色还用在名字上，留着。
+    partsGroup.group.hidden = isPicture();
+    shuffle.hidden = isPicture();
+    partsGroup.row.replaceChildren();
+    for (const id of PART_IDS) {
+      const n = PARTS[id].length;
+      const at = draft.parts[id];
+      const line = el("div", "omp-avatar-part");
+      const name = PART_NAMES[id] || id;
+      const prev = button("omp-avatar-step", "‹", () => step(id, -1));
+      const next = button("omp-avatar-step", "›", () => step(id, 1));
+      Object.assign(prev, { type: "button", title: `上一个${name}` });
+      Object.assign(next, { type: "button", title: `下一个${name}` });
+      prev.dataset.key = `part:${id}:prev`;
+      next.dataset.key = `part:${id}:next`;
+      prev.setAttribute("aria-label", `上一个${name}`);
+      next.setAttribute("aria-label", `下一个${name}`);
+      const value = el("span", "omp-avatar-part-value", SPARSE.has(id) && at === 0 ? "不要" : `${SPARSE.has(id) ? at : at + 1}/${SPARSE.has(id) ? n - 1 : n}`);
+      line.append(el("span", "omp-avatar-part-name", name), prev, value, next);
+      partsGroup.row.append(line);
     }
     color.row.replaceChildren();
-    for (const id of MASCOT_COLOR_IDS) {
+    const colors = bot?.isMain ? [MAIN_AVATAR_COLOR, ...AVATAR_COLOR_IDS] : AVATAR_COLOR_IDS;
+    for (const id of colors) {
       const swatch = el("span", "omp-avatar-swatch");
-      const [light, mid, dark] = gradientOf(id);
-      swatch.style.background = `linear-gradient(225deg, ${light}, ${mid} 55%, ${dark})`;
-      choice(color.row, `color:${id}`, COLOR_NAMES[id] || id, draft.color === id, () => set({ color: id }), swatch);
+      swatch.style.background = tintOf(id);
+      swatch.style.boxShadow = `inset 0 0 0 3px ${hexOf(id)}`;
+      const label = id === MAIN_AVATAR_COLOR ? "主助手蓝" : COLOR_NAMES[id] || id;
+      choice(color.row, `color:${id}`, label, draft.color === id, () => set({ color: id }), swatch);
     }
-    face.row.replaceChildren();
-    choice(face.row, "face:auto", "跟着状态", !draft.expression, () => set({ expression: null }), el("span", "omp-avatar-auto", "跟着状态"));
-    for (const id of MASCOT_EXPRESSIONS) {
-      choice(face.row, `face:${id}`, EXPRESSION_NAMES[id] || id, draft.expression === id, () => set({ expression: id }),
-        avatarNode({ avatar: { ...draft, crop: "mascot", expression: id } }, { size: 32 }));
-    }
+    if (creating) { paintState(); return; }
     pic.row.replaceChildren();
     const upload = button("btn ghost", draft.url ? "换一张图片" : "上传图片", () => file.click());
     upload.type = "button";
     pic.row.append(upload);
     if (draft.url) {
-      const drop = button("btn ghost", "去掉图片", () => set({ url: null, crop: "mascot", zoom: 1, focusX: 0.5, focusY: 0.5 }));
+      const drop = button("btn ghost", "去掉图片", () => set({ url: null, crop: "notion", zoom: 1, focusX: 0.5, focusY: 0.5 }));
       drop.type = "button";
       pic.row.append(drop);
     }
@@ -218,7 +279,7 @@ export function avatarEditor(bot, { onSave }) {
     for (const id of Object.keys(CROP_NAMES)) {
       const node = choice(crop.row, `crop:${id}`, CROP_NAMES[id], draft.crop === id, () => set({ crop: id }));
       node.classList.add("omp-avatar-text");
-      if (id !== "mascot" && !draft.url) { node.disabled = true; node.title = "先上传一张图片"; }
+      if (id !== "notion" && !draft.url) { node.disabled = true; node.title = "先上传一张图片"; }
     }
     paintState();
   }
@@ -259,7 +320,7 @@ export function avatarEditor(bot, { onSave }) {
         body: { botId: bot.id, filename: picked.name || "avatar", mime: picked.type, dataBase64: await readBase64(picked) },
       });
       const attachment = created.attachment || created;
-      set({ url: `/api/attachments/${encodeURIComponent(attachment.id)}/preview`, crop: draft.crop === "mascot" ? "circle" : draft.crop, zoom: 1, focusX: 0.5, focusY: 0.5 });
+      set({ url: `/api/attachments/${encodeURIComponent(attachment.id)}/preview`, crop: draft.crop === "notion" ? "circle" : draft.crop, zoom: 1, focusX: 0.5, focusY: 0.5 });
     } catch (error) {
       toast(`图片上传失败：${error.message}`, true);
     }

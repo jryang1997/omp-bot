@@ -25,3 +25,5 @@
 - 证据：`proof/avatar/shot-avatar.mjs` 34 项全过，截图有各状态、编辑器、图片裁切、详情页、主助手、群头像和深色模式，`avatar-report.json` 记录每项结果。
 - 测试：team.mjs 加 3 项 11 测试（30/30），http-boundaries.mjs 加 5 项头像检查（91/91），workbench-runs.mjs 加头像状态块（7/7），13 个测试文件全过，smoke-gui 56/56。
 - 发布前要等上游对商标的回复，issue 草稿在 `.scratch/team-architecture/mascot-proto/upstream-issue-draft.md`。
+
+- 后来：吉祥物换成 Notion 风格捏脸，这里的截图和脚本删了，新证据见 `proof/notion-avatar/`（决定 12）。

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { existsSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { DEFAULT_MASCOT_BODY, MAIN_MASCOT_COLOR, MASCOT_BODY_IDS, MASCOT_COLOR_IDS, MASCOT_EXPRESSIONS, makeBot, makeRoom, mascotColorFor, normalizeBot, permissionOf, permissionModes, roomPrompt, sceneTag, senderOf } from "../src/domain.mjs";
+import { MAIN_AVATAR_COLOR, NOTION_PARTS, avatarColorFor, avatarPartsFor, makeBot, makeRoom, normalizeBot, permissionOf, permissionModes, roomPrompt, sceneTag, senderOf } from "../src/domain.mjs";
 import { writePersonaFiles, personaText } from "../src/persona.mjs";
 import { BotRuntime } from "../src/bot.mjs";
 import { Computers } from "../src/features/computers.mjs";
@@ -609,45 +609,35 @@ test("04 消息第一行标场景和发送者", () => {
   assert.doesNotMatch(personaText(), /工作区是/, "没设工作区就不提");
 });
 
-// ---------------- 11 吉祥物头像 ----------------
+// ---------------- 11 捏脸头像 ----------------
 const PNG_1PX = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
-test("11 打包文件导出的取值和花名册校验用的一致", async () => {
-  // 打包文件定义了自定义元素，在 node 里给它一个最小的浏览器外壳就能导入。
-  const saved = { HTMLElement: globalThis.HTMLElement, customElements: globalThis.customElements };
-  globalThis.HTMLElement ??= class {};
-  globalThis.customElements ??= { get: () => undefined, define: () => {} };
-  try {
-    const m = await import("../web/vendor/mascot/omp-mascot.js");
-    assert.deepEqual([...m.MASCOT_BODY_IDS], MASCOT_BODY_IDS);
-    assert.equal(m.DEFAULT_MASCOT_BODY, DEFAULT_MASCOT_BODY);
-    assert.deepEqual([...m.MASCOT_COLOR_IDS], MASCOT_COLOR_IDS);
-    assert.deepEqual([...m.MASCOT_EXPRESSIONS], MASCOT_EXPRESSIONS);
-    assert.ok(!Object.values(m.MASCOT_COLORS).map((c) => c.toLowerCase()).includes(MAIN_MASCOT_COLOR.toLowerCase()), "主助手颜色不在 10 色里");
-    for (const s of ["idle", "thinking", "working", "alerting", "sad", "happy", ...MASCOT_EXPRESSIONS]) assert.ok(m.CURSOR_STATES.includes(s), s);
-  } finally {
-    if (saved.HTMLElement === undefined) delete globalThis.HTMLElement;
-    if (saved.customElements === undefined) delete globalThis.customElements;
-  }
-  const notice = readFileSync(new URL("../web/vendor/mascot/NOTICE", import.meta.url), "utf8");
-  const script = readFileSync(new URL("../scripts/build-mascot.mjs", import.meta.url), "utf8");
-  const commit = script.match(/UPSTREAM_COMMIT = "([0-9a-f]{40})"/)[1];
-  assert.ok(notice.includes(commit) && notice.includes("Apache") && notice.includes("Made with Blob Studio"));
-  assert.ok(readFileSync(new URL("../web/vendor/mascot/omp-mascot.js", import.meta.url), "utf8").includes(commit));
-  assert.ok(readFileSync(new URL("../web/vendor/mascot/LICENSE", import.meta.url), "utf8").includes("Apache License"));
+test("11 素材文件的部件张数和花名册校验用的一致", async () => {
+  const { PARTS } = await import("../web/vendor/notion-avatar/parts.js");
+  assert.deepEqual(Object.keys(PARTS), Object.keys(NOTION_PARTS), "叠放顺序一致");
+  for (const [part, count] of Object.entries(NOTION_PARTS)) assert.equal(PARTS[part].length, count, part);
+  for (const part of ["glasses", "accessories", "details", "beard"]) assert.ok(!/<(path|circle|ellipse|rect|polygon|polyline|line)\b/.test(PARTS[part][0]), `${part} 的 0 号什么也不画`);
+  const notice = readFileSync(new URL("../web/vendor/notion-avatar/NOTICE", import.meta.url), "utf8");
+  assert.ok(notice.includes("d59791d24db741e307d8c91ac9f38f92e033ad46") && notice.includes("CC0") && notice.includes("不是 Notion 官方素材"));
 });
-test("11 老 bot 按 id 拿到固定颜色和 cursor 身体，Main Bot 固定 star 和专用蓝", () => {
+test("11 老 bot 按 id 拿到固定的脸和颜色，旧吉祥物形象换成捏的脸，Main Bot 默认专用蓝", () => {
   const old = normalizeBot({ id: "bot_old_1", name: "老甲" });
-  assert.deepEqual(old.avatar, { body: "cursor", color: mascotColorFor("bot_old_1"), expression: null, crop: "mascot", url: null, zoom: 1, focusX: 0.5, focusY: 0.5 });
+  assert.deepEqual(old.avatar, { parts: avatarPartsFor("bot_old_1"), color: avatarColorFor("bot_old_1"), crop: "notion", url: null, zoom: 1, focusX: 0.5, focusY: 0.5 });
   assert.deepEqual(normalizeBot({ id: "bot_old_1", name: "老甲" }).avatar, old.avatar, "同一个 id 每次一样");
-  const spread = new Set(Array.from({ length: 60 }, (_, i) => mascotColorFor(`bot_${i.toString(36)}_x`)));
+  const spread = new Set(Array.from({ length: 60 }, (_, i) => avatarColorFor(`bot_${i.toString(36)}_x`)));
   assert.ok(spread.size >= 8, `颜色要散开，实际 ${spread.size} 种`);
-  const main = normalizeBot({ id: "bot_m", name: "主", isMain: true, avatar: { body: "blob", color: "red" } });
-  assert.deepEqual([main.avatar.body, main.avatar.color, main.avatar.crop], ["star", MAIN_MASCOT_COLOR, "mascot"]);
+  const faces = new Set(Array.from({ length: 60 }, (_, i) => JSON.stringify(avatarPartsFor(`bot_${i.toString(36)}_x`))));
+  assert.equal(faces.size, 60, "60 个 id 捏出 60 张不同的脸");
+  const mascot = normalizeBot({ id: "bot_o", name: "旧", avatar: { body: "blob", color: "red", expression: null, crop: "mascot", url: null, zoom: 1 } });
+  assert.deepEqual([mascot.avatar.parts, mascot.avatar.color, mascot.avatar.crop, "body" in mascot.avatar], [avatarPartsFor("bot_o"), "red", "notion", false]);
+  const oldMain = normalizeBot({ id: "bot_m", name: "主", isMain: true, avatar: { body: "star", color: MAIN_AVATAR_COLOR, crop: "mascot" } });
+  assert.deepEqual([oldMain.avatar.color, oldMain.avatar.crop], [MAIN_AVATAR_COLOR, "notion"]);
+  assert.equal(normalizeBot({ id: "bot_m2", name: "主", isMain: true }).avatar.color, MAIN_AVATAR_COLOR);
+  assert.equal(normalizeBot({ id: "bot_m3", name: "主", isMain: true, avatar: { color: "red" } }).avatar.color, "red", "主助手选的颜色不再被改回去");
   // 存坏的取值退回默认，不让整条记录消失
-  const dirty = normalizeBot({ id: "bot_d", name: "脏", avatar: { body: "cube", color: MAIN_MASCOT_COLOR, crop: "circle", url: "https://x.test/a.png", zoom: 9 } });
-  assert.deepEqual([dirty.avatar.body, dirty.avatar.color, dirty.avatar.crop, dirty.avatar.url, dirty.avatar.zoom], ["cursor", mascotColorFor("bot_d"), "mascot", null, 1]);
+  const dirty = normalizeBot({ id: "bot_d", name: "脏", avatar: { parts: { hair: 999, eyes: 3 }, color: MAIN_AVATAR_COLOR, crop: "circle", url: "https://x.test/a.png", zoom: 9 } });
+  assert.deepEqual([dirty.avatar.parts.hair, dirty.avatar.parts.eyes, dirty.avatar.color, dirty.avatar.crop, dirty.avatar.url, dirty.avatar.zoom], [avatarPartsFor("bot_d").hair, 3, avatarColorFor("bot_d"), "notion", null, 1]);
 });
-test("11 接口拒绝改 Main Bot 形象、拒绝用主助手颜色、拒绝非附件地址的图片", async () => {
+test("11 接口允许改 Main Bot 形象，拒绝别人用主助手颜色、越界部件和非附件地址的图片", async () => {
   const home = tmp("ompbot-avatar-");
   try {
     await withOrch(home, async (orch) => {
@@ -655,18 +645,21 @@ test("11 接口拒绝改 Main Bot 形象、拒绝用主助手颜色、拒绝非�
       const bot = orch.addBot({ name: "甲" });
       const other = orch.addBot({ name: "乙" });
       const code = (fn) => { try { fn(); } catch (e) { return `${e.status} ${e.code}`; } return "ok"; };
-      assert.equal(code(() => orch.updateBot(main.id, { avatar: { color: "red" } })), "400 avatar_main_fixed");
-      assert.equal(code(() => orch.updateBot(main.id, { avatar: {} })), "400 avatar_main_fixed");
-      assert.equal(code(() => orch.addBot({ name: "又一个主", isMain: true, avatar: { body: "blob" } })), "400 avatar_main_fixed");
-      assert.equal(code(() => orch.updateBot(bot.id, { isMain: true, avatar: { body: "blob" } })), "400 avatar_main_fixed");
-      assert.equal(orch.updateBot(main.id, { role: "主持" }).avatar.color, MAIN_MASCOT_COLOR, "改别的字段不受影响");
-      for (const color of [MAIN_MASCOT_COLOR, MAIN_MASCOT_COLOR.toLowerCase()]) {
+      assert.equal(main.avatar.color, MAIN_AVATAR_COLOR);
+      const restyled = orch.updateBot(main.id, { avatar: { color: "red", parts: { hair: 5 } } });
+      assert.deepEqual([restyled.avatar.color, restyled.avatar.parts.hair, restyled.avatar.parts.eyes], ["red", 5, main.avatar.parts.eyes], "主助手能改，没给的部件留着");
+      assert.equal(orch.updateBot(main.id, { avatar: { color: MAIN_AVATAR_COLOR } }).avatar.color, MAIN_AVATAR_COLOR, "主助手可以换回主蓝");
+      assert.equal(orch.updateBot(main.id, { role: "主持" }).avatar.color, MAIN_AVATAR_COLOR, "改别的字段不受影响");
+      assert.equal(orch.addBot({ name: "新主", isMain: true, avatar: { color: "pink" } }).avatar.color, "pink", "新建主助手也能挑颜色");
+      for (const color of [MAIN_AVATAR_COLOR, MAIN_AVATAR_COLOR.toLowerCase()]) {
         assert.equal(code(() => orch.updateBot(bot.id, { avatar: { color } })), "400 avatar_color_reserved");
       }
-      assert.equal(code(() => orch.addBot({ name: "丙", avatar: { color: MAIN_MASCOT_COLOR } })), "400 avatar_color_reserved");
+      assert.equal(code(() => orch.addBot({ name: "丙", avatar: { color: MAIN_AVATAR_COLOR } })), "400 avatar_color_reserved");
       assert.equal(code(() => orch.updateBot(bot.id, { avatar: { color: "#123456" } })), "400 avatar_invalid");
-      assert.equal(code(() => orch.updateBot(bot.id, { avatar: { body: "cube" } })), "400 avatar_invalid");
-      assert.equal(code(() => orch.updateBot(bot.id, { avatar: { expression: "angry" } })), "400 avatar_invalid");
+      for (const parts of [{ hair: NOTION_PARTS.hair }, { hair: -1 }, { hair: 1.5 }, { hair: "2" }, { horns: 1 }, [], null]) {
+        assert.equal(code(() => orch.updateBot(bot.id, { avatar: { parts } })), "400 avatar_invalid", JSON.stringify(parts));
+      }
+      assert.equal(code(() => orch.updateBot(bot.id, { avatar: { body: "cube" } })), "400 avatar_invalid", "旧吉祥物字段不再收");
       assert.equal(code(() => orch.updateBot(bot.id, { avatar: { zoom: 3.5 } })), "400 avatar_invalid");
       assert.equal(code(() => orch.updateBot(bot.id, { avatar: { owner: "x" } })), "400 avatar_invalid");
       assert.equal(code(() => orch.updateBot(bot.id, { avatar: { crop: "circle" } })), "400 avatar_invalid", "没图片不能选图片裁切");
@@ -683,12 +676,13 @@ test("11 接口拒绝改 Main Bot 形象、拒绝用主助手颜色、拒绝非�
       }
       const set = orch.updateBot(bot.id, { avatar: { url: preview(mine), crop: "rounded", zoom: 2, focusX: 0.25, focusY: 0.75 } });
       assert.deepEqual([set.avatar.crop, set.avatar.url, set.avatar.zoom, set.avatar.focusX], ["rounded", preview(mine), 2, 0.25]);
-      const look = orch.updateBot(bot.id, { avatar: { body: "drop", color: "teal", expression: "proud" } });
-      assert.deepEqual([look.avatar.body, look.avatar.color, look.avatar.expression, look.avatar.url], ["drop", "teal", "proud", preview(mine)], "部分改动合并进现有头像");
-      assert.equal(orch.getBot(bot.id).avatar.body, "drop", "存进花名册");
-      assert.equal(orch.updateBot(bot.id, { avatar: { expression: null, crop: "mascot", url: null } }).avatar.expression, null);
+      const look = orch.updateBot(bot.id, { avatar: { parts: { beard: 3 }, color: "teal" } });
+      assert.deepEqual([look.avatar.parts.beard, look.avatar.color, look.avatar.url], [3, "teal", preview(mine)], "部分改动合并进现有头像");
+      assert.equal(orch.getBot(bot.id).avatar.parts.beard, 3, "存进花名册");
+      assert.equal(orch.updateBot(bot.id, { avatar: { crop: "notion", url: null } }).avatar.url, null);
       assert.equal(code(() => orch.addBot({ name: "丁", avatar: { url: preview(mine), crop: "circle" } })), "400 avatar_url_invalid", "新 bot 还没有自己的附件");
-      assert.equal(orch.addBot({ name: "戊", avatar: { body: "hexagon", color: "pink" } }).avatar.body, "hexagon");
+      const picked = { face: 2, nose: 1, mouth: 3, eyes: 4, eyebrows: 5, glasses: 0, hair: 10, accessories: 0, details: 1, beard: 0 };
+      assert.deepEqual(orch.addBot({ name: "戊", avatar: { parts: picked, color: "pink" } }).avatar.parts, picked, "新建时捏的脸原样存下");
     });
   } finally {
     rmSync(home, { recursive: true, force: true });
