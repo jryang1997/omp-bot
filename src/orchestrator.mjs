@@ -25,6 +25,7 @@ import { BotRuntime, runtimeDirs } from "./bot.mjs";
 import { TeamDir, identityFields } from "./team.mjs";
 import { WorkbenchFeatures } from "./features.mjs";
 import { Relay } from "./relay.mjs";
+import { createStuckDetector, stuckSteerText } from "./stuck.mjs";
 import {
   genId,
   makeBot,
@@ -1113,6 +1114,7 @@ export class Orchestrator {
     if (!projected) return; // 物理分块等不投影的帧
     const runId = this._activeRunIdForRuntime(rt);
     this.emit("native_event", { runId, botId, scope, event: projected });
+    this._watchStuck(runId, botId, scope, frame);
     const t = String(projected.type ?? "");
     if (/subagent|task/i.test(t)) {
       const subagentId = projected.subagentId ?? projected.subagent?.id ?? projected.targetId ?? null;
@@ -1125,6 +1127,30 @@ export class Orchestrator {
       this.emit("todos_update", { runId, botId, scope, event: projected });
     } else if (/goal/i.test(t)) {
       this.emit("goal_update", { runId, botId, scope, event: projected });
+    }
+  }
+
+  /**
+   * 卡住检测：同样的工具调用得到同样的结果反复出现，先插一句换策略，再犯就取消。
+   * 用原始帧算指纹（投影帧可能被截断）；检测器挂在 Run 上，Run 结束就跟着丢。
+   */
+  _watchStuck(runId, botId, scope, frame) {
+    const ctrl = runId ? this.runs.get(runId) : null;
+    if (!ctrl?.stuck || ctrl.cancelling || ctrl.finished) return;
+    const hit = ctrl.stuck.observe(frame);
+    if (!hit) return;
+    this.emit("run_stuck", { runId, botId, scope, action: hit.action, toolName: hit.toolName, count: hit.count });
+    if (hit.action === "steer") {
+      this._background(
+        this.steerRun(runId, stuckSteerText(hit.toolName, hit.count)).catch((e) => {
+          // 回合恰好结束时 steer 会 409，这不算错：下一次再重复就会被取消。
+          if (e?.status !== 409) throw e;
+        }),
+      );
+    } else {
+      this._background(
+        this.cancelRun(runId, `stuck-loop: 同样的 ${hit.toolName} 调用重复 ${hit.count} 次，结果没变，已停止`),
+      );
     }
   }
 
@@ -1784,6 +1810,7 @@ export class Orchestrator {
       children: new Set(),
       approvals: new Set(),
       subagentIds: new Set(),
+      stuck: createStuckDetector(),
       cancelled: false,
       cancelErrors: [],
       finished: false,

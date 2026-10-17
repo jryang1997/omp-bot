@@ -5,3 +5,6 @@ ts	phase	decision	why	evidence	result
 2026-10-17T00:53:46Z	01	只读白名单走 OMP bash.patterns，不写宿主分类器	规则在 OMP 内按真实参数判，零 token，一处真相	bash.ts main@eb74cf84 的 allow 语义	adopted
 2026-10-17T00:53:46Z	01	白名单剔除 git	write 档可改 .git/config，git status 会跑 fsmonitor，绕过 exec 审批	git core.fsmonitor/diff.external 文档行为	discarded git
 2026-10-17T00:53:46Z	01	验证	照抄 OMP 匹配函数做正反例，变异去掉档位判断	test/approval-tiers 5/5，变异 4/5，回归全绿	done
+2026-10-17T00:58:57Z	02	宿主侧确定性指纹检测卡住，不用 OMP advisor	advisor 每次评审花 token；OMP 没有自带重复检测	search_code 0 条；docs/advisor-watchdog.md	adopted
+2026-10-17T00:58:57Z	02	取消阈值 6 不是 5	轮询等待结果常相同，减少误杀	判断	adopted
+2026-10-17T00:58:57Z	02	验证	单元+编排器接线，两个变异	test/stuck 7/7，变异 6/7 与 5/7，回归全绿；shutdown/channels 失败在 master 上同样存在	done

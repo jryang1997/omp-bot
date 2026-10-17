@@ -177,11 +177,19 @@ export class FakeRuntime extends EventEmitter {
         return { text: texts.join("\n---\n"), status: "completed", settled: true };
       }
       case "frames": {
+        // hang：发完帧继续挂着，像回合还在跑，测试可以在这时 steer/取消。
+        // 先挂上等待再发帧：帧触发的取消要能找到这个回合。
+        const hung = step.hang
+          ? new Promise((resolve, reject) => {
+              this._abortWaiters.push({ resolve, reject });
+            })
+          : null;
         for (const f of step.frames) {
           // 与真实 BotRuntime 一致：extension_ui_request 既走 native_frame 也走 ui_request。
           this.emit("native_frame", f);
           if (f?.type === "extension_ui_request") this.emit("ui_request", f);
         }
+        if (hung) await hung;
         return { text: step.text ?? "frames-sent", status: "completed", settled: true };
       }
       default:

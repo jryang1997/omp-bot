@@ -161,3 +161,11 @@ export const NATIVE_COMMAND_ALLOWLIST = new Set([
   "login",
   "logout",
 ]);
+
+/**
+ * 卡住检测：同一个工具、同样的参数、同样的结果，在一次 Run 里出现到这么多次。
+ * 到 STEER_AT 插一句换策略；到 CANCEL_AT 取消这次 Run。只看确定性数据，不调模型。
+ * 6 而不是更小：轮询类等待（看部署是否完成）结果常常一样，留出余地。
+ */
+export const STUCK_STEER_AT = 3;
+export const STUCK_CANCEL_AT = 6;
