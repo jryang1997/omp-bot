@@ -54,6 +54,22 @@ try {
     await api("PATCH", `/api/bots/${ada}`, { allowedCommands: [] });
   });
 
+  await test("04 全部放手的助手：飞书来的回合运行命令照样弹卡，工作台来的不弹", async () => {
+    const before = (await api("GET", "/api/bots")).bots.find((b) => b.id === w.bo);
+    await api("PATCH", `/api/bots/${w.bo}`, { permission: "full", confirmPermission: true, workspace: proj });
+    try {
+      const dir = join(proj, "fromfeishu");
+      const r1 = await run(call("bash", { command: `mkdir -p ${dir}` }), () => ({ value: "Deny" }), { botId: w.bo, source: "feishu:ou_real:oc_real" });
+      assert.equal(r1.cards.length, 1, "飞书来的回合弹卡");
+      assert.ok(!existsSync(dir), "拒绝了就没建");
+      const r2 = await run(call("bash", { command: `mkdir -p ${dir}` }), () => ({ value: "Deny" }), { botId: w.bo });
+      assert.deepEqual(r2.cards, [], "工作台来的回合不弹卡");
+      assert.ok(existsSync(dir));
+    } finally {
+      await api("PATCH", `/api/bots/${w.bo}`, { executionMode: before.executionMode, approvalMode: before.approvalMode, workspace: before.workspace || null });
+    }
+  });
+
   await test("密钥硬拦：要我同意档里 cat/read 碰 runtime.json 和 ~/.ssh 都被拦，不弹卡，token 不进模型", async () => {
     const r = await run(call("bash", { command: `cat ${join(home, "runtime.json")}` }) + call("read", { path: "~/.ssh/id_rsa" }));
     assert.equal(r.run.state, "completed");

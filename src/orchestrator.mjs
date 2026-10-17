@@ -184,6 +184,14 @@ function byShutdown(run) {
   return /(^|:)shutdown$/.test(String(run?.error ?? ""));
 }
 
+// 飞书账号或配对设备的令牌落到别人手里，不能等于拿到一台不设防的电脑。
+const EXTERNAL_SOURCE = /^(feishu|device):/;
+
+/** 外部渠道来的回合：「全部放手」按「本机改东西先问我」跑，其他档不变。进程按这个策略起，换回来再重建。 */
+function strictForExternal(bot) {
+  return permissionOf(bot) === "full" ? { ...bot, ...permissionModes("ask") } : bot;
+}
+
 /** 用户在工作台或配对设备上直接发起的私聊：这种 Run 的往来记进聊天记录。 */
 function isDirectChat(run) {
   return run?.kind === "chat" && (run.source === "user" || String(run.source ?? "").startsWith("device:"));
@@ -1060,8 +1068,9 @@ export class Orchestrator {
     if (pending) await pending;
     if (this.closing) throw httpErr(503, "团队正在关闭，无法启动新的 Bot 会话");
 
-    const bot = this.getBot(botId);
-    if (!bot) throw httpErr(404, `未知 bot: ${botId}`);
+    const stored = this.getBot(botId);
+    if (!stored) throw httpErr(404, `未知 bot: ${botId}`);
+    const bot = this._externalRun(o.runId) ? strictForExternal(stored) : stored;
     // 群回合按成员逐个进来，接管暂停也要在这里挡住。
     this._assertNotPaused(botId, scope);
 
@@ -1099,6 +1108,13 @@ export class Orchestrator {
     if (this.closing) throw httpErr(503, "团队正在关闭，无法接收新的消息");
     if (o.runId) rt.lastRunId = o.runId;
     return rt;
+  }
+
+  /** 这条 Run（或它所在派工树的根）是飞书、手机这类外部渠道发起的。 */
+  _externalRun(runId) {
+    const run = runId ? this.getRun(runId) : null;
+    if (!run) return false;
+    return [run, this.getRun(this._treeRootOf(run))].some((r) => EXTERNAL_SOURCE.test(String(r?.source ?? "")));
   }
 
   _wireRuntime(rt, botId, scope) {

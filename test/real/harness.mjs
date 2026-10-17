@@ -48,8 +48,8 @@ export async function world({ modelsYml, model, cheapModel = model }) {
   w.getRun = async (id) => (await w.api("GET", `/api/runs/${id}`)).run;
   w.events = async (id) => (await w.api("GET", `/api/events/history?runId=${id}&limit=5000`)).events;
   /** 跑一次，碰到审批卡就交给 answer(card) 决定回什么。 */
-  w.run = async (text, answer = () => null, { polls = 400, botId = w.ada } = {}) => {
-    const { run: r } = await w.api("POST", "/api/runs", { botId, text });
+  w.run = async (text, answer = () => null, { polls = 400, botId = w.ada, source } = {}) => {
+    const { run: r } = await w.api("POST", "/api/runs", { botId, text, ...(source ? { source } : {}) });
     const cards = [];
     for (let i = 0; i < polls; i++) {
       for (const a of (await w.api("GET", "/api/approvals")).approvals) {

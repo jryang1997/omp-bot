@@ -753,7 +753,7 @@ export function createPanels({ client, deps }) {
     const PERMISSION_HINTS = {
       chat: "不运行命令，不改文件，不用电脑。",
       ask: "读写文件照常，运行命令和操作浏览器前先问你。",
-      full: "不再逐次问你，装系统包仍会问。",
+      full: "不再逐次问你，装系统包仍会问。飞书和手机发来的任务照样先问你。",
     };
     const level = permissionOf(bot);
     permissionCard.append(row("权限", `${PERMISSION_HINTS[level]}下一次任务生效。`,
