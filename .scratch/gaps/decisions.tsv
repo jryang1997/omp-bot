@@ -23,3 +23,7 @@ ts	phase	decision	why	evidence	result
 2026-10-17T01:27:56Z	07	验证	断言+变异	team 32/32，删句变异 31/32	done
 2026-10-17T01:28:14Z	08	解析 OMP todo 工具结果的 details.phases	todo_reminder 只在想停但没做完时发，且只带未完成项	OMP session/todo-tracker.ts, tools/todo.ts	adopted
 2026-10-17T01:28:14Z	08	验证	单测+两个变异+回归	plan-state 5/5，变异 4/5×2，workbench-runs 7/7	done
+2026-10-17T01:37:26Z	09	OMP tool_call 扩展，目录外写入弹卡而不是硬拦	write 档不看路径，无原生开关；tools.approval 只能整工具 prompt	OMP tools/approval.ts, internal-urls/router.ts, extensibility/shared-events.ts, rpc-mode.ts confirm	adopted
+2026-10-17T01:37:26Z	09	弃用：钉 edit.mode=replace / import 原生 editInspect / 硬拦	改所有 ask 档编辑方式；跟 OMP 版本绑死；太死	edit/settings.ts 默认 hashline	discarded
+2026-10-17T01:37:26Z	09	验证	单测+五个变异+回归	write-guard 6/6，变异各抓到；team 32/32 runs 45/45 http-boundaries 100/100	done
+2026-10-17T01:37:26Z	all	退出条件	9 个 issue 全 done，相关测试全绿，每步有决策行	plan.md 状态表	met (未推送：token 只读)

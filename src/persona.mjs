@@ -18,6 +18,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { COMPUTER_PROMPT_TOOLS, COMPUTER_TOOL_NAMES, DEFAULT_TASK_CONCURRENCY } from "./constants.mjs";
+import { guardExtensionSource } from "./write-guard.mjs";
+
+const WRITE_GUARD_MODULE = new URL("./write-guard.mjs", import.meta.url).href;
 
 /**
  * 嵌入模型。multilingual = intfloat/multilingual-e5-large，中文换说法也召回得到；
@@ -104,6 +107,7 @@ export function personaText() {
  * @param {string[]} [opts.extraDisabledExtensions] 额外要禁用的扩展 id（如 chat 档逐个关掉的 `mcp:<name>`）
  * @param {string} [opts.librarySkillsDir] 共享技能库目录（team/skills），写进 skills.customDirectories
  * @param {{dbPath:string, bank:string}} [opts.memory] 开启记忆时必填：mnemopi 库文件和 bank
+ * @param {{cwd?:string, roots?:string[]}} [opts.writeRoots] 要我同意档可直接写的目录（bot cwd 和工作区）
  */
 export function writePersonaFiles(bot, dir, opts = {}) {
   mkdirSync(dir, { recursive: true });
@@ -239,9 +243,18 @@ export function writePersonaFiles(bot, dir, opts = {}) {
   );
   writeFileSync(overlayPath, lines.join("\n"), "utf8");
 
-  return {
-    personaPath,
-    overlayPath,
-    argv: ["--append-system-prompt", personaPath, "--config", overlayPath],
-  };
+  const argv = ["--append-system-prompt", personaPath, "--config", overlayPath];
+  if (bot.executionMode === "supervised" && (bot.approvalMode ?? "write") === "write") {
+    // 4d) 要我同意档：OMP 的 write 档对 write/edit/ast_edit 不看路径。挂一个 tool_call 扩展，
+    //     目标在 bot 目录、工作区、临时目录以外就弹卡。文件放在 bot 私有目录（不在 cwd 里），每次启动重写。
+    const guardPath = join(dir, "write-guard.js");
+    const wr = opts.writeRoots ?? {};
+    writeFileSync(guardPath, guardExtensionSource(WRITE_GUARD_MODULE, {
+      cwd: typeof wr.cwd === "string" ? wr.cwd : "",
+      roots: Array.isArray(wr.roots) ? wr.roots.filter((r) => typeof r === "string" && r) : [],
+    }), "utf8");
+    argv.push("--extension", guardPath);
+  }
+
+  return { personaPath, overlayPath, argv };
 }
