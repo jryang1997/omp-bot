@@ -636,6 +636,12 @@ export function createPanels({ client, deps }) {
     if (isLiveRun(run.state)) {
       actions.append(button("btn ghost danger", "停止", function () { return busy(this, client.cancel(run.id).then(() => { toast("已接受取消请求"); announce("已接受取消请求"); }), "停止中…"); }));
     }
+    if (run.botId && run.state === "interrupted" && !run.roomId && !run.parentRunId) {
+      actions.append(button("btn", run.resumedBy ? "已续上" : "接着做", function () {
+        // 服务端幂等：同一个中断的任务只会续一次，重复点只拿回已有的那次。
+        return busy(this, client.resume(run.id).then(({ resumed }) => toast(resumed ? "已接着做，先核对上次做到哪" : "这件事已经续过了")).catch((error) => toast(`没能接着做：${error.message}`, true)), "续上中…");
+      }));
+    }
     if (run.botId) {
       actions.append(button("btn ghost", "重试", () => {
         if (!confirm("重试会以相同内容发起一个新任务。已经发生的对外动作不会回滚。继续？")) return;

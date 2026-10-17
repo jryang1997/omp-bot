@@ -548,6 +548,16 @@ export function createRunClient(deps) {
     return result;
   }
 
+  async function resume(id) {
+    const result = await request(`/api/runs/${encodeURIComponent(id)}/resume`, { method: "POST", body: {} });
+    if (result.run) {
+      record(result.run);
+      deps.onRunStarted?.(result.run);
+      notify("run");
+    }
+    return result;
+  }
+
   async function steer(id, text, behavior = "steer") {
     const result = await request(`/api/runs/${encodeURIComponent(id)}/steer`, { method: "POST", body: { text, behavior } });
     if (result.run) applyRun(result.run);
@@ -738,7 +748,7 @@ export function createRunClient(deps) {
   }
 
   return {
-    on, connect, handleEvent, restore, start, cancel, steer, respond, note,
+    on, connect, handleEvent, restore, start, cancel, resume, steer, respond, note,
     record, applyRun, upsertApproval, pending, runsFor, activeFor, transcriptRuns, appendLive, statusText, avatarState,
     all: () => [...runs.values()],
     get: (id) => runs.get(id) || null,

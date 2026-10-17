@@ -713,6 +713,9 @@ export async function startServer({ port = 3099, host = "127.0.0.1", home, bin =
       return await orch.cancelRun(run.id, reason);
     } },
 
+    // 续跑被重启打断的 Run：只给主人（等于替 bot 重新派一次活）。
+    { method: "POST", path: ["api", "runs", "*", "resume"], status: 202, run: (c) => orch.resumeRun(c.segs[2]) },
+
     { method: "POST", path: ["api", "runs", "*", "steer"], access: "any", run: async (c) => {
       const run = orch.getRun(c.segs[2]);
       if (!run) throw httpError(404, "run 不存在");

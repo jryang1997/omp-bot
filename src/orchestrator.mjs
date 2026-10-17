@@ -2841,6 +2841,40 @@ export class Orchestrator {
     await Promise.allSettled(children);
   }
 
+  /**
+   * 续跑一次被重启打断的 Run（主人点"继续"）。只认 interrupted：reconciliation_required
+   * 有结果未知的外部动作，要先人工核对，不能续。派活子 Run 和群 Run 不在这里续：前者已经
+   * 作为"中断"交回给派活方，由它决定；后者是群的回合。同一个 Run 只续一次，重复请求返回同一个新 Run。
+   * 新 Run 在同一个常驻会话里跑，bot 看得到上次做到哪；提示里要求先核对再接着做，做完的不重做。
+   */
+  resumeRun(id) {
+    const run = this.getRun(id);
+    if (!run) throw httpErr(404, `run ${id} 不存在`, "run_not_found");
+    if (run.resumedBy) {
+      const again = this.getRun(run.resumedBy);
+      if (again) return { run: again, resumed: false };
+    }
+    if (run.state !== RUN_STATES.INTERRUPTED) {
+      throw httpErr(409, `只有因重启中断的 Run 能继续（当前 ${run.state}）`, "not_interrupted");
+    }
+    if (!run.botId || run.roomId || run.parentRunId) {
+      throw httpErr(409, "群聊回合和派出去的子任务不在这里继续", "resume_unsupported");
+    }
+    const text =
+      `[继续] 上一次这件事因为服务重启中断了（${run.id}）。先查清已经做到哪一步，做完的不要重做，` +
+      `结果不确定的先核对，再接着做完。原来的要求：\n\n${run.text}`;
+    const next = this.startRun({
+      botId: run.botId,
+      text,
+      attachmentIds: Array.isArray(run.attachmentIds) ? run.attachmentIds : [],
+      source: "resume",
+      ...(run.taskId ? { taskId: run.taskId } : {}),
+    });
+    this._patchRun(run.id, { resumedBy: next.id });
+    this._patchRun(next.id, { resumeOf: run.id });
+    return { run: this.getRun(next.id) ?? next, resumed: true };
+  }
+
   /** 中途指令：不创建第二并发运行。 */
   async steerRun(id, text, { behavior = "steer", images } = {}) {
     const run = this.getRun(id);

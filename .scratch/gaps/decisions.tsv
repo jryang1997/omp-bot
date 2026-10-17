@@ -13,3 +13,6 @@ ts	phase	decision	why	evidence	result
 2026-10-17T01:04:03Z	03	验证	单元+真实子进程+真实 HTTP	routine-check 6/6，两个变异都抓到，回归绿；smoke-gui 唯一失败是沙箱无 omp	done
 2026-10-17T01:05:42Z	06	不加 tier 参数，list_bots 带上模型	每 bot 一个模型一个常驻会话，分档就是挑人；按次切模型打乱缓存	orchestrator _handleListBots	adopted
 2026-10-17T01:05:42Z	06	验证	单测+变异	delegation 18/18，变异 17/18，回归绿	done
+2026-10-17T01:15:54Z	05	不自动续，改成用户点"接着做"	原设计约定重启后不自动重放；自动开跑会吓到用户	web/workbench-panels.js 1409 行提示文案	adopted
+2026-10-17T01:15:54Z	05	不用 OMP --continue	每 bot 常驻会话，新 Run 已接同一会话	orchestrator startRun	adopted
+2026-10-17T01:15:54Z	05	验证	单测+两个变异+回归	resume 5/5，变异 4/5、3/5，runs/http/workbench/delegation/unit 绿	done
