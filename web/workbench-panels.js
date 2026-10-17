@@ -789,7 +789,7 @@ export function createPanels({ client, deps }) {
     const memoryToggle = checkbox(bot.memoryEnabled === true, (checked) => void patchBot(bot, { memoryEnabled: checked }));
     const memoryCard = el("div", "bt-set-card");
     memoryCard.append(row("记忆开关",
-      "它会记住聊过的事，下次任务生效。第一次开启要下载约 2.7GB。",
+      "开着时它会自己记住聊过的事，下次任务生效，第一次开启要下载约 2.7GB。关着时，你明确让它记住的偏好和约定照样写进它的笔记（AGENTS.md）。",
       memoryToggle));
     root.append(section("记忆", memoryCard));
 
