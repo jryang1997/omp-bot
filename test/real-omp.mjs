@@ -61,6 +61,17 @@ try {
     assert.ok(reply, "子代理的 read 被拦");
   });
 
+  await test("相对路径落到工作区：write 和 bash 不带目录，都落在 proj，不进 bot 自己的目录", async () => {
+    const r = await run(call("write", { path: "rel-77.txt", content: "REL-77" }) + call("bash", { command: "cat rel-77.txt" }));
+    assert.equal(r.run.state, "completed");
+    assert.ok(existsSync(join(proj, "rel-77.txt")), "文件在工作区");
+    assert.ok(!existsSync(join(home, "team", "bots", ada, "rel-77.txt")), "不在 bot 目录");
+    assert.match(toolText(toolEnds(r.events, "bash").at(-1)), /REL-77/, "bash 在工作区里跑");
+    const seen = JSON.stringify(llm.requests.at(-1).messages);
+    assert.ok(seen.includes(`current working directory: '${proj}'`), "模型看到的当前目录是工作区");
+    assert.ok(!seen.includes(`current working directory: '${join(home, "team", "bots", ada)}'`));
+  });
+
   await test("08 计划状态：真 todo 帧解析成完整计划，卡住的带原因", async () => {
     const r = await run(
       call("todo", { op: "init", list: [{ phase: "调研", items: ["读文档", "列方案"] }, { phase: "实现", items: ["写代码"] }] }) +

@@ -22,17 +22,26 @@ import { secretPaths } from "./secret-guard.mjs";
 
 const WRITE_GUARD_MODULE = new URL("./write-guard.mjs", import.meta.url).href;
 const SECRET_GUARD_MODULE = new URL("./secret-guard.mjs", import.meta.url).href;
+const WORKSPACE_PATHS_MODULE = new URL("./workspace-paths.mjs", import.meta.url).href;
 
 /** 生成给 OMP --extension 加载的模块：只做 import + 注册，逻辑都在 src 里，测的就是跑的。 */
 function guardExtensionSource(opts) {
   return [
-    "// omp-bot 生成：密钥目录硬拦 + 要我同意档的写文件边界。每次启动重写，改了也没用。",
+    "// omp-bot 生成：相对路径落到工作区 + 密钥目录硬拦 + 要我同意档的写文件边界。每次启动重写，改了也没用。",
     `import { secretToolCall } from ${JSON.stringify(SECRET_GUARD_MODULE)};`,
     `import { guardToolCall } from ${JSON.stringify(WRITE_GUARD_MODULE)};`,
+    `import { payloadToWorkspace, toWorkspace } from ${JSON.stringify(WORKSPACE_PATHS_MODULE)};`,
     `const opts = ${JSON.stringify(opts)};`,
     "export default function guard(pi) {",
-    "  pi.on(\"tool_call\", (event, ctx) => secretToolCall(event, { ...opts, cwd: opts.cwd || ctx?.cwd })",
-    "    ?? (opts.writeBoundary ? guardToolCall(event, ctx, opts) : undefined));",
+    "  pi.on(\"tool_call\", async (event, ctx) => {",
+    "    // 先改路径再检查：硬拦和审批卡看到的都是真正要碰的位置。",
+    "    const input = toWorkspace(event.toolName, event.input, opts.workspace);",
+    "    const ev = input ? { ...event, input } : event;",
+    "    const verdict = secretToolCall(ev, { ...opts, cwd: opts.cwd || ctx?.cwd })",
+    "      ?? (opts.writeBoundary ? await guardToolCall(ev, ctx, opts) : undefined);",
+    "    return verdict ?? (input ? { input } : undefined);",
+    "  });",
+    "  pi.on(\"before_provider_request\", (event, ctx) => payloadToWorkspace(event.payload, opts.cwd || ctx?.cwd, opts.workspace));",
     "}",
     "",
   ].join("\n");
@@ -96,7 +105,7 @@ const USER_SOURCE_TOGGLES = [
  * persona.md 只留 omp-bot 必须注入的内容：团队工具怎么用、渠道消息的格式。
  * 名字、角色、专属指令在 team/bots/<id>/AGENTS.md 的身份块里，说话方式和征求同意在 team/AGENTS.md。
  */
-export function personaText() {
+export function personaText({ workspace, botDir } = {}) {
   return [
     `# 团队协作`,
     ``,
@@ -106,12 +115,13 @@ export function personaText() {
     `- 需要对方在后台并行处理时用 delegate_bot：它立即返回子 Run id，你之后可以继续做自己的事。`,
     `- 派活和问队友时，对方看不到你的对话：把背景、相关文件、现状和约束写全，别只丢一句「按刚才说的做」。`,
     `- 团队都该知道的事（约定、资料位置、被纠正过的说法）用 propose_team_fact 提议，写清来源；用户或主助手确认后才进团队共识。`,
-    `- 只跟你自己有关、要长期记住的事（主人的偏好、约定、踩过的坑），能写文件时就记进你工作目录的 AGENTS.md，写在身份块结束标记后面，一条一行，带上日期和来源；新会话、重启后都会读到。身份块里面别改，密码和密钥别记。`,
+    `- 只跟你自己有关、要长期记住的事（主人的偏好、约定、踩过的坑），能写文件时就记进你自己的 ${botDir ? join(botDir, "AGENTS.md") : "bots/<你的 id>/AGENTS.md"}，写在身份块结束标记后面，一条一行，带上日期和来源；新会话、重启后都会读到。身份块里面别改，密码和密钥别记。`,
     `- 每条消息第一行是方括号标签，写着场景和发送者，形如「[私聊，用户]」「[私聊，🤖 名字 (@id)]」「[群聊，产品群]」。记事时把来源一起记下。`,
     `- 群聊里，如果这轮你没有实质内容要说，只回复 [PASS]。`,
     `- 想点名某个成员接着说，用 @名字。`,
     `- 跨合作范围（不同工作区）的私有上下文不共享；不要索要其他工作区的私有资料。`,
     `- 回答简洁、直接，别复述规则本身。`,
+    ...(workspace ? [`- 主人给你的工作区是 ${workspace}，主人的项目和文件都在这里。相对路径和不带 cwd 的命令都落在工作区；你自己的文件（笔记、work/）用绝对路径。`] : []),
   ].join("\n");
 }
 
@@ -129,7 +139,7 @@ export function personaText() {
 export function writePersonaFiles(bot, dir, opts = {}) {
   mkdirSync(dir, { recursive: true });
   const personaPath = join(dir, "persona.md");
-  writeFileSync(personaPath, personaText(), "utf8");
+  writeFileSync(personaPath, personaText({ workspace: bot.workspace, botDir: opts.writeRoots?.cwd }), "utf8");
 
   const extraDisabled = Array.isArray(opts.extraDisabledExtensions) ? opts.extraDisabledExtensions : [];
   const overlayPath = join(dir, "isolate.yml");
@@ -271,6 +281,7 @@ export function writePersonaFiles(bot, dir, opts = {}) {
       roots: Array.isArray(wr.roots) ? wr.roots.filter((r) => typeof r === "string" && r) : [],
       writeBoundary: bot.executionMode === "supervised" && (bot.approvalMode ?? "write") === "write",
       secrets: secretPaths(opts.secretDirs),
+      workspace: typeof bot.workspace === "string" ? bot.workspace : "",
     }), "utf8");
     argv.push("--extension", guardPath);
   }

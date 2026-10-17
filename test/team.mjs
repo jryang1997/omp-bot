@@ -605,6 +605,8 @@ test("04 消息第一行标场景和发送者", () => {
   assert.equal(prompt.split("\n")[0], "[群聊，产品群]");
   assert.ok(personaText().includes("[私聊，用户]"), "bot 知道标签的含义");
   assert.match(personaText(), /AGENTS\.md，写在身份块结束标记后面/, "bot 知道自己的长期笔记记在哪");
+  assert.match(personaText({ workspace: "/w/proj" }), /工作区是 \/w\/proj.*相对路径和不带 cwd 的命令都落在工作区/, "相对路径落在工作区，不落进 bot 自己的目录");
+  assert.doesNotMatch(personaText(), /工作区是/, "没设工作区就不提");
 });
 
 // ---------------- 11 吉祥物头像 ----------------
