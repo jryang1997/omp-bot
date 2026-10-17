@@ -250,6 +250,12 @@ table.usage tr.total td { font-weight: 600; border-top: 1px solid var(--bt-line-
 .wb-todo-item::before { content: "○ "; color: var(--bt-ink-3); }
 .wb-todo-item.done { color: var(--bt-ink-3); text-decoration: line-through; }
 .wb-todo-item.done::before { content: "● "; }
+.wb-todo-phase { margin-top: 4px; color: var(--bt-ink-2); }
+.wb-todo-item.wb-todo-in_progress { color: var(--bt-ink); font-weight: 600; }
+.wb-todo-item.wb-todo-in_progress::before { content: "▸ "; }
+.wb-todo-item.wb-todo-abandoned { color: var(--bt-ink-3); }
+.wb-todo-item.wb-todo-abandoned::before { content: "– "; }
+.wb-todo-item.wb-todo-blocked::before { content: "! "; color: var(--bt-warn, #b45309); }
 .wb-artifacts { display: flex; flex-direction: column; gap: 8px; width: 100%; }
 .wb-artifact { border: .5px solid var(--bt-line); border-radius: 12px; background: var(--bt-card); max-width: min(560px, 100%); }
 .wb-preview { display: flex; flex-direction: column; gap: 6px; }

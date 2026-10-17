@@ -115,6 +115,30 @@ export function childStatusRank(status) {
   return 0;
 }
 
+const PLAN_STATUSES = new Set(["pending", "in_progress", "completed", "abandoned", "blocked"]);
+
+/**
+ * OMP 原生 todo 工具每次改动都在结果 details.phases 里带上完整计划。
+ * 从一条已解析的工具帧里取出计划；不是 todo 的成功结束帧、只是查看、或形状不对，返回 null。
+ */
+export function planFromTool(parsed) {
+  if (!parsed || parsed.kind !== "tool" || parsed.phase !== "end" || parsed.isError) return null;
+  if (parsed.name !== "todo") return null;
+  const details = parsed.result && typeof parsed.result === "object" ? parsed.result.details : null;
+  if (!details || details.op === "view" || !Array.isArray(details.phases)) return null;
+  const phases = [];
+  for (const phase of details.phases) {
+    if (!phase || typeof phase.name !== "string" || !Array.isArray(phase.tasks)) return null;
+    const tasks = [];
+    for (const task of phase.tasks) {
+      if (!task || typeof task.content !== "string" || !PLAN_STATUSES.has(task.status)) return null;
+      tasks.push(typeof task.blocker === "string" && task.blocker ? { content: task.content, status: task.status, blocker: task.blocker } : { content: task.content, status: task.status });
+    }
+    phases.push({ name: phase.name, tasks });
+  }
+  return phases;
+}
+
 /** Parse one native frame into a renderer input; null means "not a display frame". */
 export function parseNativeFrame(frame) {
   if (!frame || typeof frame.type !== "string") return null;

@@ -21,3 +21,5 @@ ts	phase	decision	why	evidence	result
 2026-10-17T01:21:04Z	04	验证	单测+四个变异+回归	computer-help 7/7，变异全抓到；computers/team/features/http/runs/unit/delegation 绿；smoke-gui 55/56 同基线	done
 2026-10-17T01:27:56Z	07	不开 OMP local/autolearn，改成 bot 记笔记进自己 AGENTS.md	local 要后台 token 且仓库已迁走过；autolearn 带 manage_skill 影响面大；AGENTS.md 块外本来就留给 bot	OMP docs/memory.md, autolearn/controller.ts, team.mjs BOT_AGENTS_TAIL	adopted
 2026-10-17T01:27:56Z	07	验证	断言+变异	team 32/32，删句变异 31/32	done
+2026-10-17T01:28:14Z	08	解析 OMP todo 工具结果的 details.phases	todo_reminder 只在想停但没做完时发，且只带未完成项	OMP session/todo-tracker.ts, tools/todo.ts	adopted
+2026-10-17T01:28:14Z	08	验证	单测+两个变异+回归	plan-state 5/5，变异 4/5×2，workbench-runs 7/7	done

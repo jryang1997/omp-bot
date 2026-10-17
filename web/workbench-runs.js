@@ -4,7 +4,7 @@
  * mutated in place so a token never rebuilds the chat log.
  */
 import { el, button, svgIcon, toast, announce, api, renderMarkdown, runStateLabel, isLiveRun, fmtClock, fmtDuration } from "./workbench-core.js";
-import { parseNativeFrame, mergeChildStats, childStatBits, childStatusRank } from "./workbench-native.js";
+import { parseNativeFrame, planFromTool, mergeChildStats, childStatBits, childStatusRank } from "./workbench-native.js";
 
 const ATTENTION = new Set(["waiting_input", "waiting_approval"]);
 /** 头像表情：刚完成时开心一下的时长，以及「刚发生事件」让头像动起来的时长。 */
@@ -288,6 +288,21 @@ class LiveRun {
       this.todoNode = el("div", "wb-todo");
       this.stream.append(this.todoNode);
     }
+    if (Array.isArray(frame.phases)) {
+      // 原生 todo 工具给的完整计划：每次改动整份替换，进度是做完的/总数。
+      const all = frame.phases.flatMap((phase) => phase.tasks);
+      const closed = all.filter((task) => task.status === "completed" || task.status === "abandoned").length;
+      this.todoNode.replaceChildren(el("div", "wb-todo-title", `计划 ${closed}/${all.length}`));
+      for (const phase of frame.phases) {
+        if (frame.phases.length > 1) this.todoNode.append(el("div", "wb-todo-phase", phase.name));
+        for (const task of phase.tasks) {
+          const line = el("div", `wb-todo-item wb-todo-${task.status}${task.status === "completed" ? " done" : ""}`, `${task.content}${task.blocker ? `（卡住：${task.blocker}）` : ""}`);
+          this.todoNode.append(line);
+        }
+      }
+      this.keepPinned();
+      return;
+    }
     this.todoNode.replaceChildren(el("div", "wb-todo-title", "任务清单"));
     if (!todos) {
       this.todoNode.append(el("div", "wb-note", JSON.stringify(frame.raw ?? frame.todos ?? {})));
@@ -429,6 +444,8 @@ export function createRunClient(deps) {
     else if (parsed.kind === "block_end") node.endPart(parsed.block);
     else if (parsed.kind === "tool") {
       node.tool(parsed);
+      const plan = planFromTool(parsed);
+      if (plan) node.todo({ phases: plan });
       if (Array.isArray(parsed.children) && parsed.children.length) node.childTasks(parsed.children);
     } else if (parsed.kind === "subagent") {
       node.subagent({ id: parsed.id, label: parsed.name, agent: parsed.phase, status: parsed.status, progress: parsed.progress, detail: parsed.detail });
