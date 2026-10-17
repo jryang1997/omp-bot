@@ -1504,6 +1504,27 @@ await test("外部动作做到一半崩溃：重启后 Run 记 reconciliation_re
   }
 });
 
+await test("外部动作记不下来就不做：记账写失败直接报错，不静默放行", async () => {
+  const t = newTeam();
+  try {
+    const bot = t.orch.addBot({ name: "EffBot3" });
+    const fake = await t.orch.runtimeFor(bot.id, "private");
+    fake.queue = [{ kind: "hang" }];
+    const run = t.orch.startRun({ botId: bot.id, text: "装包" });
+    await waitFor(() => fake.busy, { label: "在跑" });
+    const real = t.orch.ledger.updateRun.bind(t.orch.ledger);
+    t.orch.ledger.updateRun = () => { throw new Error("disk I/O error"); };
+    try {
+      assert.throws(() => t.orch.beginSideEffect(run.id, { tool: "computer_shell" }), (e) => e.code === "side_effect_record_failed");
+    } finally {
+      t.orch.ledger.updateRun = real;
+    }
+    await t.orch.cancelRun(run.id);
+  } finally {
+    await t.cleanup();
+  }
+});
+
 await test("外部动作都落定后再崩溃：只记 interrupted，不夸大成未知", async () => {
   const t = newTeam();
   let t2;

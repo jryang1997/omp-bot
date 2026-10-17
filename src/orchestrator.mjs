@@ -1909,6 +1909,7 @@ export class Orchestrator {
    * 键 = 工具名 + 本 Run 里第几次调用，同一 Run 里每次动作各一个。
    * 进程在动作中途没了，重启时这笔变 unknown、Run 落 reconciliation_required，不当成没做过。
    * @returns {string|null} 动作键；没有 Run 或台账只读时返回 null（不挡动作本身）
+   * @throws 记账写失败：没记下就不做，否则崩溃后这次动作会被当成没发生过
    */
   beginSideEffect(runId, { tool, kind = null } = {}) {
     if (!runId || this.ledger.readonly) return null;
@@ -1925,7 +1926,7 @@ export class Orchestrator {
       return id;
     } catch (e) {
       this.emit("side_effect_record_error", { runId, error: e?.message ?? String(e) });
-      return null;
+      throw httpErr(503, `动作没做：记录这次动作失败（${e?.message ?? String(e)}）`, "side_effect_record_failed");
     }
   }
 
