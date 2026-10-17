@@ -253,7 +253,7 @@ export class Routines {
   /**
    * 新建计划。新建一律 paused（导入/首次创建不自动开跑），需显式 resume。
    * @param {{name?:string, botId:string, text:string, schedule:object, paused?:boolean,
-   *          timeoutMs?:number, overlap?:'skip'|'queue', missedPolicy?:'record'|'none',
+   *          timeoutMs?:number, missedPolicy?:'record'|'none',
    *          budget?:object|null, owner?:string}} input
    */
   create(input = {}) {
@@ -274,7 +274,6 @@ export class Routines {
       schedule,
       paused: input.paused !== false, // 默认 paused
       timeoutMs: intArg(input.timeoutMs, { min: 1000, max: 24 * 3600 * 1000, dflt: DEFAULT_TIMEOUT_MS }),
-      overlap: input.overlap === "queue" ? "queue" : "skip",
       missedPolicy: input.missedPolicy === "none" ? "none" : "record",
       budget: input.budget ?? null,
       check: normalizeCheck(input.check),
@@ -317,7 +316,6 @@ export class Routines {
     if (patch.timeoutMs !== undefined) {
       rec.timeoutMs = intArg(patch.timeoutMs, { min: 1000, max: 24 * 3600 * 1000, dflt: DEFAULT_TIMEOUT_MS });
     }
-    if (patch.overlap !== undefined) rec.overlap = patch.overlap === "queue" ? "queue" : "skip";
     if (patch.missedPolicy !== undefined) rec.missedPolicy = patch.missedPolicy === "none" ? "none" : "record";
     if (patch.budget !== undefined) rec.budget = patch.budget;
     if (patch.check !== undefined) rec.check = normalizeCheck(patch.check, rec.check);
@@ -358,11 +356,10 @@ export class Routines {
     }
     if (rec.activeRunId) {
       const active = this.orch.getRun?.(rec.activeRunId);
+      // 上一次还没跑完就跳过这一次，留回执。不排队：同一个助手私聊同时只能跑一个回合。
       if (active && !TERMINAL_RUN_STATES.has(active.state)) {
-        if (rec.overlap !== "queue") {
-          this.#receipt(rec, { at: now, status: "skipped", reason: "overlap", runId: active.id });
-          return { status: "skipped", reason: "overlap", runId: active.id };
-        }
+        this.#receipt(rec, { at: now, status: "skipped", reason: "overlap", runId: active.id });
+        return { status: "skipped", reason: "overlap", runId: active.id };
       } else {
         rec.activeRunId = null;
       }
