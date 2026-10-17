@@ -19,3 +19,5 @@ ts	phase	decision	why	evidence	result
 2026-10-17T01:21:04Z	04	不做原地等待态，归还时开新 Run	接管让代号+1、旧租约永久作废；原地等待要复活旧租约	computers.mjs takeover/acquireRunLease	adopted
 2026-10-17T01:21:04Z	04	不做 VNC 视频流，接管期间前端每秒截图	成本低，够处理验证码和登录	web/workbench-computer.js	adopted
 2026-10-17T01:21:04Z	04	验证	单测+四个变异+回归	computer-help 7/7，变异全抓到；computers/team/features/http/runs/unit/delegation 绿；smoke-gui 55/56 同基线	done
+2026-10-17T01:27:56Z	07	不开 OMP local/autolearn，改成 bot 记笔记进自己 AGENTS.md	local 要后台 token 且仓库已迁走过；autolearn 带 manage_skill 影响面大；AGENTS.md 块外本来就留给 bot	OMP docs/memory.md, autolearn/controller.ts, team.mjs BOT_AGENTS_TAIL	adopted
+2026-10-17T01:27:56Z	07	验证	断言+变异	team 32/32，删句变异 31/32	done

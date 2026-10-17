@@ -604,6 +604,7 @@ test("04 消息第一行标场景和发送者", () => {
   const prompt = roomPrompt({ room, members: [{ id: "bot_a", name: "A" }], self: { id: "bot_a", name: "A" }, turnNumber: 1 });
   assert.equal(prompt.split("\n")[0], "[群聊，产品群]");
   assert.ok(personaText().includes("[私聊，用户]"), "bot 知道标签的含义");
+  assert.match(personaText(), /AGENTS\.md，写在身份块结束标记后面/, "bot 知道自己的长期笔记记在哪");
 });
 
 // ---------------- 11 吉祥物头像 ----------------
