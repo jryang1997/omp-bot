@@ -45,7 +45,13 @@ try {
   rt.queue.push({ kind: "complete", text: "第二条回复" });
   await page.fill("#input", "第二条");
   await page.keyboard.press("Enter");
-  await page.waitForFunction(() => document.getElementById("chat-log").innerText.includes("第二条回复"), null, { timeout: 8000 });
+  await page.waitForFunction(() => document.getElementById("chat-log").innerText.includes("第二条回复"), null, { timeout: 8000 }).catch(async (e) => {
+    console.log("DEBUG chat-log:", JSON.stringify(await page.textContent("#chat-log")), "errors:", errors.join("; "));
+    console.log("DEBUG runs:", JSON.stringify(orch.listRuns().map((r) => [r.text?.slice?.(0, 6), r.state, r.error?.message || r.error])));
+    await page.waitForTimeout(3000);
+    console.log("DEBUG later:", JSON.stringify(await page.textContent("#chat-log")), JSON.stringify(orch.listRuns().map((r) => r.state)));
+    throw e;
+  });
   await page.waitForTimeout(200);
   const fresh = await page.$$eval("#chat-log .is-new", (els) => els.map((e) => e.innerText.trim().slice(0, 12)));
   const old = await page.$$eval("#chat-log .bt-urow:not(.is-new)", (els) => els.map((e) => e.innerText.trim()));

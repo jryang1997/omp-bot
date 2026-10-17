@@ -386,7 +386,9 @@ export function createRunClient(deps) {
   const record = (run, sequence = seqCursor) => {
     if (!run || !run.id) return null;
     const existing = runs.get(run.id);
-    runs.set(run.id, { ...existing, ...run });
+    // 运行很快时，结束事件会比提交接口的返回先到。返回里那份旧快照不能把已结束改回进行中。
+    const stale = TERMINAL.has(existing?.state) && !TERMINAL.has(run.state);
+    runs.set(run.id, stale ? { ...run, ...existing } : { ...existing, ...run });
     runSequences.set(run.id, sequence);
     return runs.get(run.id);
   };
@@ -462,6 +464,12 @@ export function createRunClient(deps) {
     if (node) {
       node.run = runs.get(run.id);
       if (run.state) node.setState(run.state);
+    }
+    // 结束事件先于提交返回到达时还没有实时行，也要通知一次，聊天记录才会刷新。
+    if (TERMINAL.has(run.state) && !node && !replay && wasTerminal !== run.state) {
+      const finished = runs.get(run.id);
+      const botChat = !!finished.botId && !finished.roomId && finished.kind !== "delegation";
+      if (botChat) deps.onRunFinished?.(finished, { text: "", botChat });
     }
     if (TERMINAL.has(run.state) && node) {
       node.collapseThinking();

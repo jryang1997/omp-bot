@@ -261,6 +261,9 @@ function renderSidebar() {
   syncAvatars();
 }
 
+// 每个会话已经画过几条消息，用来只给新来的消息加进场动效。
+const chatSeen = new Map();
+
 function select(kind, id) {
   const target = { kind, id };
   if (!itemOf(target)) return;
@@ -276,7 +279,10 @@ function select(kind, id) {
   resizeInput();
   state.tray?.setBot(kind === "bot" ? id : null);
   renderSidebar();
+  chatSeen.delete(keyOf(target));
   renderSelected(true);
+  // 单聊马上会重新拉历史：先清掉这次的记数，等历史到了那次再算首次。
+  if (kind === "bot") chatSeen.delete(keyOf(target));
   if (fromSidebar) $("head-title").focus();
   if (kind === "bot") void loadChat(id).catch((error) => toast(`历史加载失败：${error.message}`, true));
 }
@@ -438,8 +444,6 @@ function chatWelcome(target, item) {
 }
 
 /** 每个会话上次画到第几条消息，用来认出新消息。 */
-const chatSeen = new Map();
-
 function renderChat(scroll = false) {
   const target = state.sel;
   const item = itemOf(target);
@@ -452,9 +456,11 @@ function renderChat(scroll = false) {
   let previousDay = "";
   // 只给这次新来的消息加进场动效：整段日志每次都会重画，全加会一起闪。切换会话后第一次画不加。
   const seenKey = keyOf(target);
+  const loading = target.kind === "bot" && state.history.get(target.id)?.loading;
   const seen = chatSeen.get(seenKey);
-  const freshFrom = seen != null && messages.length > seen ? seen : messages.length;
-  chatSeen.set(seenKey, messages.length);
+  const freshFrom = !loading && seen != null && messages.length > seen ? seen : messages.length;
+  // 切换会话时清掉记数；历史加载中不记，加载完那次画算首次，旧消息不闪。
+  if (!loading) chatSeen.set(seenKey, messages.length);
   for (const [index, message] of messages.entries()) {
     const date = new Date(message.at);
     if (Number.isFinite(date.getTime())) {
@@ -469,7 +475,6 @@ function renderChat(scroll = false) {
     if (index >= freshFrom) node.classList.add("is-new");
     log.append(node);
   }
-  const loading = target.kind === "bot" && state.history.get(target.id)?.loading;
   state.runs?.appendLive(log, target);
   if (!messages.length && !loading && !liveRuns(target).length) {
     log.append(target.kind === "bot" ? chatWelcome(target, item) : el("div", "empty-hint", "发一条消息，开始群聊回合"));
@@ -588,9 +593,10 @@ async function send() {
   }
   renderSidebar();
   renderSelected(true);
+  let startedRun = null;
   try {
     if (target.kind === "bot") {
-      await state.runs.start({ botId: target.id, text, attachmentIds, source: "user" });
+      startedRun = await state.runs.start({ botId: target.id, text, attachmentIds, source: "user" });
       state.tray?.clear(target.id, attachmentIds);
     } else {
       const { spoken } = await api(`/api/rooms/${encodeURIComponent(target.id)}/say`, { method: "POST", body: { text, userName: "你" } });
@@ -614,6 +620,11 @@ async function send() {
     announce(`发送失败：${error.message}`);
   } finally {
     if (state.pending.get(key) === pending) state.pending.delete(key);
+    // 回合在提交返回前就跑完了：结束时发送还没收尾、没法拉历史，这里补拉一次。
+    const settled = startedRun && state.runs.get(startedRun.id);
+    if (target.kind === "bot" && settled && ["completed", "failed", "cancelled", "interrupted", "reconciliation_required"].includes(settled.state) && isSelected(target)) {
+      void loadChat(target.id).catch((error) => toast(`历史加载失败：${error.message}`, true));
+    }
     if (target.kind === "room") {
       state.roomActivity.delete(target.id);
       state.revision += 1;
