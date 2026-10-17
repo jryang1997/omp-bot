@@ -85,29 +85,27 @@ await test("看不出写哪儿也弹卡", async () => {
   assert.match(f.calls[0].msg, /看不出/);
 });
 
-await test("只有要我同意档挂扩展；生成的模块能被加载并真的拦", async () => {
+await test("除了聊天档都挂扩展；写文件边界只在要我同意档拦；生成的模块能被加载并真的拦", async () => {
   const dir = join(sandbox, "persona");
-  const modes = [
-    [{ executionMode: "supervised", approvalMode: "write" }, true],
-    [{ executionMode: "supervised", approvalMode: "always-ask" }, false],
-    [{ executionMode: "supervised", approvalMode: "yolo" }, false],
-    [{ executionMode: "autonomous", approvalMode: "yolo" }, false],
-    [{ executionMode: "chat" }, false],
-  ];
-  for (const [fields, want] of modes) {
+  const load = async (fields) => {
     const { argv } = writePersonaFiles({ id: "b1", ...fields }, dir, { writeRoots: { cwd, roots: [workspace] } });
-    assert.equal(argv.includes("--extension"), want, JSON.stringify(fields));
+    if (!argv.includes("--extension")) return null;
+    const guardPath = argv[argv.indexOf("--extension") + 1];
+    assert.ok(!guardPath.startsWith(cwd), "扩展文件不放在 bot 能直接改的 cwd 里");
+    const handlers = {};
+    const mod = await import(`${pathToFileURL(guardPath).href}?${Math.random()}`);
+    mod.default({ on: (name, fn) => { handlers[name] = fn; } });
+    return handlers.tool_call;
+  };
+  const etc = { toolName: "write", input: { path: "/etc/hosts" } };
+  assert.equal(await load({ executionMode: "chat" }), null);
+  const ask = await load({ executionMode: "supervised", approvalMode: "write" });
+  assert.equal((await ask(etc, { hasUI: false })).block, true);
+  assert.equal(await ask({ toolName: "write", input: { path: join(workspace, "ok.txt") } }, { hasUI: false }), undefined);
+  for (const fields of [{ executionMode: "supervised", approvalMode: "always-ask" }, { executionMode: "full", approvalMode: "yolo" }]) {
+    const h = await load(fields);
+    assert.equal(await h(etc, { hasUI: false }), undefined, JSON.stringify(fields));
   }
-  const { argv } = writePersonaFiles({ id: "b1", executionMode: "supervised", approvalMode: "write" }, dir, { writeRoots: { cwd, roots: [workspace] } });
-  const guardPath = argv[argv.indexOf("--extension") + 1];
-  assert.ok(!guardPath.startsWith(cwd), "扩展文件不放在 bot 能直接改的 cwd 里");
-  const handlers = {};
-  const mod = await import(pathToFileURL(guardPath).href);
-  mod.default({ on: (name, fn) => { handlers[name] = fn; } });
-  assert.equal(typeof handlers.tool_call, "function");
-  assert.equal((await handlers.tool_call({ toolName: "write", input: { path: "/etc/hosts" } }, { hasUI: false })).block, true);
-  assert.equal(await handlers.tool_call({ toolName: "write", input: { path: join(workspace, "ok.txt") } }, { hasUI: false }), undefined);
-  assert.match(readFileSync(guardPath, "utf8"), /write-guard\.mjs/);
 });
 
 await test("BotRuntime 启动参数带上 cwd 和工作区", async () => {

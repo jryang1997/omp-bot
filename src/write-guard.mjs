@@ -4,7 +4,8 @@
  * OMP 的 write 档会直接放行 write/edit/ast_edit，不看路径在哪。这里补一条：
  * 目标在 bot 自己的目录、工作区、系统临时目录以外，就先弹一张「要我同意」卡，
  * 主人同意才写；看不出要写哪儿也弹卡。处理器出错时 OMP 按拦截处理（失败即关）。
- * 只在 supervised + write 档挂上；全部放手档按用户选择不拦，chat 档本来就没有写工具。
+ * 只在 supervised + write 档生效；全部放手档按用户选择不拦，chat 档本来就没有写工具。
+ * 和密钥硬拦（secret-guard.mjs）挂在同一个扩展里，扩展源码由 persona.mjs 生成。
  */
 import { realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -86,7 +87,7 @@ export function writeTargets(toolName, input) {
 }
 
 /** 解析符号链接：取最近一个存在的上级做 realpath，再接回剩下的部分。 */
-function realish(path) {
+export function realish(path) {
   let head = path;
   const tail = [];
   for (;;) {
@@ -161,17 +162,4 @@ export async function guardToolCall(event, ctx, opts = {}) {
   if (!ctx?.hasUI || typeof ctx.ui?.confirm !== "function") return denied;
   const ok = await ctx.ui.confirm("允许改目录外的文件？", what);
   return ok === true ? undefined : denied;
-}
-
-/** 生成给 OMP --extension 加载的模块源码：只做 import + 注册，逻辑都在本文件里，测的就是跑的。 */
-export function guardExtensionSource(moduleUrl, opts) {
-  return [
-    "// omp-bot 生成：要我同意档的写文件边界。每次启动重写，改了也没用。",
-    `import { guardToolCall } from ${JSON.stringify(moduleUrl)};`,
-    `const opts = ${JSON.stringify(opts)};`,
-    "export default function writeGuard(pi) {",
-    '  pi.on("tool_call", (event, ctx) => guardToolCall(event, ctx, opts));',
-    "}",
-    "",
-  ].join("\n");
 }

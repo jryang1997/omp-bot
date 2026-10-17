@@ -32,3 +32,4 @@ ts	phase	decision	why	evidence	result
 2026-10-17T02:12:53Z	02	修：指纹前去掉 OMP 重复读提示	真 omp 第 3 次相同 read 起加计数提示，指纹永不重复	OMP 18.11.3 实测原文	adopted
 2026-10-17T02:12:53Z	04	真测 skip	沙盒无 /dev/kvm，起不了 VM	ls /dev/kvm 无	skip
 2026-10-17T02:12:53Z	real	验证	真 omp 端到端 + 全量 npm test	见 issue 02 与 plan.md 实测段	done
+2026-10-17T03:02:08Z	10	密钥目录硬拦，任何档位都拦，不弹卡	01 放行 cat/grep/head 后 ask 档能静默读 ~/.ssh 和 runtime.json（服务 token）；对标 openhuman 无论档位硬拒；OMP 无原生设置，复用 09 的 tool_call 扩展	test/secret-guard 6/6，8 处变异全抓到；real-omp 8/8，关掉硬拦后两条真测都失败（token 进了模型上下文）	adopted

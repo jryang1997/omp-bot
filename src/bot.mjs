@@ -257,6 +257,7 @@ export class BotRuntime extends EventEmitter {
       librarySkillsDir: this.dirs.librarySkillsDir,
       memory: { dbPath: this.dirs.memoryDbPath, bank: memoryBank(this.bot.id) },
       writeRoots: { cwd: this.cwd, roots: this.workspace ? [this.workspace] : [] },
+      secretDirs: { ompbotHome: this.home, agentDirs: [userAgentDir()] },
     });
     const mode = this.bot.executionMode === "chat" ? "rpc" : "rpc-ui";
     const args = ["--session-dir", this.sessionDir, ...personaArgv];

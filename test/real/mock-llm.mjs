@@ -7,12 +7,36 @@ import { createServer } from "node:http";
 const textOf = (c) => (typeof c === "string" ? c : Array.isArray(c) ? c.map((p) => p?.text ?? "").join("") : "");
 const SCRIPT = /\[\[(tool|sleep):/;
 
+/** 按括号配对切 JSON，参数里可以再嵌一段 [[tool:...]]（给子任务的脚本）。 */
+function toolSteps(text) {
+  const steps = [];
+  const head = /\[\[tool:([\w.-]+)\s+\{/g;
+  let m;
+  while ((m = head.exec(text))) {
+    const start = m.index + m[0].length - 1;
+    let depth = 0;
+    let str = false;
+    let end = -1;
+    for (let i = start; i < text.length && end < 0; i++) {
+      const c = text[i];
+      if (str) { if (c === "\\") i++; else if (c === '"') str = false; }
+      else if (c === '"') str = true;
+      else if (c === "{") depth++;
+      else if (c === "}" && --depth === 0) end = i;
+    }
+    if (end < 0 || !text.startsWith("]]", end + 1)) continue;
+    steps.push({ name: m[1], args: text.slice(start, end + 1) });
+    head.lastIndex = end + 3;
+  }
+  return steps;
+}
+
 function plan(messages) {
   let at = -1;
   for (let i = messages.length - 1; i >= 0; i--) if (messages[i].role === "user" && SCRIPT.test(textOf(messages[i].content))) { at = i; break; }
   if (at < 0) for (let i = messages.length - 1; i >= 0; i--) if (messages[i].role === "user") { at = i; break; }
   const user = at >= 0 ? textOf(messages[at].content) : "";
-  const steps = [...user.matchAll(/\[\[tool:([\w.-]+)\s+(\{.*?\})\]\]/gs)].map((m) => ({ name: m[1], args: m[2] }));
+  const steps = toolSteps(user);
   const sleep = Number(/\[\[sleep:(\d+)\]\]/.exec(user)?.[1] || 0);
   const after = messages.slice(at + 1);
   const done = after.filter((m) => m.role === "assistant" && Array.isArray(m.tool_calls)).reduce((n, m) => n + m.tool_calls.length, 0);
@@ -35,7 +59,7 @@ export function startMockLlm() {
       try { j = JSON.parse(body); } catch {}
       const messages = j.messages || [];
       const p = plan(messages);
-      requests.push({ tools: (j.tools || []).map((t) => t.function?.name), messages, plan: p });
+      requests.push({ tools: (j.tools || []).map((t) => t.function?.name), toolDefs: j.tools || [], messages, plan: p });
       if (p.sleep) await new Promise((r) => setTimeout(r, p.sleep));
       if (res.destroyed) return;
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });

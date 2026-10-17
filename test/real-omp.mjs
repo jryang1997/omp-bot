@@ -66,15 +66,18 @@ async function run(text, answer = () => null) {
     if (DONE.has(now.state)) return { run: now, cards, events: await events(r.id) };
     await sleep(250);
   }
+  await api("POST", `/api/runs/${r.id}/cancel`, {}).catch(() => {}); // 别让后面的用例撞上 target_busy
   throw new Error(`run ${r.id} 没结束`);
 }
 const call = (name, args) => `[[tool:${name} ${JSON.stringify(args)}]] `;
 const toolEnds = (evs, name) => evs.filter((e) => e.event?.type === "tool_execution_end" && (!name || e.event.toolName === name));
+const textOf = (c) => (typeof c === "string" ? c : Array.isArray(c) ? c.map((p) => p?.text ?? "").join("") : "");
 const toolText = (e) => (e.event.result?.content ?? []).map((p) => p.text ?? "").join("");
 
 let passed = 0;
 let failed = 0;
 async function test(name, fn) {
+  if (process.env.REAL_ONLY && !name.includes(process.env.REAL_ONLY)) return;
   try { await fn(); passed++; console.log(`PASS  ${name}`); }
   catch (e) { failed++; console.log(`FAIL  ${name}\n      ${e?.stack ?? e}`); }
 }
@@ -99,6 +102,27 @@ try {
     assert.deepEqual(r2.cards.map((c) => c.method), ["confirm", "select"]);
     assert.match(r2.cards[1].title, /^Allow tool: bash/);
     assert.ok(existsSync(out2) && !existsSync(join(proj, "in.txt")));
+  });
+
+  await test("密钥硬拦：要我同意档里 cat/read 碰 runtime.json 和 ~/.ssh 都被拦，不弹卡，token 不进模型", async () => {
+    const r = await run(call("bash", { command: `cat ${join(home, "runtime.json")}` }) + call("read", { path: "~/.ssh/id_rsa" }));
+    assert.equal(r.run.state, "completed");
+    assert.deepEqual(r.cards, [], "硬拦不弹卡");
+    for (const name of ["bash", "read"]) assert.match(toolText(toolEnds(r.events, name).at(-1)), /没执行。.*任何档位都不读不写/s, name);
+    const seen = JSON.stringify(llm.requests.slice(-3).map((q) => q.messages));
+    assert.ok(!seen.includes(desc.token), "服务 token 没进模型上下文");
+  });
+
+  await test("密钥硬拦管到 OMP 原生子任务：子代理 read ~/.ssh 也被拦", async () => {
+    const sub = `SUB-${Date.now()}`;
+    await run(call("task", { i: "读钥匙", context: sub, tasks: [{ task: `${sub} ${call("read", { path: "~/.ssh/id_rsa" })}${call("yield", { data: "done" })}`, solutionSpace: "one read" }] }), (a) => (a.method === "confirm" ? { confirmed: true } : { value: "Approve" }));
+    let reply = null;
+    for (let i = 0; i < 120 && !reply; i++) {
+      reply = llm.requests.flatMap((q) => q.messages).find((m) => m.role === "tool" && /\.ssh\/id_rsa/.test(textOf(m.content)) && /没执行/.test(textOf(m.content)));
+      if (!reply) await sleep(250);
+    }
+    assert.ok(llm.requests.some((q) => q.messages.some((m) => m.role === "user" && textOf(m.content).includes(sub) && !textOf(m.content).includes("[[tool:task"))), "子代理真的跑了");
+    assert.ok(reply, "子代理的 read 被拦");
   });
 
   await test("08 计划状态：真 todo 帧解析成完整计划，卡住的带原因", async () => {

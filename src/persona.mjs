@@ -18,9 +18,25 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { COMPUTER_PROMPT_TOOLS, COMPUTER_TOOL_NAMES, DEFAULT_TASK_CONCURRENCY } from "./constants.mjs";
-import { guardExtensionSource } from "./write-guard.mjs";
+import { secretPaths } from "./secret-guard.mjs";
 
 const WRITE_GUARD_MODULE = new URL("./write-guard.mjs", import.meta.url).href;
+const SECRET_GUARD_MODULE = new URL("./secret-guard.mjs", import.meta.url).href;
+
+/** 生成给 OMP --extension 加载的模块：只做 import + 注册，逻辑都在 src 里，测的就是跑的。 */
+function guardExtensionSource(opts) {
+  return [
+    "// omp-bot 生成：密钥目录硬拦 + 要我同意档的写文件边界。每次启动重写，改了也没用。",
+    `import { secretToolCall } from ${JSON.stringify(SECRET_GUARD_MODULE)};`,
+    `import { guardToolCall } from ${JSON.stringify(WRITE_GUARD_MODULE)};`,
+    `const opts = ${JSON.stringify(opts)};`,
+    "export default function guard(pi) {",
+    "  pi.on(\"tool_call\", (event, ctx) => secretToolCall(event, { ...opts, cwd: opts.cwd || ctx?.cwd })",
+    "    ?? (opts.writeBoundary ? guardToolCall(event, ctx, opts) : undefined));",
+    "}",
+    "",
+  ].join("\n");
+}
 
 /**
  * 嵌入模型。multilingual = intfloat/multilingual-e5-large，中文换说法也召回得到；
@@ -108,6 +124,7 @@ export function personaText() {
  * @param {string} [opts.librarySkillsDir] 共享技能库目录（team/skills），写进 skills.customDirectories
  * @param {{dbPath:string, bank:string}} [opts.memory] 开启记忆时必填：mnemopi 库文件和 bank
  * @param {{cwd?:string, roots?:string[]}} [opts.writeRoots] 要我同意档可直接写的目录（bot cwd 和工作区）
+ * @param {{ompbotHome?:string, agentDirs?:string[]}} [opts.secretDirs] 除了 ~ 下的常见凭据，还要硬拦的位置
  */
 export function writePersonaFiles(bot, dir, opts = {}) {
   mkdirSync(dir, { recursive: true });
@@ -244,14 +261,16 @@ export function writePersonaFiles(bot, dir, opts = {}) {
   writeFileSync(overlayPath, lines.join("\n"), "utf8");
 
   const argv = ["--append-system-prompt", personaPath, "--config", overlayPath];
-  if (bot.executionMode === "supervised" && (bot.approvalMode ?? "write") === "write") {
-    // 4d) 要我同意档：OMP 的 write 档对 write/edit/ast_edit 不看路径。挂一个 tool_call 扩展，
-    //     目标在 bot 目录、工作区、临时目录以外就弹卡。文件放在 bot 私有目录（不在 cwd 里），每次启动重写。
-    const guardPath = join(dir, "write-guard.js");
+  if (bot.executionMode !== "chat") {
+    // 4d) 一个 tool_call 扩展，两条规矩（OMP 原生扩展点，文件放 bot 私有目录、不在 cwd 里，每次启动重写）：
+    //     任何档位碰密钥目录一律拦；要我同意档的 write/edit/ast_edit 写到 bot 目录、工作区、临时目录以外先弹卡。
+    const guardPath = join(dir, "guard.js");
     const wr = opts.writeRoots ?? {};
-    writeFileSync(guardPath, guardExtensionSource(WRITE_GUARD_MODULE, {
+    writeFileSync(guardPath, guardExtensionSource({
       cwd: typeof wr.cwd === "string" ? wr.cwd : "",
       roots: Array.isArray(wr.roots) ? wr.roots.filter((r) => typeof r === "string" && r) : [],
+      writeBoundary: bot.executionMode === "supervised" && (bot.approvalMode ?? "write") === "write",
+      secrets: secretPaths(opts.secretDirs),
     }), "utf8");
     argv.push("--extension", guardPath);
   }
