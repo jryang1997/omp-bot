@@ -257,7 +257,7 @@ export function writePersonaFiles(bot, dir, opts = {}) {
       "bash:",
       "  allowCompoundCommands: true",
       "  patterns:",
-      ...READ_ONLY_BASH_PATTERNS.map((match) => `    - { match: ${JSON.stringify(match)}, approval: allow }`),
+      ...[...READ_ONLY_BASH_PATTERNS, ...(bot.allowedCommands ?? [])].map((match) => `    - { match: ${JSON.stringify(match)}, approval: allow }`),
     );
   }
 

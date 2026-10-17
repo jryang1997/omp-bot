@@ -356,6 +356,12 @@ try {
     approverRespond.status === 403 && /CHANNEL_IDENTITY_REQUIRED/.test(approverRespond.text),
     `status=${approverRespond.status}`,
   );
+  const approverRemember = await raw("/api/approvals/appr_boundary_fs/respond", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${approver.token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ value: "Approve", remember: true }),
+  });
+  check("设备不能把命令记成以后都允许 403 remember_forbidden", approverRemember.status === 403 && /remember_forbidden/.test(approverRemember.text), `status=${approverRemember.status}`);
   const ownerRespond = await api("/api/approvals/appr_boundary_fs/respond", { method: "POST", body: { value: "Approve" } });
   check("owner 回答非活跃审批是显式错误（不假成功）", [400, 409].includes(ownerRespond.status), `status=${ownerRespond.status}`);
 

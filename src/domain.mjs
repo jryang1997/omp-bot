@@ -2,6 +2,7 @@
 // 领域建模：花名册/群用 registry（id→记录），bot 运行态用显式状态机，
 // 消息用带 kind 的统一形状，避免散落的布尔判断。
 
+import { normalizeAllowedCommands } from "./allowed-commands.mjs";
 import { createHash } from "node:crypto";
 import {
   ROOM_MODES,
@@ -198,6 +199,7 @@ export function makeBot({
   budget = null,
   computer = null,
   avatar = null,
+  allowedCommands = [],
 } = {}) {
   if (!id) throw new Error("bot 需要 id");
   if (!name) throw new Error("bot 需要 name");
@@ -222,6 +224,7 @@ export function makeBot({
     budget: normalizedBudget,
     computer: normalizeComputer(computer),
     avatar: normalizeAvatar(avatar, { id, isMain }),
+    allowedCommands: normalizeAllowedCommands(allowedCommands),
     createdAt: Date.now(),
   };
 }
@@ -410,6 +413,7 @@ export function normalizeBot(raw) {
       budget,
       computer: raw.computer ?? null,
       avatar: raw.avatar ?? null,
+      allowedCommands: raw.allowedCommands ?? [],
     });
     return budgetInvalid ? { ...bot, budgetInvalid } : bot;
   } catch {
@@ -437,6 +441,7 @@ export function policySignature(bot, ctx) {
     `skills=${(bot.skills ?? []).join(",")}`,
     `memory=${bot.memoryEnabled === true ? 1 : 0}`,
     `computer=${c ? `${c.runtime}:${c.kind}:${c.image}` : "-"}`,
+    `allow=${JSON.stringify(bot.allowedCommands ?? [])}`,
     `cwd=${ctx?.cwd ?? ""}`,
     `scope=${ctx?.scope ?? ""}`,
     `context=${ctx?.contextDigest ?? ""}`,

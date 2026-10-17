@@ -847,6 +847,11 @@ export function createApprovalDock(deps) {
     if (toolApproval) {
       const foot = el("div", "bt-q-foot");
       foot.append(button("bt-q-btn", "拒绝", () => void submit({ value: "Deny" })));
+      if (record.rememberCommand) {
+        const always = button("bt-q-btn", "以后都允许这条命令", () => void submit({ value: "Approve", remember: true }));
+        always.title = `以后 ${record.rememberCommand} 不再问；可在助手设置里移除`;
+        foot.append(always);
+      }
       foot.append(button("bt-q-submit", "允许这一次", () => void submit({ value: "Approve" })));
       root.append(foot);
     } else if (record.method === "select") {

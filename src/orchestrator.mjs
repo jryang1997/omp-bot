@@ -14,6 +14,7 @@
 // （session_settled / get_state.isSettled）才释放 scope 租约。超时与取消走同一条
 // 取消路径；效果未知时标 reconciliation_required，不假装 completed。
 
+import { MAX_ALLOWED_COMMANDS, normalizeAllowedCommands, rememberableCommand } from "./allowed-commands.mjs";
 import { execFile } from "node:child_process";
 import { join, resolve, sep } from "node:path";
 import { readFile, mkdir } from "node:fs/promises";
@@ -834,6 +835,13 @@ export class Orchestrator {
     // 档位只经 resolvePermission 写入：旧字段和三档都归一成一种组合，升到全部放手要确认。
     patch = { ...patch, ...resolvePermission(patch, bot) };
     if (patch.budget !== undefined) normalizeBudget(patch.budget, "bot.budget");
+    if (patch.allowedCommands !== undefined) {
+      try {
+        patch = { ...patch, allowedCommands: normalizeAllowedCommands(patch.allowedCommands) };
+      } catch (e) {
+        throw httpErr(400, e.message, "allowed_commands_invalid");
+      }
+    }
     if (patch.avatar !== undefined) {
       patch = { ...patch, avatar: this._checkAvatar(patch.avatar, { id, isMain: patch.isMain ?? bot.isMain, current: bot.avatar }) };
     }
@@ -841,12 +849,13 @@ export class Orchestrator {
     for (const k of [
       "name", "role", "instructions", "model", "thinking", "isMain",
       "executionMode", "approvalMode", "workspace", "memoryEnabled", "skills", "budget", "computer", "avatar",
+      "allowedCommands",
     ]) {
       if (patch[k] !== undefined) next[k] = patch[k];
     }
     const affectsRuntime = [
       "instructions", "model", "thinking", "role", "executionMode", "approvalMode",
-      "workspace", "memoryEnabled", "skills", "budget", "computer",
+      "workspace", "memoryEnabled", "skills", "budget", "computer", "allowedCommands",
     ].some((k) => JSON.stringify(patch[k]) !== JSON.stringify(bot[k]) && patch[k] !== undefined);
     const normalized = normalizeBot({ ...next, id });
     if (!normalized) throw httpErr(400, "更新后的 bot 记录不合法", "bot_invalid");
@@ -2949,6 +2958,7 @@ export class Orchestrator {
       options: Array.isArray(frame.options) ? frame.options : null,
       optionDetails: frame.optionDetails ?? null,
       questions: frame.questions ?? null,
+      rememberCommand: this._rememberable(botId, frame),
       status: "pending",
       createdAt: Date.now(),
       expiresAt: Date.now() + this.uiApprovalTtlMs,
@@ -3050,6 +3060,10 @@ export class Orchestrator {
         throw httpErr(409, "目标 Run 已不活跃，拒绝应答", "run_inactive");
       }
     }
+    const remember = response?.remember === true;
+    if (remember && (!rec.rememberCommand || response.value !== "Approve")) {
+      throw httpErr(400, "这张卡不能记成「以后都允许」：只有要我同意档里的单条简单 bash 命令可以", "remember_invalid");
+    }
     const payload = validateUiResponse(rec, response);
     const rt = this.runtimes.get(`${rec.botId}::${rec.scope}`);
     if (!rt || !rt.alive) {
@@ -3069,6 +3083,11 @@ export class Orchestrator {
     };
     this.ledger.put("approvals", next);
     this._clearUiTimer(id);
+    if (remember) {
+      // 写进 OMP bash.patterns：本回合结束后进程按新配置重建，以后同一条命令由 OMP 直接放行。
+      const bot = this.getBot(rec.botId);
+      if (bot) this.updateBot(bot.id, { allowedCommands: [...bot.allowedCommands, rec.rememberCommand] });
+    }
     const ctrl = rec.runId ? this.runs.get(rec.runId) : null;
     ctrl?.approvals.delete(id);
     this.emit("ui_resolved", { runId: rec.runId, botId: rec.botId, scope: rec.scope, approval: next });
@@ -3079,6 +3098,15 @@ export class Orchestrator {
       }
     }
     return { ...next, native };
+  }
+
+  /** 要我同意档里的单条简单 bash 命令卡，返回能记住的命令；其他卡 null。 */
+  _rememberable(botId, frame) {
+    const bot = this.getBot(botId);
+    if (!bot || frame?.method !== "select" || permissionOf(bot) !== "ask") return null;
+    if (!Array.isArray(frame.options) || !frame.options.includes("Approve")) return null;
+    if (bot.allowedCommands.length >= MAX_ALLOWED_COMMANDS) return null;
+    return rememberableCommand(frame.title);
   }
 
   /** 内部：把挂起审批落成 cancelled（Run 取消、父子清理）。 */

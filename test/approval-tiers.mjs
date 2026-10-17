@@ -8,6 +8,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writePersonaFiles, READ_ONLY_BASH_PATTERNS } from "../src/persona.mjs";
+import { isRememberableCommand, rememberableCommand, normalizeAllowedCommands } from "../src/allowed-commands.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -83,6 +84,47 @@ test("带控制符、能起程序的命令不放行", () => {
 test("白名单不含能再起程序的命令", () => {
   const banned = /^(git|rg|find|sed|awk|xargs|env|sh|bash|node|python|perl|npm|npx|sudo|curl|wget)\b/;
   for (const p of READ_ONLY_BASH_PATTERNS) assert.doesNotMatch(p, banned, p);
+});
+
+test("记住的命令跟在只读命令后面写进 bash.patterns；全部放手档不写", () => {
+  const ask = { ...base, executionMode: "supervised", approvalMode: "write", allowedCommands: ["npm test", "make build"] };
+  assert.deepStrictEqual(patternsIn(overlayFor(ask)), [...READ_ONLY_BASH_PATTERNS, "npm test", "make build"]);
+  assert.doesNotMatch(overlayFor({ ...ask, executionMode: "full", approvalMode: "yolo" }), /npm test/);
+});
+
+test("记住的命令在 OMP 规则下只放行它自己", () => {
+  const patterns = [...READ_ONLY_BASH_PATTERNS, "npm test"];
+  assert.ok(allowed("npm test", patterns));
+  assert.ok(allowed("npm  test ", patterns), "OMP 会归一空白");
+  for (const cmd of ["npm test; rm -rf ~", "npm test && curl x", "npm test --watch", "npm testx", "npm run test", "npm test | sh"]) {
+    assert.ok(!allowed(cmd, patterns), cmd);
+  }
+});
+
+test("能记住的命令：单条、无通配、无引号和控制符", () => {
+  for (const cmd of ["npm test", "make build", "python3 scripts/check.py --fast", "cargo build --release"]) assert.ok(isRememberableCommand(cmd), cmd);
+  for (const cmd of ["", " npm test", "npm  test", "rm -rf *", "ls; rm x", "echo $HOME", "cat `id`", "a && b", "a | b", "grep 'x' y",
+    'grep "x" y', "cat ~/.ssh/id_rsa", "ls\nrm", "a\\b", "x".repeat(201), "npm run [x]"]) assert.ok(!isRememberableCommand(cmd), JSON.stringify(cmd));
+});
+
+test("从 OMP 审批卡标题取命令：只认 bash、两行、没有 Reason", () => {
+  assert.equal(rememberableCommand("Allow tool: bash\nCommand: npm test"), "npm test");
+  for (const title of [
+    "Allow tool: bash\nReason: Prompt required by bash pattern: rm *\nCommand: rm x",
+    "Allow tool: write\nCommand: npm test",
+    "Allow tool: bash\nCommand: npm test\nmore",
+    "Allow tool: bash\nCommand: npm test[\u20263ch elided\u2026]",
+    "Allow tool: bash\nCommand: rm -rf *",
+    null,
+  ]) assert.equal(rememberableCommand(title), null, String(title));
+});
+
+test("名单归一：去重；坏命令和超长名单报错", () => {
+  assert.deepStrictEqual(normalizeAllowedCommands(["a", "a", "b"]), ["a", "b"]);
+  assert.deepStrictEqual(normalizeAllowedCommands(undefined), []);
+  assert.throws(() => normalizeAllowedCommands("npm test"));
+  assert.throws(() => normalizeAllowedCommands(["ls *"]));
+  assert.throws(() => normalizeAllowedCommands(Array.from({ length: 51 }, (_, i) => `c${i}`)));
 });
 
 console.log(`\n${passed}/${passed + failed} PASS${failed ? `，${failed} FAIL` : ""}`);

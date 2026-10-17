@@ -772,6 +772,18 @@ export function createPanels({ client, deps }) {
       ? computer.note || "本机和共享电脑两套工具都在。"
       : "能访问你这个账户能访问的文件和程序。",
       el("span", "bt-note", chatOnly ? (computer ? "只聊天（电脑只提供桌面）" : "只聊天") : computer ? "本机 + 共享电脑" : "本机账户权限")));
+    const allowed = level === "ask" && Array.isArray(bot.allowedCommands) ? bot.allowedCommands : [];
+    if (allowed.length) {
+      const list = el("div", "wb-allowed-commands");
+      for (const command of allowed) {
+        const item = el("div", "bt-note");
+        item.append(el("code", null, command), " ", button("btn ghost", "移除", async () => {
+          if (await patchBot(bot, { allowedCommands: allowed.filter((c) => c !== command) })) deps.rerenderPanel?.();
+        }));
+        list.append(item);
+      }
+      permissionCard.append(row("不再问的命令", "在确认卡上点过「以后都允许」的命令。移除后下一次任务生效。", list));
+    }
     root.append(section("权限与确认", permissionCard));
 
     const memoryToggle = checkbox(bot.memoryEnabled === true, (checked) => void patchBot(bot, { memoryEnabled: checked }));

@@ -2,7 +2,7 @@
 // 模型换成 test/real/mock-llm.mjs 的脚本模型，用独立的 PI_CODING_AGENT_DIR，不碰用户自己的 omp 配置。
 // 没装 omp 就 SKIP。REAL_SLOW=1 时多跑计划任务检查（要等约 2.5 分钟，最短间隔是 60 秒）。
 import assert from "node:assert/strict";
-import { appendFileSync, existsSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { startMockLlm, mockModelsYml } from "./real/mock-llm.mjs";
 import { world, tester, ompVersion as getOmpVersion, DONE, sleep, toolEnds, textOf, toolText } from "./real/harness.mjs";
@@ -38,6 +38,20 @@ try {
     assert.deepEqual(r2.cards.map((c) => c.method), ["confirm", "select"]);
     assert.match(r2.cards[1].title, /^Allow tool: bash/);
     assert.ok(existsSync(out2) && !existsSync(join(proj, "in.txt")));
+  });
+
+  await test("03 审批卡点「以后都允许这条命令」：下一回合同一条命令 OMP 直接放行，别的命令照样弹卡", async () => {
+    const dir = join(proj, "remdir");
+    const other = join(proj, "otherdir");
+    const cmd = `mkdir -p ${dir}`;
+    const r1 = await run(call("bash", { command: cmd }), (a) => ({ value: "Approve", remember: a.rememberCommand === cmd }));
+    assert.deepEqual(r1.cards.map((c) => c.rememberCommand), [cmd], "真 OMP 的卡标题能取出命令");
+    assert.ok(existsSync(dir));
+    rmSync(dir, { recursive: true });
+    const r2 = await run(call("bash", { command: cmd }) + call("bash", { command: `mkdir -p ${other}` }), () => ({ value: "Deny" }));
+    assert.deepEqual(r2.cards.map((c) => c.rememberCommand), [`mkdir -p ${other}`], "只有没记住的那条弹卡");
+    assert.ok(existsSync(dir) && !existsSync(other));
+    await api("PATCH", `/api/bots/${ada}`, { allowedCommands: [] });
   });
 
   await test("密钥硬拦：要我同意档里 cat/read 碰 runtime.json 和 ~/.ssh 都被拦，不弹卡，token 不进模型", async () => {

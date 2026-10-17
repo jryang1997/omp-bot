@@ -90,6 +90,7 @@ const BOT_FIELDS = [
   "skills",
   "budget",
   "avatar",
+  "allowedCommands",
 ];
 
 // 原生命令白名单与 Orchestrator 共用同一常量：API 层只做形状校验（不接受路径/参数/空格），
@@ -768,6 +769,11 @@ export async function startServer({ port = 3099, host = "127.0.0.1", home, bin =
         if (b[k] !== undefined) response[k] = b[k];
       }
       if (!Object.keys(response).length) throw httpError(400, "value/confirmed/cancelled/answers 至少一个必填");
+      if (b.remember === true) {
+        // 「以后都允许」改的是助手的长期权限，只在工作台本人那里改。
+        if (deviceOf(c)) throw httpError(403, "配对设备不能把命令记成以后都允许，请在工作台操作", "remember_forbidden");
+        response.remember = true;
+      }
       if (deviceOf(c)) {
         // approve 必须有 botId（DeviceChannelOwner 的 authorize 强制），所以先取审批记录拿 botId，
         // 再做权限 + 作用域判定；顺序固定为「存在性 → 权限/作用域 → 渠道来源」。
