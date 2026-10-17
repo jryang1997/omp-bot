@@ -40,7 +40,7 @@ app/build/outputs/apk/release/app-release-unsigned.apk
 
 - 桌面侧：`/api/mobile` 控制设备入口，`/api/mobile/invitation` 生成二维码与配对码。
 - 设备入口：默认 `0.0.0.0:3100`，只发布设备 API，公开 `/api/health` 与 APK 下载。
-- 连接步骤见根目录 [README](../README.md#安卓手机)。
+- 连接步骤见[使用指南](../docs/guide.md#安卓手机)。
 
 ## 目录
 
