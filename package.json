@@ -44,7 +44,8 @@
     "setup:computers": "node scripts/setup-computers.mjs",
     "smoke:computers": "node smoke-computers.mjs",
     "smoke:persist": "node smoke-persist.mjs",
-    "test:write-guard": "node test/write-guard.mjs"
+    "test:write-guard": "node test/write-guard.mjs",
+    "test:real": "node test/real-omp.mjs"
   },
   "engines": {
     "node": ">=24"

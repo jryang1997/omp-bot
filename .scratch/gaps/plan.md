@@ -33,3 +33,11 @@
 ## 每步怎么验
 
 单元测试进 `test/*.mjs`；跑相关测试和不需要真模型的那部分全量测试；结果写进 issue 的 `## Comments` 和 `decisions.tsv`。
+
+## 真 omp 实测（第二轮）
+
+沙盒装 OMP 18.11.3（`omp.sh/install --binary`），接一个本地脚本假模型（OpenAI 兼容，零 token），起真 `omp-bot serve` 走 HTTP。脚本是 `test/real-omp.mjs`，假模型是 `test/real/mock-llm.mjs`。
+
+- 过：01 审批卡、09 目录外写入、08 计划、02 交替打转、06 队友模型、07 记忆、05 kill -9 后续跑、03 计划检查（REAL_SLOW=1）。
+- 测出：02 被 OMP 原生重复提示破坏，已修。
+- 测不了：04 电脑求助，沙盒没 KVM。模型行为和质量，假模型只照脚本走。

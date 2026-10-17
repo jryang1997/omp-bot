@@ -1,0 +1,182 @@
+// test/real-omp.mjs — 在真 omp 上跑 omp-bot（零 token）：真服务、真 RPC、真工具、真审批卡。
+// 模型换成 test/real/mock-llm.mjs 的脚本模型，用独立的 PI_CODING_AGENT_DIR，不碰用户自己的 omp 配置。
+// 没装 omp 就 SKIP。REAL_SLOW=1 时多跑计划任务检查（要等约 2.5 分钟，最短间隔是 60 秒）。
+import assert from "node:assert/strict";
+import { execFileSync, spawn } from "node:child_process";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { startMockLlm, mockModelsYml } from "./real/mock-llm.mjs";
+import { readServerDescriptor } from "../src/server.mjs";
+import { parseNativeFrame, planFromTool } from "../web/workbench-native.js";
+
+const REPO = fileURLToPath(new URL("..", import.meta.url));
+try { execFileSync("omp", ["--version"], { stdio: "ignore" }); } catch { console.log("SKIP 没装 omp"); process.exit(0); }
+const ompVersion = execFileSync("omp", ["--version"], { encoding: "utf8" }).trim();
+
+const root = mkdtempSync(join(homedir(), ".ompbot-real-")); // 不放系统临时目录：那里是写文件边界的放行区
+const home = join(root, "home");
+const agentDir = join(root, "agent");
+const proj = join(root, "proj");
+const outside = join(root, "outside");
+for (const d of [agentDir, proj, outside]) mkdirSync(d, { recursive: true });
+const llm = await startMockLlm();
+writeFileSync(join(agentDir, "models.yml"), mockModelsYml(llm.port));
+const env = { ...process.env, OMPBOT_HOME: home, PI_CODING_AGENT_DIR: agentDir, NODE_NO_WARNINGS: "1" };
+const cli = (...args) => execFileSync(process.execPath, ["ompbot.mjs", ...args], { cwd: REPO, env, encoding: "utf8" });
+
+const ada = /\((bot_[^)]+)\)/.exec(cli("bots", "add", "Ada", "--role", "测试", "--main", "--model", "mock/scripted"))[1];
+cli("settings", "set", "Ada", "--permission", "ask", "--workspace", proj);
+cli("bots", "add", "Bo", "--role", "便宜跑腿", "--model", "mock/scripted");
+
+let server = null;
+let desc = null;
+async function startServer() {
+  server = spawn(process.execPath, ["ompbot.mjs", "serve", "--no-open", "--port", "0"], { cwd: REPO, env, detached: true, stdio: "ignore" });
+  for (let i = 0; i < 100 && !desc; i++) { await sleep(200); desc = await readServerDescriptor(home); }
+  assert.ok(desc, "服务没起来");
+}
+function killServer() {
+  try { process.kill(-server.pid, "SIGKILL"); } catch {}
+  desc = null;
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function api(method, path, body) {
+  const r = await fetch(desc.url + path, { method, headers: { Authorization: `Bearer ${desc.token}`, "content-type": "application/json", origin: desc.url }, body: body ? JSON.stringify(body) : undefined });
+  const t = await r.text();
+  if (!r.ok) throw Object.assign(new Error(`${method} ${path} ${r.status} ${t.slice(0, 300)}`), { status: r.status });
+  return JSON.parse(t);
+}
+const DONE = new Set(["completed", "failed", "cancelled", "interrupted", "timed_out"]);
+const getRun = async (id) => (await api("GET", `/api/runs/${id}`)).run;
+const events = async (id) => (await api("GET", `/api/events/history?runId=${id}&limit=5000`)).events;
+/** 跑一次，碰到审批卡就交给 answer(card) 决定回什么。 */
+async function run(text, answer = () => null) {
+  const { run: r } = await api("POST", "/api/runs", { botId: ada, text });
+  const cards = [];
+  for (let i = 0; i < 400; i++) {
+    for (const a of (await api("GET", "/api/approvals")).approvals) {
+      if (a.runId !== r.id || cards.some((c) => c.id === a.id)) continue;
+      cards.push(a);
+      const resp = answer(a);
+      if (resp) await api("POST", `/api/approvals/${a.id}/respond`, resp);
+    }
+    const now = await getRun(r.id);
+    if (DONE.has(now.state)) return { run: now, cards, events: await events(r.id) };
+    await sleep(250);
+  }
+  throw new Error(`run ${r.id} 没结束`);
+}
+const call = (name, args) => `[[tool:${name} ${JSON.stringify(args)}]] `;
+const toolEnds = (evs, name) => evs.filter((e) => e.event?.type === "tool_execution_end" && (!name || e.event.toolName === name));
+const toolText = (e) => (e.event.result?.content ?? []).map((p) => p.text ?? "").join("");
+
+let passed = 0;
+let failed = 0;
+async function test(name, fn) {
+  try { await fn(); passed++; console.log(`PASS  ${name}`); }
+  catch (e) { failed++; console.log(`FAIL  ${name}\n      ${e?.stack ?? e}`); }
+}
+
+try {
+  await startServer();
+  console.log(`omp ${ompVersion}，服务 ${desc.url}`);
+
+  await test("01+09 要我同意档：只读命令和目录内写入不弹卡；目录外写入弹卡，拒绝就不写，同意才写；rm 照样弹卡", async () => {
+    const out1 = join(outside, "no.txt");
+    const out2 = join(outside, "yes.txt");
+    const r1 = await run(call("bash", { command: "ls -la" }) + call("write", { path: join(proj, "in.txt"), content: "inside" }) + call("write", { path: out1, content: "x" }),
+      (a) => (a.method === "confirm" ? { confirmed: false } : { value: "Deny" }));
+    assert.equal(r1.run.state, "completed");
+    assert.deepEqual(r1.cards.map((c) => c.method), ["confirm"], "只有目录外那一次弹卡");
+    assert.match(r1.cards[0].message, /no\.txt/);
+    assert.ok(existsSync(join(proj, "in.txt")) && !existsSync(out1));
+    assert.match(toolText(toolEnds(r1.events, "write").at(-1)), /没写。目标在允许范围外/);
+
+    const r2 = await run(call("write", { path: out2, content: "ok" }) + call("bash", { command: `rm ${join(proj, "in.txt")}` }),
+      (a) => (a.method === "confirm" ? { confirmed: true } : { value: "Approve" }));
+    assert.deepEqual(r2.cards.map((c) => c.method), ["confirm", "select"]);
+    assert.match(r2.cards[1].title, /^Allow tool: bash/);
+    assert.ok(existsSync(out2) && !existsSync(join(proj, "in.txt")));
+  });
+
+  await test("08 计划状态：真 todo 帧解析成完整计划，卡住的带原因", async () => {
+    const r = await run(
+      call("todo", { op: "init", list: [{ phase: "调研", items: ["读文档", "列方案"] }, { phase: "实现", items: ["写代码"] }] }) +
+      call("todo", { op: "done", task: "读文档" }) + call("todo", { op: "block", task: "写代码", reason: "等权限" }));
+    const plans = r.events.map((e) => e.event && parseNativeFrame(e.event)).map((p) => p && planFromTool(p)).filter(Boolean);
+    assert.equal(plans.length, 3);
+    assert.deepEqual(plans.at(-1), [
+      { name: "调研", tasks: [{ content: "读文档", status: "completed" }, { content: "列方案", status: "in_progress" }] },
+      { name: "实现", tasks: [{ content: "写代码", status: "blocked", blocker: "等权限" }] },
+    ]);
+  });
+
+  await test("02 卡住检测：A、B 交替重复读（OMP 自带的连续重复检测抓不到），第 3 次提示，第 6 次取消", async () => {
+    writeFileSync(join(proj, "a.txt"), "a\n");
+    writeFileSync(join(proj, "b.txt"), "b\n");
+    const r = await run((call("read", { path: join(proj, "a.txt") }) + call("read", { path: join(proj, "b.txt") })).repeat(8));
+    assert.equal(r.run.state, "cancelled");
+    assert.match(r.run.error, /stuck-loop/);
+    assert.deepEqual(r.events.filter((e) => e.type === "run_stuck").map((e) => e.action), ["steer", "steer", "cancel"]);
+  });
+
+  await test("06 list_bots 带上队友的模型", async () => {
+    const r = await run(call("list_bots", {}));
+    assert.match(toolText(toolEnds(r.events, "list_bots")[0]), /Bo .*模型 mock\/scripted/);
+  });
+
+  await test("07 记在 AGENTS.md 身份块后面的笔记，下一轮进系统提示词；人格里有这条规矩", async () => {
+    appendFileSync(join(home, "team", "bots", ada, "AGENTS.md"), "- 2026-10-17 来自私聊：主人喜欢简短回答（NOTE-7731）\n");
+    await run("你好");
+    const sys = llm.requests.at(-1).messages.find((m) => m.role === "system" || m.role === "developer");
+    const text = typeof sys.content === "string" ? sys.content : sys.content.map((p) => p.text).join("");
+    assert.match(text, /NOTE-7731/);
+    assert.match(text, /身份块结束标记后面/);
+  });
+
+  await test("05 服务被强杀，运行标成中断；接着做只续一次，在原会话里续", async () => {
+    const { run: r } = await api("POST", "/api/runs", { botId: ada, text: "[[sleep:30000]] 长任务 LONG-55" });
+    for (let i = 0; i < 40 && llm.requests.at(-1)?.plan?.sleep !== 30000; i++) await sleep(250);
+    killServer();
+    await startServer();
+    assert.equal((await getRun(r.id)).state, "interrupted");
+    const first = (await api("POST", `/api/runs/${r.id}/resume`, {})).run;
+    const again = (await api("POST", `/api/runs/${r.id}/resume`, {})).run;
+    assert.equal(first.resumeOf, r.id);
+    assert.equal(again.id, first.id, "重复点不多开");
+    // 续跑的文本里带着原要求，脚本模型会再睡 30 秒。
+    for (let i = 0; i < 480 && !DONE.has((await getRun(first.id)).state); i++) await sleep(250);
+    assert.equal((await getRun(first.id)).state, "completed");
+    const users = llm.requests.at(-1).messages.filter((m) => m.role === "user").map((m) => (typeof m.content === "string" ? m.content : m.content.map((p) => p.text).join("")));
+    const orig = users.findIndex((u) => u.includes("LONG-55") && !u.includes("[继续]"));
+    const cont = users.findLastIndex((u) => u.includes("[继续]"));
+    assert.ok(orig >= 0, "原来的那条还在会话里");
+    // OMP 可能在后面再补 todo 提醒，所以只要求续跑那条排在原话之后。
+    assert.ok(cont > orig, "续跑接在原会话后面");
+  });
+
+  if (process.env.REAL_SLOW === "1") {
+    await test("03 计划任务检查：第一次记基线，没变跳过，变了才叫 bot", async () => {
+      const status = join(proj, "status.txt");
+      writeFileSync(status, "v1\n");
+      const { routine } = await api("POST", "/api/routines", { name: "检查", botId: ada, text: "状态变了", schedule: { kind: "interval", intervalMs: 60000 }, paused: false, check: { command: `cat ${status}`, mode: "changed" } });
+      const get = async () => (await api("GET", "/api/routines")).routines.find((x) => x.id === routine.id);
+      const tick = async (n) => { for (let i = 0; i < 160; i++) { const x = await get(); if (x.receipts.length >= n) return x; await sleep(1000); } throw new Error("没到点"); };
+      assert.equal((await tick(1)).runs, 0);
+      assert.equal((await tick(2)).runs, 0);
+      writeFileSync(status, "v2\n");
+      const third = await tick(3);
+      assert.equal(third.runs, 1);
+      assert.deepEqual(third.receipts.map((x) => x.reason ?? x.status), ["ok", "no_change", "baseline"]);
+      await api("PATCH", `/api/routines/${routine.id}`, { paused: true });
+    });
+  }
+} finally {
+  if (server) killServer();
+  await llm.close();
+  rmSync(root, { recursive: true, force: true });
+}
+console.log(`\n${passed}/${passed + failed} ${failed ? "FAIL" : "PASS"}（omp ${ompVersion}）`);
+process.exit(failed ? 1 : 0);
