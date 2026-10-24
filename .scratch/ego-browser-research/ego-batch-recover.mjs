@@ -1,5 +1,5 @@
 const fs = await import('node:fs/promises');
-const root = 'C:/Users/Jerry/Desktop/omp_bot/.scratch/ego-browser-research/';
+const root = 'C:/Users/<user>/Desktop/omp_bot/.scratch/ego-browser-research/';
 const task = await taskSpace(4);
 const page = task.page('p1');
 const snapshot = await page.snapshot();

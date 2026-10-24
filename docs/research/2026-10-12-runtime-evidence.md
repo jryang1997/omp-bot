@@ -4,7 +4,7 @@
 
 ## 真实网页界面
 
-启动命令为 `node ompbot.mjs serve --port 3197 --no-open --home C:/Users/Jerry/AppData/Local/Temp/ompbot-research-20261012`。服务成功监听 127.0.0.1:3197。
+启动命令为 `node ompbot.mjs serve --port 3197 --no-open --home C:/Users/<user>/AppData/Local/Temp/ompbot-research-20261012`。服务成功监听 127.0.0.1:3197。
 
 使用 Chromium 打开实际页面。初始界面有新建 Bot、新建群聊、搜索、用量、主题入口。进入新建 Bot 表单后，实际 DOM 含名字、角色、模型、思考档、专属指令和主 Bot 选择。模型原生 select 有 218 项，包含默认项。这是本机配置下的样本，不是产品固定数量。没有在这次浏览器检查中完整测试移动端、键盘和读屏。
 

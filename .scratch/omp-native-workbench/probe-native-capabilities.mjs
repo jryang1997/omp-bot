@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { Orchestrator } from '../../src/orchestrator.mjs';
 const home=mkdtempSync(join(tmpdir(),'ompbot-native-capabilities-'));
 const events=[];
-const orch=new Orchestrator({home,bin:'C:/Users/Jerry/Desktop/omp_bot/.desktop-runtime/omp.exe',onEvent:e=>events.push(e)});
+const orch=new Orchestrator({home,bin:'C:/Users/<user>/Desktop/omp_bot/.desktop-runtime/omp.exe',onEvent:e=>events.push(e)});
 try{
  const bot=orch.addBot({name:'NativeCapabilityQA',model:'magpie/commandcode-plan/deepseek/deepseek-v4.1-flash',thinking:'low',approvalMode:'write',instructions:'Temporary local native QA. No external messages. Any task workers must use the same selected DeepSeek Flash model and must not use file or network tools.'});
  const rt=await orch.runtimeFor(bot.id,'private');

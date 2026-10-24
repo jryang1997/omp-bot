@@ -4,18 +4,18 @@
     {
       "check": "actual-native-learn-in-private-dir",
       "botId": "bot_mv5brwwe_1",
-      "privateAgentDir": "C:\\Users\\Jerry\\AppData\\Local\\Temp\\ompbot-private-memory-proof-Hmbarr\\bots\\bot_mv5brwwe_1\\private\\agent",
+      "privateAgentDir": "C:\\Users\\<user>\\AppData\\Local\\Temp\\ompbot-private-memory-proof-Hmbarr\\bots\\bot_mv5brwwe_1\\private\\agent",
       "model": "magpie/opencode-go/deepseek-v4.1-flash",
-      "learnedPath": "C:\\Users\\Jerry\\AppData\\Local\\Temp\\ompbot-private-memory-proof-Hmbarr\\bots\\bot_mv5brwwe_1\\private\\agent\\memories\\--c--users-jerry-appdata-local-temp-ompbot-private-memory-proof-hmbarr-bots-bot_mv5brwwe_1-private-work--\\learned.md",
+      "learnedPath": "C:\\Users\\<user>\\AppData\\Local\\Temp\\ompbot-private-memory-proof-Hmbarr\\bots\\bot_mv5brwwe_1\\private\\agent\\memories\\--c--users-jerry-appdata-local-temp-ompbot-private-memory-proof-hmbarr-bots-bot_mv5brwwe_1-private-work--\\learned.md",
       "ownMarkerStored": true,
       "otherMarkerAbsent": true
     },
     {
       "check": "actual-native-learn-in-private-dir",
       "botId": "bot_mv5brwwn_2",
-      "privateAgentDir": "C:\\Users\\Jerry\\AppData\\Local\\Temp\\ompbot-private-memory-proof-Hmbarr\\bots\\bot_mv5brwwn_2\\private\\agent",
+      "privateAgentDir": "C:\\Users\\<user>\\AppData\\Local\\Temp\\ompbot-private-memory-proof-Hmbarr\\bots\\bot_mv5brwwn_2\\private\\agent",
       "model": "magpie/opencode-go/deepseek-v4.1-flash",
-      "learnedPath": "C:\\Users\\Jerry\\AppData\\Local\\Temp\\ompbot-private-memory-proof-Hmbarr\\bots\\bot_mv5brwwn_2\\private\\agent\\memories\\--c--users-jerry-appdata-local-temp-ompbot-private-memory-proof-hmbarr-bots-bot_mv5brwwn_2-private-work--\\learned.md",
+      "learnedPath": "C:\\Users\\<user>\\AppData\\Local\\Temp\\ompbot-private-memory-proof-Hmbarr\\bots\\bot_mv5brwwn_2\\private\\agent\\memories\\--c--users-jerry-appdata-local-temp-ompbot-private-memory-proof-hmbarr-bots-bot_mv5brwwn_2-private-work--\\learned.md",
       "ownMarkerStored": true,
       "otherMarkerAbsent": true
     },

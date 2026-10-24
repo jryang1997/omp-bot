@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Orchestrator } from '../../src/orchestrator.mjs';
 const exec=promisify(execFile);const home=mkdtempSync(join(tmpdir(),'ompbot-browser-handoff-proof-'));const frames=[];
-const orch=new Orchestrator({home,bin:'C:/Users/Jerry/Desktop/omp_bot/.desktop-runtime/omp.exe',onEvent:event=>frames.push(event)});
+const orch=new Orchestrator({home,bin:'C:/Users/<user>/Desktop/omp_bot/.desktop-runtime/omp.exe',onEvent:event=>frames.push(event)});
 orch.onEvent=event=>{frames.push(event);if(event.type==='ui_request'&&event.approval.method==='select'){const a=event.approval;const approved=a.options?.find(value=>/^Approve$/i.test(value));if(approved)void orch.answerUi(a.id,{value:approved}).catch(()=>{});}};
 let socket;let cwd;let seq=0;const pending=new Map();
 async function cdp(method,params={},sessionId){const id=++seq;return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{pending.delete(id);reject(new Error('CDP timeout: '+method));},10000);pending.set(id,{resolve,reject,timer});socket.send(JSON.stringify({id,method,params,...(sessionId?{sessionId}:{})}));});}

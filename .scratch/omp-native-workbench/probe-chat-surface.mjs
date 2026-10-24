@@ -7,7 +7,7 @@ import { hostToolsFor } from '../../src/features/hosttools.mjs';
 const home = mkdtempSync(join(tmpdir(), 'ompbot-chat-surface-'));
 const bot = { id: 'chat_surface', name: 'ChatSurfaceQA', model: 'magpie/commandcode-plan/deepseek/deepseek-v4.1-flash', thinking: 'low', instructions: 'Temporary local native QA. Use only explicitly requested tools and paths. No external messages or network.', executionMode: 'chat', approvalMode: 'write', workspace: '', memoryEnabled: false, skills: [] };
 const calls = [];
-const runtime = new BotRuntime({ home, bot, scope: 'private', bin: 'C:/Users/Jerry/Desktop/omp_bot/.desktop-runtime/omp.exe', teamToolsFactory: rt => hostToolsFor(rt, { home }).map(tool => ({ ...tool, handler: async (...args) => { calls.push(tool.name); return tool.handler(...args); } })) });
+const runtime = new BotRuntime({ home, bot, scope: 'private', bin: 'C:/Users/<user>/Desktop/omp_bot/.desktop-runtime/omp.exe', teamToolsFactory: rt => hostToolsFor(rt, { home }).map(tool => ({ ...tool, handler: async (...args) => { calls.push(tool.name); return tool.handler(...args); } })) });
 const project = join(runtime.cwd, '.omp');
 mkdirSync(project, { recursive: true });
 const canary = join(runtime.cwd, 'qa-input.txt');

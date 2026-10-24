@@ -1,5 +1,5 @@
 {
-  "appId": "cli_aa4645d90c789be9",
+  "appId": "cli_example_app_id",
   "sdkVersion": "1.75.0",
   "transport": "websocket",
   "ownerOnly": true,
@@ -18,17 +18,17 @@
     {
       "runId": "run_mv5wauad_6c625751",
       "status": "sent",
-      "messageId": "om_x100b63e341d8d4a0b3ebc7e2058fc50"
+      "messageId": "om_x100b63e_redacted"
     },
     {
       "runId": "run_mv5w1j0i_4e78ea9a",
       "status": "sent",
-      "messageId": "om_x100b63e2a965a0a0b14a7d37de858a8"
+      "messageId": "om_x100b63e_redacted"
     },
     {
       "runId": "run_mv5wauad_6c625751",
       "status": "sent",
-      "messageId": "om_x100b63e341ac1ca4b3dd24cf1439c84"
+      "messageId": "om_x100b63e_redacted"
     }
   ],
   "file": {
@@ -49,19 +49,19 @@
     "receipts": [
       {
         "status": "sent",
-        "messageId": "om_x100b63e3bde2d4a8b22a320d6fcb96b"
+        "messageId": "om_x100b63e_redacted"
       },
       {
         "status": "sent",
-        "messageId": "om_x100b63e3bde114b0b32a1b20397e06b"
+        "messageId": "om_x100b63e_redacted"
       },
       {
         "status": "sent",
-        "messageId": "om_x100b63e3bde73ca4b3f715c2a51d91d"
+        "messageId": "om_x100b63e_redacted"
       },
       {
         "status": "sent",
-        "messageId": "om_x100b63e3bc388ca4b1cca2fd39d035a"
+        "messageId": "om_x100b63e_redacted"
       }
     ]
   }

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Orchestrator } from '../../src/orchestrator.mjs';
 const home=mkdtempSync(join(tmpdir(),'ompbot-subagent-proof-'));
-const events=[];const orch=new Orchestrator({home,bin:'C:/Users/Jerry/Desktop/omp_bot/.desktop-runtime/omp.exe',onEvent:e=>events.push(e)});
+const events=[];const orch=new Orchestrator({home,bin:'C:/Users/<user>/Desktop/omp_bot/.desktop-runtime/omp.exe',onEvent:e=>events.push(e)});
 const model='magpie/commandcode-plan/deepseek/deepseek-v4.1-flash';
 const forward=orch.onEvent;
 orch.onEvent=event=>{forward(event);if(event.type==='ui_request'){const a=event.approval;const options=(a.options??[]).filter(value=>/^(Approve|Allow)$/i.test(value));if(a.method==='select'&&options.length===1&&/task/i.test(JSON.stringify(a))){void orch.answerUi(a.id,{value:options[0]}).catch(error=>console.error('Task approval failed:',error.message));}else console.log(JSON.stringify({check:'native-subagent-pending-input',method:a.method,options:a.options,title:a.title,message:a.message}));}};

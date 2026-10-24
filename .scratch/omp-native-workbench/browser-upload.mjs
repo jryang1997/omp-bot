@@ -1,11 +1,11 @@
 const fs=await import('node:fs/promises');
-const info=JSON.parse(await fs.readFile('C:/Users/Jerry/Desktop/omp_bot/.scratch/omp-native-workbench/ui-service.json','utf8'));
+const info=JSON.parse(await fs.readFile('C:/Users/<user>/Desktop/omp_bot/.scratch/omp-native-workbench/ui-service.json','utf8'));
 const space=await taskSpace(2);const page=space.page('p1');
 await page.click('loc=css:button[aria-label="BrowserNativeQA"]');
 const chooserPromise=page.waitForFileChooser({timeout:5000});
 await page.click('#btn-attach');
 const chooser=await chooserPromise;
-await chooser.setFiles('C:/Users/Jerry/Desktop/omp_bot/.scratch/omp-native-workbench/browser-input.txt');
+await chooser.setFiles('C:/Users/<user>/Desktop/omp_bot/.scratch/omp-native-workbench/browser-input.txt');
 await page.waitForFunction(()=>document.querySelector('#attach-tray')?.innerText.includes('browser-input.txt'),undefined,{timeout:10000});
 const output=info.home.replaceAll('\\','/')+'/bots/'+info.botId+'/private/work/browser-report.txt';
 await page.fill('#input',`Read the attached browser-input.txt and write ${output} with exact content BROWSER_ATTACHMENT_SOURCE_6048. Use only native read then write, no other tools or network. Do not retry any denied tool.`);

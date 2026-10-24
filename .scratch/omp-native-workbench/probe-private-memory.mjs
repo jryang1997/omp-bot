@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { Orchestrator } from '../../src/orchestrator.mjs';
 const home=mkdtempSync(join(tmpdir(),'ompbot-private-memory-proof-'));
 const markers=[randomUUID(),randomUUID()];const events=[];
-const orch=new Orchestrator({home,bin:'C:/Users/Jerry/Desktop/omp_bot/.desktop-runtime/omp.exe',onEvent:event=>events.push(event)});
+const orch=new Orchestrator({home,bin:'C:/Users/<user>/Desktop/omp_bot/.desktop-runtime/omp.exe',onEvent:event=>events.push(event)});
 orch.onEvent=event=>{events.push(event);if(event.type==='ui_request'){const a=event.approval;if(a.method==='select'){const approved=a.options?.find(value=>/^Approve$/i.test(value));if(approved)void orch.answerUi(a.id,{value:approved}).catch(()=>{});}}};
 const evidence=[];
 try{

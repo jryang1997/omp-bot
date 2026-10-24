@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { startServer } from '../../src/server.mjs';
 const runCli = promisify(execFile);
 const home=mkdtempSync(join(tmpdir(),'ompbot-real-workbench-'));
-const server=await startServer({port:0,home,bin:'C:/Users/Jerry/Desktop/omp_bot/.desktop-runtime/omp.exe'});
+const server=await startServer({port:0,home,bin:'C:/Users/<user>/Desktop/omp_bot/.desktop-runtime/omp.exe'});
 const observed=[];
 let eventReader;
 async function api(path,{method='GET',body}={}){
@@ -60,7 +60,7 @@ try{
  await until(()=>existsSync(join(home,'native-tool-started.txt')));
  const toolPid=Number(readFileSync(join(home,'native-tool-started.txt'),'utf8'));
  const stopAt=Date.now();
- const cliStop = await runCli(process.execPath,['ompbot.mjs','runs','stop',cancelling.id,'--home',home,'--json'],{cwd:'C:/Users/Jerry/Desktop/omp_bot',timeout:30000,windowsHide:true});
+ const cliStop = await runCli(process.execPath,['ompbot.mjs','runs','stop',cancelling.id,'--home',home,'--json'],{cwd:'C:/Users/<user>/Desktop/omp_bot',timeout:30000,windowsHide:true});
  const verdict=JSON.parse(cliStop.stdout);
  assert.equal(verdict.accepted,true,'CLI must reach the live owning backend');
  const cancelled=await done(cancelling.id);

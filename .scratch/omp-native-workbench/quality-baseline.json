@@ -1201,7 +1201,7 @@
         "toolCalls": 4,
         "contextPercent": 1.1565,
         "raw": {
-          "sessionFile": "C:\\Users\\Jerry\\AppData\\Local\\Temp\\ompbot-quality-7fhh3T\\bots\\bot_mv4zhywc_1\\private\\sessions\\2026-10-12T08-28-30-339Z_01a12f3a-4503-761b-ae1f-a716d4cc2dee.jsonl",
+          "sessionFile": "C:\\Users\\<user>\\AppData\\Local\\Temp\\ompbot-quality-7fhh3T\\bots\\bot_mv4zhywc_1\\private\\sessions\\2026-10-12T08-28-30-339Z_01a12f3a-4503-761b-ae1f-a716d4cc2dee.jsonl",
           "sessionId": "01a12f3a-4503-761b-ae1f-a716d4cc2dee",
           "userMessages": 2,
           "assistantMessages": 6,
@@ -1239,7 +1239,7 @@
         "toolCalls": 4,
         "contextPercent": 1.0218,
         "raw": {
-          "sessionFile": "C:\\Users\\Jerry\\AppData\\Local\\Temp\\ompbot-quality-7fhh3T\\bots\\bot_mv4zhywm_2\\private\\sessions\\2026-10-12T08-28-44-994Z_01a12f3a-7e42-753f-9324-8fdf21039279.jsonl",
+          "sessionFile": "C:\\Users\\<user>\\AppData\\Local\\Temp\\ompbot-quality-7fhh3T\\bots\\bot_mv4zhywm_2\\private\\sessions\\2026-10-12T08-28-44-994Z_01a12f3a-7e42-753f-9324-8fdf21039279.jsonl",
           "sessionId": "01a12f3a-7e42-753f-9324-8fdf21039279",
           "userMessages": 2,
           "assistantMessages": 6,
@@ -1277,7 +1277,7 @@
         "toolCalls": 4,
         "contextPercent": 1.0437,
         "raw": {
-          "sessionFile": "C:\\Users\\Jerry\\AppData\\Local\\Temp\\ompbot-quality-7fhh3T\\bots\\bot_mv4zhywt_3\\private\\sessions\\2026-10-12T08-28-56-035Z_01a12f3a-a963-7703-9acc-7f1dcec8734d.jsonl",
+          "sessionFile": "C:\\Users\\<user>\\AppData\\Local\\Temp\\ompbot-quality-7fhh3T\\bots\\bot_mv4zhywt_3\\private\\sessions\\2026-10-12T08-28-56-035Z_01a12f3a-a963-7703-9acc-7f1dcec8734d.jsonl",
           "sessionId": "01a12f3a-a963-7703-9acc-7f1dcec8734d",
           "userMessages": 2,
           "assistantMessages": 6,

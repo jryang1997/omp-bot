@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { startServer } from '../../src/server.mjs';
 
 const home = mkdtempSync(join(tmpdir(), 'ompbot-quality-'));
-const service = await startServer({ port: 0, home, bin: 'C:/Users/Jerry/Desktop/omp_bot/.desktop-runtime/omp.exe' });
+const service = await startServer({ port: 0, home, bin: 'C:/Users/<user>/Desktop/omp_bot/.desktop-runtime/omp.exe' });
 const observations = [];
 const results = [];
 let reader;

@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 const home = mkdtempSync(join(tmpdir(), 'ompbot-native-gate-'));
 const { argv } = writePersonaFiles({name:'NativeGate',role:'Protocol probe',instructions:'Use exactly the tool asked for. Do not retry denied operations.',id:'gate'}, home);
 const target = join(home, 'approved-output.txt');
-const child = spawn('C:/Users/Jerry/Desktop/omp_bot/.desktop-runtime/omp.exe', ['--mode','rpc-ui','--approval-mode','always-ask','--tools','read,write','--model','magpie/commandcode-plan/deepseek/deepseek-v4.1-flash','--thinking','low','--session-dir',join(home,'sessions'),...argv], {cwd:home,stdio:['pipe','pipe','pipe'],windowsHide:true});
+const child = spawn('C:/Users/<user>/Desktop/omp_bot/.desktop-runtime/omp.exe', ['--mode','rpc-ui','--approval-mode','always-ask','--tools','read,write','--model','magpie/commandcode-plan/deepseek/deepseek-v4.1-flash','--thinking','low','--session-dir',join(home,'sessions'),...argv], {cwd:home,stdio:['pipe','pipe','pipe'],windowsHide:true});
 let buffer='';
 const frames=[];
 const pending=new Map();

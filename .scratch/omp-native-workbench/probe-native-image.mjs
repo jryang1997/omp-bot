@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { deflateSync } from 'node:zlib';
 import { startServer } from '../../src/server.mjs';
 const home=mkdtempSync(join(tmpdir(),'ompbot-image-proof-'));
-const backend=await startServer({port:0,home,bin:'C:/Users/Jerry/Desktop/omp_bot/.desktop-runtime/omp.exe'});
+const backend=await startServer({port:0,home,bin:'C:/Users/<user>/Desktop/omp_bot/.desktop-runtime/omp.exe'});
 function crc32(buf){let crc=0xffffffff;for(const byte of buf){crc^=byte;for(let bit=0;bit<8;bit++)crc=(crc>>>1)^((crc&1)?0xedb88320:0);}return (crc^0xffffffff)>>>0;}
 function chunk(type,buf){const name=Buffer.from(type);const size=Buffer.alloc(4);size.writeUInt32BE(buf.length);const crc=Buffer.alloc(4);crc.writeUInt32BE(crc32(Buffer.concat([name,buf])));return Buffer.concat([size,name,buf,crc]);}
 const width=160,height=80,raw=Buffer.alloc((width*3+1)*height);

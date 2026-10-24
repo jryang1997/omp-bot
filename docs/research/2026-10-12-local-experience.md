@@ -1,7 +1,7 @@
 # omp-bot 本地体验与功能审计（竞品差距输入）
 
 - 日期：2026-10-12
-- 对象：C:/Users/Jerry/Desktop/omp_bot
+- 对象：C:/Users/<user>/Desktop/omp_bot
 - 方法：只读通读 desktop/main.mjs、web/index.html、web/app.js、web/style.css、ompbot.mjs、README.md，并以 src/*.mjs 为后端契约权威来源。未运行应用、未跑测试、未接触竞品（OpenMausBot / Meta Muse / xAI Grok Bot / OpenAI Dots 仅为差距参照，本文件不声称任何竞品实测）。所有结论分三级标注：【源】= 源码可验证行为；【营销】= README/文档自述；【推断】= 由源码结构合理外推、未实测。
 
 ## 1. 结论概览

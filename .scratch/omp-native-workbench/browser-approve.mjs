@@ -1,5 +1,5 @@
 const fs=await import('node:fs/promises');
-const info=JSON.parse(await fs.readFile('C:/Users/Jerry/Desktop/omp_bot/.scratch/omp-native-workbench/ui-service.json','utf8'));
+const info=JSON.parse(await fs.readFile('C:/Users/<user>/Desktop/omp_bot/.scratch/omp-native-workbench/ui-service.json','utf8'));
 const space=await taskSpace(2);const page=space.page('p1');
 await page.click('@33');
 await page.click('@36');
@@ -8,9 +8,9 @@ const output=info.home+'/bots/'+info.botId+'/private/work/browser-report.txt';
 const content=await fs.readFile(output,'utf8');
 if(content.trim()!=='BROWSER_ATTACHMENT_SOURCE_6048')throw new Error('Browser approved output mismatch');
 const view=await page.evaluate(async()=>{const r=await fetch('/api/artifacts');const d=await r.json();return{chat:document.querySelector('#chat-log').innerText,approvalsVisible:!document.querySelector('#approval-dock').classList.contains('hidden'),artifacts:d.artifacts.map(a=>({id:a.id,name:a.name,hash:a.hash})),stopVisible:!document.querySelector('#btn-stop').classList.contains('hidden')};});
-await fs.writeFile('C:/Users/Jerry/Desktop/omp_bot/.scratch/omp-native-workbench/browser-approval-proof.json',JSON.stringify({checkedAt:new Date().toISOString(),pickerWorked:true,approvedOutput:content,view},null,2));
+await fs.writeFile('C:/Users/<user>/Desktop/omp_bot/.scratch/omp-native-workbench/browser-approval-proof.json',JSON.stringify({checkedAt:new Date().toISOString(),pickerWorked:true,approvedOutput:content,view},null,2));
 console.log({pickerWorked:true,approvedOutput:content,view});
 console.log(await page.snapshot());
 const image=await page.cdp('Page.captureScreenshot',{format:'png',fromSurface:false,captureBeyondViewport:false});
-await fs.writeFile('C:/Users/Jerry/Desktop/omp_bot/.scratch/omp-native-workbench/browser-approval-proof.png',Buffer.from(image.data,'base64'));
+await fs.writeFile('C:/Users/<user>/Desktop/omp_bot/.scratch/omp-native-workbench/browser-approval-proof.png',Buffer.from(image.data,'base64'));
 console.log('Browser approval screenshot captured');

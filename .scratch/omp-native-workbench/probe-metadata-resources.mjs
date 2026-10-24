@@ -6,7 +6,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Orchestrator } from '../../src/orchestrator.mjs';
 const home=mkdtempSync(join(tmpdir(),'ompbot-metadata-proof-'));
-const orch=new Orchestrator({home,bin:'C:/Users/Jerry/Desktop/omp_bot/.desktop-runtime/omp.exe'});
+const orch=new Orchestrator({home,bin:'C:/Users/<user>/Desktop/omp_bot/.desktop-runtime/omp.exe'});
 const exec=promisify(execFile);const observations=[];
 try{
  const bot=orch.addBot({name:'ModelMetadataQA',model:'magpie/commandcode-plan/deepseek/deepseek-v4.1-flash',thinking:'low',instructions:'No tools or extra prose. Reply only the exact requested token.'});

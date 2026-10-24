@@ -5,8 +5,8 @@
     "real guest screenshot through SDK",
     "runtime record points at stable external image"
   ],
-  "source": "C:\\Users\\Jerry\\Desktop\\omp_bot\\.computer-runtime",
-  "target": "C:\\Users\\Jerry\\AppData\\Local\\omp-bot\\computer-runtime",
+  "source": "C:\\Users\\<user>\\Desktop\\omp_bot\\.computer-runtime",
+  "target": "C:\\Users\\<user>\\AppData\\Local\\omp-bot\\computer-runtime",
   "screenshot": {
     "width": 1280,
     "height": 800

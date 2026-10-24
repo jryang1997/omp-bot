@@ -1,6 +1,6 @@
 {
   "startedAt": "2026-10-14T12:13:31.022Z",
-  "home": "C:\\Users\\Jerry\\AppData\\Local\\Temp\\ompbot-computer-smoke-aXTiwP",
+  "home": "C:\\Users\\<user>\\AppData\\Local\\Temp\\ompbot-computer-smoke-aXTiwP",
   "model": "magpie/codex/gpt-6.1-sol",
   "checks": [
     {

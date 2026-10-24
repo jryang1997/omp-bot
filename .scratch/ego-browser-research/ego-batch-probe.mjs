@@ -1,5 +1,5 @@
 const fs = await import('node:fs/promises');
-const root = 'C:/Users/Jerry/Desktop/omp_bot/.scratch/ego-browser-research/';
+const root = 'C:/Users/<user>/Desktop/omp_bot/.scratch/ego-browser-research/';
 const task = await taskSpace('omp_bot browser efficiency probe');
 await fs.writeFile(root + 'ego-space-proof.json', JSON.stringify({spaceId: task.spaceId, status: 'STARTED'}, null, 2), 'utf8');
 console.log({spaceId: task.spaceId});

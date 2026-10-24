@@ -16,7 +16,7 @@
     "source": "user",
     "attachmentIds": [],
     "sessionId": "01a12f5e-291c-73f7-ab46-042ace3e2081",
-    "sessionFile": "C:\\Users\\Jerry\\AppData\\Local\\Temp\\ompbot-subagent-proof-LXMmym\\bots\\bot_mv51416k_1\\private\\sessions\\2026-10-12T09-07-42-492Z_01a12f5e-291c-73f7-ab46-042ace3e2081.jsonl",
+    "sessionFile": "C:\\Users\\<user>\\AppData\\Local\\Temp\\ompbot-subagent-proof-LXMmym\\bots\\bot_mv51416k_1\\private\\sessions\\2026-10-12T09-07-42-492Z_01a12f5e-291c-73f7-ab46-042ace3e2081.jsonl",
     "reply": "NATIVE_CHILD_VALUE_437\n\nSkipped: no independent verification of the child's arithmetic (19*23=437 happens to be correct).",
     "error": null,
     "stats": {
@@ -45,7 +45,7 @@
       "command": "get_session_stats",
       "success": true,
       "data": {
-        "sessionFile": "C:\\Users\\Jerry\\AppData\\Local\\Temp\\ompbot-subagent-proof-LXMmym\\bots\\bot_mv51416k_1\\private\\sessions\\2026-10-12T09-07-42-492Z_01a12f5e-291c-73f7-ab46-042ace3e2081.jsonl",
+        "sessionFile": "C:\\Users\\<user>\\AppData\\Local\\Temp\\ompbot-subagent-proof-LXMmym\\bots\\bot_mv51416k_1\\private\\sessions\\2026-10-12T09-07-42-492Z_01a12f5e-291c-73f7-ab46-042ace3e2081.jsonl",
         "sessionId": "01a12f5e-291c-73f7-ab46-042ace3e2081",
         "userMessages": 0,
         "assistantMessages": 0,
@@ -16097,7 +16097,7 @@
       "command": "get_session_stats",
       "success": true,
       "data": {
-        "sessionFile": "C:\\Users\\Jerry\\AppData\\Local\\Temp\\ompbot-subagent-proof-LXMmym\\bots\\bot_mv51416k_1\\private\\sessions\\2026-10-12T09-07-42-492Z_01a12f5e-291c-73f7-ab46-042ace3e2081.jsonl",
+        "sessionFile": "C:\\Users\\<user>\\AppData\\Local\\Temp\\ompbot-subagent-proof-LXMmym\\bots\\bot_mv51416k_1\\private\\sessions\\2026-10-12T09-07-42-492Z_01a12f5e-291c-73f7-ab46-042ace3e2081.jsonl",
         "sessionId": "01a12f5e-291c-73f7-ab46-042ace3e2081",
         "userMessages": 1,
         "assistantMessages": 3,

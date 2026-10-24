@@ -1,11 +1,11 @@
 {
   "exitCode": 0,
-  "home": "C:\\Users\\Jerry\\AppData\\Local\\Temp\\ompbot-setup-release-proof-zcEGVr",
+  "home": "C:\\Users\\<user>\\AppData\\Local\\Temp\\ompbot-setup-release-proof-zcEGVr",
   "verifiedReleaseArchives": true,
   "stalePartialPresent": true,
   "cliAction": "downloaded and verified",
   "qemuAction": "downloaded, verified and unpacked",
   "imageAction": "copied from --image-source",
-  "stdout": "电脑运行资源目录：C:\\Users\\Jerry\\AppData\\Local\\Temp\\ompbot-setup-release-proof-zcEGVr\n从记录的官方发布下载并核验运行资源\ncua.exe 583a09f21793997b4a619e722ce5390f8c483a06de002e65c156198107c1e90e （downloaded and verified）\nqemu 11.1.0 47d57a6072e0bb3bd98f87926eb129eb1736dfe818c67b3b81ef7ce4edd0b3cd （downloaded, verified and unpacked）\n镜像 images/linux.img qcow2 1306198016 字节 sha256 57feb6ef48446f4eff4541266841ec78d79e0a8662f2e9e3081942c9c4581721\n许可原文：licenses/cua-cli-LICENSE.md、licenses/cua-spacesd-LICENSE.txt（复制自 desktop/CUA-CLI-LICENSE、desktop/CUA-SPACESD-LICENSE）+ qemu/COPYING*\nmanifest：C:\\Users\\Jerry\\AppData\\Local\\Temp\\ompbot-setup-release-proof-zcEGVr\\manifest.json\n",
+  "stdout": "电脑运行资源目录：C:\\Users\\<user>\\AppData\\Local\\Temp\\ompbot-setup-release-proof-zcEGVr\n从记录的官方发布下载并核验运行资源\ncua.exe 583a09f21793997b4a619e722ce5390f8c483a06de002e65c156198107c1e90e （downloaded and verified）\nqemu 11.1.0 47d57a6072e0bb3bd98f87926eb129eb1736dfe818c67b3b81ef7ce4edd0b3cd （downloaded, verified and unpacked）\n镜像 images/linux.img qcow2 1306198016 字节 sha256 57feb6ef48446f4eff4541266841ec78d79e0a8662f2e9e3081942c9c4581721\n许可原文：licenses/cua-cli-LICENSE.md、licenses/cua-spacesd-LICENSE.txt（复制自 desktop/CUA-CLI-LICENSE、desktop/CUA-SPACESD-LICENSE）+ qemu/COPYING*\nmanifest：C:\\Users\\<user>\\AppData\\Local\\Temp\\ompbot-setup-release-proof-zcEGVr\\manifest.json\n",
   "stderr": ""
 }
