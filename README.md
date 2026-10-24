@@ -8,6 +8,13 @@
 
 给每个助手起名字、捏个脸、分好工，私聊派活，或者拉进群里一起商量。
 
+**简体中文** · [English](README.en.md)
+
+[![CI](https://github.com/jryang1997/omp-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/jryang1997/omp-bot/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+![Node >= 24](https://img.shields.io/badge/Node-%3E%3D24-339933?logo=node.js&logoColor=white)
+![Platform: Windows x64 + Android](https://img.shields.io/badge/Platform-Windows_x64_%7C_Android_8.0%2B-0078D4)
+
 [使用指南](docs/guide.md) · [开发文档](docs/development.md) · [变更记录](CHANGELOG.md)
 
 </div>

@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+      - run: npm ci
+      - name: Run core & security boundary test suites
+        run: |
+          node test/unit.mjs
+          node test/approval-tiers.mjs
+          node test/stuck.mjs
+          node test/routine-check.mjs
+          node test/resume.mjs
+          node test/computer-help.mjs
+          node test/plan-state.mjs
+          node test/write-guard.mjs
+          node test/secret-guard.mjs
+          node test/workspace-paths.mjs
+          node test/allowed-commands.mjs
+          node test/external-approval.mjs
+          node test/team-memory.mjs
+          node test/work-budget.mjs
+          node test/ledger.mjs
+          node test/attachment-drafts.mjs
