@@ -4,7 +4,7 @@
 // edit 的三种整段格式照 crates/pi-edit/grammars 的 hashline / apply_patch / sloppy。
 
 import assert from "node:assert";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -19,7 +19,7 @@ async function test(name, fn) {
   catch (e) { failed++; console.log(`FAIL  ${name}\n      ${e.message}`); }
 }
 
-const sandbox = mkdtempSync(join("/var/tmp", "omp-bot-guard-"));
+const sandbox = realpathSync(mkdtempSync(join(tmpdir(), "omp-bot-guard-")));
 const cwd = join(sandbox, "team", "bots", "b1");
 const workspace = join(sandbox, "project");
 const outsideDir = join(sandbox, "elsewhere");
@@ -52,7 +52,7 @@ await test("目录里、工作区、临时目录、内部 URL 放行；外面、
   assert.equal(outsideOf("write", { path: "../../AGENTS.md" }).length, 1, "team AGENTS.md 要走提议审核，不许直接改");
   assert.equal(outsideOf("write", { path: "link/x.txt" })[0], join(outsideDir, "x.txt"));
   assert.equal(outsideOf("write", { path: `${workspace}-evil/x` }).length, 1);
-  assert.equal(outsideOf("write", { path: "file:///etc/passwd" })[0], "/etc/passwd");
+  assert.equal(outsideOf("write", { path: "file:///etc/passwd" })[0], realpathSync("/etc/passwd"));
   assert.equal(outsideOf("ast_edit", { paths: ["/etc/*.conf"] }).length, 1);
   assert.deepEqual(outsideOf("ast_edit", { paths: ["src/**/*.ts"] }), []);
 });
